@@ -1,0 +1,3 @@
+Resume this session with:
+claude --resume b6237c8c-0f9d-4710-9726-9b41f279e764
+

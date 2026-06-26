@@ -1,0 +1,786 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <!-- Mobile: stable layout + safe-area -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light">
+  <title>Air China · 智能中转</title>
+  <style>
+    :root {
+      /* Portal-style page (airchina.com): cool gray field + 国航红 accent */
+      --ac-red: #c8102e;
+      --ac-red-hover: #a30d25;
+      --bg: linear-gradient(180deg, #f7f8fb 0%, #eceff4 45%, #e2e6ee 100%);
+      --text: #1a1a1a;
+      --muted: #5c6370;
+      --muted2:#8b919c;
+      --line: #dce0e6;
+      --pill: #eef1f5;
+      --brand: #c8102e;
+      --brand2:#a30d25;
+      --shadow: 0 12px 40px rgba(26, 26, 26, 0.08);
+      --radius: 22px;
+    }
+
+    /* (1) Prevent iOS font scaling surprises */
+    html { -webkit-text-size-adjust: 100%; }
+    * {
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+      font-family: system-ui,"Segoe UI",Roboto,Helvetica,Arial,
+                   "PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      min-height: 100svh;
+      background: var(--bg);
+      color: var(--text);
+      border-top: 4px solid var(--ac-red);
+      box-sizing: border-box;
+    }
+
+    /* (2) Use svh to avoid address-bar jump on mobile */
+    .wrap {
+      min-height: 100vh;
+      min-height: 100svh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+
+      /* (3) Safe-area padding for notches/home indicator */
+      padding:
+        calc(18px + env(safe-area-inset-top))
+        16px
+        calc(18px + env(safe-area-inset-bottom));
+    }
+
+    .card {
+      width: min(540px, 100%);
+      background: #fff;
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 24px 20px 18px;
+      border: 1px solid rgba(230,232,236,0.8);
+    }
+
+    .brand {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      user-select: none;
+      margin-top: 4px;
+      margin-bottom: 14px;
+    }
+
+    .logo {
+      width: auto;
+      max-width: min(200px, 86vw);
+      max-height: 120px;
+      height: auto;
+      display: block;
+      object-fit: contain;
+    }
+
+    .tagline {
+      font-size: 14px;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+    .brand-tagline {
+      margin-top: 6px;
+      line-height: 1.35;
+      text-align: center;
+      max-width: 300px;
+    }
+
+    /* Mode segmented control */
+    .seg {
+      display: flex;
+      gap: 8px;
+      padding: 8px;
+      border-radius: 999px;
+      background: var(--pill);
+      border: 1px solid rgba(230,232,236,0.9);
+      margin: 10px 0 16px;
+    }
+    .seg button {
+      flex: 1;
+      border: 0;
+      background: transparent;
+      padding: 12px 14px;
+      border-radius: 999px;
+      font-size: 15px;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 700;
+    }
+    .seg button.active {
+      background: #fff;
+      color: var(--text);
+      box-shadow: 0 10px 20px rgba(15,23,42,0.10);
+      border: 1px solid rgba(230,232,236,0.95);
+    }
+
+    .hint {
+      font-size: 13px;
+      color: var(--muted);
+      line-height: 1.4;
+      margin: 2px 0 10px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      color: var(--muted);
+      margin: 6px 0 8px;
+      font-weight: 750;
+    }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin: 0 0 14px;
+    }
+
+    /* (4) input >= 16px to prevent iOS auto-zoom */
+    input, textarea {
+      font-size: 16px;
+    }
+
+    input {
+      height: 54px;
+      border-radius: 14px;
+      border: 1px solid var(--line);
+      background: #fff;
+      padding: 0 16px;
+      outline: none;
+      box-shadow: 0 1px 0 rgba(15,23,42,0.02);
+    }
+    input:focus {
+      border-color: rgba(200,16,46,0.45);
+      box-shadow: 0 0 0 4px rgba(200,16,46,0.12);
+    }
+    input::placeholder {
+      color: #b3bac4;
+    }
+
+    .btn {
+      width: 100%;
+      height: 56px;
+      border-radius: 16px;
+      border: 0;
+      color: #fff;
+      font-size: 18px;
+      font-weight: 850;
+      cursor: pointer;
+      background: linear-gradient(180deg, var(--brand), var(--brand2));
+      display: none; /* appear only when ready */
+    }
+    .btn.show { display: block; }
+    .btn:active { transform: translateY(1px); }
+
+    .btn.secondary {
+      background: #fff;
+      border: 1px solid var(--line);
+      color: var(--text);
+      font-weight: 800;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 54px;
+      border-radius: 16px;
+      width: 100%;
+    }
+
+    .subrow {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .link {
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: underline;
+      text-underline-offset: 4px;
+      cursor: pointer;
+      background: transparent;
+      border: 0;
+      padding: 6px 0;
+    }
+
+    .error {
+      display: none;
+      margin-top: 10px;
+      padding: 10px 12px;
+      border-radius: 14px;
+      background: #fff1f1;
+      border: 1px solid rgba(255,77,79,0.35);
+      color: #7a1b1d;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    /* Welcome banner */
+    .welcome {
+      display: none;
+      margin: 6px 0 12px;
+      padding: 12px 14px;
+      border-radius: 16px;
+      background: #fff8f8;
+      border: 1px solid rgba(200,16,46,0.2);
+      color: #5c1018;
+    }
+    .welcome.show { display: block; }
+    .welcome .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-weight: 900;
+    }
+    .badge {
+      font-size: 12px;
+      font-weight: 900;
+      color: var(--ac-red);
+      background: rgba(200,16,46,0.08);
+      border: 1px solid rgba(200,16,46,0.22);
+      padding: 4px 10px;
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+
+    /* Choice buttons row (出发/抵达/中转/其它) */
+    .choice-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 12px;
+      margin: 10px 0 16px;
+    }
+
+    @media (max-width: 420px) {
+      .choice-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .logo { max-width: min(180px, 82vw); max-height: 108px; }
+    }
+
+    .choice {
+      height: 52px;
+      border-radius: 14px;
+      border: 1px solid rgba(200,16,46,0.35);
+      background: var(--ac-red);
+      color: #fff;
+      font-weight: 900;
+      font-size: 22px;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(200,16,46,0.22);
+    }
+    .choice:not(.active) {
+      background: var(--ac-red);
+      opacity: 0.55;
+      box-shadow: none;
+    }
+    .choice.active {
+      opacity: 1;
+      transform: translateY(-1px);
+      box-shadow: 0 10px 24px rgba(200,16,46,0.28);
+    }
+
+    /* ChatGPT-style input */
+    .chatbox {
+      display: none;
+      margin-top: 10px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 10px 12px;
+      box-shadow: 0 10px 30px rgba(15,23,42,0.06);
+      align-items: flex-end;
+      gap: 10px;
+    }
+    .chatbox.show { display: flex; }
+
+    textarea {
+      width: 100%;
+      min-height: 44px;
+      max-height: 140px;
+      border: 0;
+      outline: none;
+      resize: none;
+      padding: 6px 6px;
+      line-height: 1.35;
+      color: var(--text);
+      background: transparent;
+    }
+    textarea::placeholder {
+      color: #b3bac4;
+    }
+
+    .send {
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      border: 1px solid rgba(230,232,236,0.9);
+      background: rgba(15,23,42,0.04);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex: 0 0 auto;
+    }
+    .send svg {
+      width: 18px;
+      height: 18px;
+      fill: rgba(15,23,42,0.35);
+    }
+    .send.active {
+      background: linear-gradient(180deg, var(--brand), var(--brand2));
+      border-color: rgba(200,16,46,0.3);
+    }
+    .send.active svg {
+      fill: #fff;
+    }
+
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="brand">
+        <img class="logo" alt="Air China" src="/airchina-logo.png" />
+        <div class="tagline brand-tagline">智能中转导航 · Orienta Transfer Assist</div>
+      </div>
+
+      <div class="seg" role="tablist" aria-label="模式">
+        <button id="tab-free" class="active" type="button" aria-selected="true">免费（匿名）</button>
+        <button id="tab-login" type="button" aria-selected="false">登录（邮箱）</button>
+      </div>
+
+      <!-- FREE (anonymous) -->
+      <section id="panel-free" aria-label="免费匿名">
+        <div class="hint">匿名模式：系统仅生成随机用户ID，不收集姓名/邮箱。</div>
+
+        <div class="section-title">请选择类型</div>
+        <div class="choice-row" id="choices-free">
+          <button class="choice" data-type="depart">出发</button>
+          <button class="choice" data-type="arrive">抵达</button>
+          <button class="choice" data-type="transfer">中转</button>
+          <button class="choice" data-type="other">其它</button>
+        </div>
+
+        <!-- Forms -->
+        <div id="free-one" style="display:none;">
+          <div class="section-title">航班号</div>
+          <div class="field">
+            <input id="free-flight" placeholder="CA987 / UA889" inputmode="text" autocapitalize="characters" autocomplete="off" />
+          </div>
+          <button class="btn" id="free-start" type="button">确认并提交</button>
+          <div class="error" id="err-free"></div>
+        </div>
+
+        <div id="free-transfer" style="display:none;">
+          <div class="section-title">抵达航班号</div>
+          <div class="field">
+            <input id="free-arr" placeholder="例如：CA987" inputmode="text" autocapitalize="characters" autocomplete="off" />
+          </div>
+          <div class="section-title">出发航班号</div>
+          <div class="field">
+            <input id="free-dep" placeholder="例如：UA889" inputmode="text" autocapitalize="characters" autocomplete="off" />
+          </div>
+          <button class="btn" id="free-start2" type="button">确认并提交</button>
+          <div class="error" id="err-free2"></div>
+        </div>
+
+        <div class="chatbox" id="free-chat">
+          <textarea id="free-msg" placeholder="描述你的需求，例如：帮我找最近的登机口、餐厅、洗手间…"></textarea>
+          <button class="send" id="free-send" type="button" aria-label="Send">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </section>
+
+      <!-- LOGIN (email OTP) -->
+      <section id="panel-login" aria-label="登录" style="display:none;">
+        <div id="login-step1">
+          <div class="section-title">邮箱</div>
+          <div class="field">
+            <input id="email" placeholder="you@example.com" inputmode="email" autocapitalize="none" autocomplete="email" />
+            <div class="hint">测试版：验证码固定为 <b>0000</b>（演示用）。</div>
+          </div>
+          <button class="btn secondary" id="send-otp" type="button">发送验证码</button>
+          <div class="error" id="err-login1"></div>
+        </div>
+
+        <div id="login-step2" style="display:none;">
+          <div class="section-title">验证码</div>
+          <div class="field">
+            <input id="code" placeholder="0000" inputmode="numeric" autocomplete="one-time-code" />
+            <div class="hint">已发送到：<span id="emailEcho"></span></div>
+          </div>
+          <button class="btn secondary" id="verify" type="button">登录</button>
+          <div class="subrow">
+            <button class="link" id="change-email" type="button">更换邮箱</button>
+            <button class="link" id="resend" type="button">重发验证码</button>
+          </div>
+          <div class="error" id="err-login2"></div>
+        </div>
+
+        <!-- Welcome + paid -->
+        <div class="welcome" id="welcome">
+          <div class="top">
+            <div>欢迎回来，SIYAO FU</div>
+            <div class="badge">付费用户</div>
+          </div>
+        </div>
+
+        <!-- After login: choose type -->
+        <div id="login-after" style="display:none;">
+          <div class="section-title">请选择类型</div>
+          <div class="choice-row" id="choices-paid">
+            <button class="choice" data-type="depart">出发</button>
+            <button class="choice" data-type="arrive">抵达</button>
+            <button class="choice" data-type="transfer">中转</button>
+            <button class="choice" data-type="other">其它</button>
+          </div>
+
+          <div id="paid-one" style="display:none;">
+            <div class="section-title">航班号</div>
+            <div class="field">
+              <input id="paid-flight" placeholder="CA987 / UA889" inputmode="text" autocapitalize="characters" autocomplete="off" />
+            </div>
+            <button class="btn" id="paid-start" type="button">确认并提交</button>
+            <div class="error" id="err-paid"></div>
+          </div>
+
+          <div id="paid-transfer" style="display:none;">
+            <div class="section-title">抵达航班号</div>
+            <div class="field">
+              <input id="paid-arr" placeholder="例如：CA987" inputmode="text" autocapitalize="characters" autocomplete="off" />
+            </div>
+            <div class="section-title">出发航班号</div>
+            <div class="field">
+              <input id="paid-dep" placeholder="例如：UA889" inputmode="text" autocapitalize="characters" autocomplete="off" />
+            </div>
+            <button class="btn" id="paid-start2" type="button">确认并提交</button>
+            <div class="error" id="err-paid2"></div>
+          </div>
+
+          <div class="chatbox" id="paid-chat">
+            <textarea id="paid-msg" placeholder="像 ChatGPT 一样输入：例如帮我规划从安检到登机口的路线…"></textarea>
+            <button class="send" id="paid-send" type="button" aria-label="Send">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // ---------------- Mode switch ----------------
+    const tabFree = document.getElementById('tab-free');
+    const tabLogin = document.getElementById('tab-login');
+    const panelFree = document.getElementById('panel-free');
+    const panelLogin = document.getElementById('panel-login');
+
+    function setMode(mode) {
+      clearAllErrors();
+      const isFree = mode === 'free';
+      tabFree.classList.toggle('active', isFree);
+      tabLogin.classList.toggle('active', !isFree);
+      tabFree.setAttribute('aria-selected', String(isFree));
+      tabLogin.setAttribute('aria-selected', String(!isFree));
+      panelFree.style.display = isFree ? 'block' : 'none';
+      panelLogin.style.display = isFree ? 'none' : 'block';
+      if (isFree) focusFirstFree();
+      else focusFirstLogin();
+    }
+
+    tabFree.addEventListener('click', () => setMode('free'));
+    tabLogin.addEventListener('click', () => setMode('login'));
+
+    function clearAllErrors() {
+      ['err-free','err-free2','err-login1','err-login2','err-paid','err-paid2'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.style.display = 'none';
+        el.textContent = '';
+      });
+    }
+    function showErr(id, msg) {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.textContent = msg;
+      el.style.display = 'block';
+    }
+
+    // ---------------- Trip selector component ----------------
+    function initTripSelector(opts) {
+      const {
+        choiceRowId,
+        oneBoxId,
+        transferBoxId,
+        chatBoxId,
+        oneInputId,
+        transferArrId,
+        transferDepId,
+        startBtnId,
+        startBtn2Id,
+        msgId,
+        sendBtnId,
+        errorOneId,
+        errorTransferId,
+        onStart,
+        onSend
+      } = opts;
+
+      const row = document.getElementById(choiceRowId);
+      const oneBox = document.getElementById(oneBoxId);
+      const transferBox = document.getElementById(transferBoxId);
+      const chatBox = document.getElementById(chatBoxId);
+
+      const oneInput = document.getElementById(oneInputId);
+      const transferArr = document.getElementById(transferArrId);
+      const transferDep = document.getElementById(transferDepId);
+
+      const startBtn = document.getElementById(startBtnId);
+      const startBtn2 = document.getElementById(startBtn2Id);
+
+      const msg = document.getElementById(msgId);
+      const sendBtn = document.getElementById(sendBtnId);
+
+      let selected = null;
+
+      function showOne() {
+        if (oneBox) oneBox.style.display = 'block';
+        if (transferBox) transferBox.style.display = 'none';
+        if (chatBox) chatBox.classList.remove('show');
+        startBtn?.classList.remove('show');
+        startBtn2?.classList.remove('show');
+        oneInput?.focus();
+      }
+
+      function showTransfer() {
+        if (transferBox) transferBox.style.display = 'block';
+        if (oneBox) oneBox.style.display = 'none';
+        if (chatBox) chatBox.classList.remove('show');
+        startBtn?.classList.remove('show');
+        startBtn2?.classList.remove('show');
+        transferArr?.focus();
+      }
+
+      function showOther() {
+        if (chatBox) chatBox.classList.add('show');
+        if (oneBox) oneBox.style.display = 'none';
+        if (transferBox) transferBox.style.display = 'none';
+        startBtn?.classList.remove('show');
+        startBtn2?.classList.remove('show');
+        msg?.focus();
+      }
+
+      function updateOneReady() {
+        clearAllErrors();
+        const v = (oneInput?.value || '').trim();
+        if (!startBtn) return;
+        if (v) startBtn.classList.add('show');
+        else startBtn.classList.remove('show');
+      }
+
+      function updateTransferReady() {
+        clearAllErrors();
+        const a = (transferArr?.value || '').trim();
+        const d = (transferDep?.value || '').trim();
+        if (!startBtn2) return;
+        if (a && d) startBtn2.classList.add('show');
+        else startBtn2.classList.remove('show');
+      }
+
+      function updateSendReady() {
+        const t = (msg?.value || '').trim();
+        if (t) sendBtn.classList.add('active');
+        else sendBtn.classList.remove('active');
+      }
+
+      row.querySelectorAll('.choice').forEach(btn => {
+        btn.addEventListener('click', () => {
+          clearAllErrors();
+          selected = btn.dataset.type;
+          row.querySelectorAll('.choice').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+
+          if (selected === 'depart' || selected === 'arrive') showOne();
+          else if (selected === 'transfer') showTransfer();
+          else showOther();
+        });
+      });
+
+      oneInput?.addEventListener('input', updateOneReady);
+      transferArr?.addEventListener('input', updateTransferReady);
+      transferDep?.addEventListener('input', updateTransferReady);
+
+      msg?.addEventListener('input', () => {
+        updateSendReady();
+        // autosize textarea
+        msg.style.height = 'auto';
+        msg.style.height = Math.min(msg.scrollHeight, 140) + 'px';
+      });
+
+      startBtn?.addEventListener('click', () => {
+        const v = (oneInput.value || '').trim();
+        if (!v) return showErr(errorOneId, '请输入航班号（如 CA987）。');
+        onStart({ type: selected, flight: v });
+      });
+
+      startBtn2?.addEventListener('click', () => {
+        const a = (transferArr.value || '').trim();
+        const d = (transferDep.value || '').trim();
+        if (!a || !d) return showErr(errorTransferId, '请输入抵达与出发航班号。');
+        onStart({ type: selected, arrivalFlight: a, departureFlight: d });
+      });
+
+      sendBtn?.addEventListener('click', () => {
+        const t = (msg.value || '').trim();
+        if (!t) return;
+        onSend({ type: selected, message: t });
+      });
+
+      msg?.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault();
+          if (sendBtn.classList.contains('active')) sendBtn.click();
+        }
+      });
+    }
+
+    // Free selector
+    initTripSelector({
+      choiceRowId: 'choices-free',
+      oneBoxId: 'free-one',
+      transferBoxId: 'free-transfer',
+      chatBoxId: 'free-chat',
+      oneInputId: 'free-flight',
+      transferArrId: 'free-arr',
+      transferDepId: 'free-dep',
+      startBtnId: 'free-start',
+      startBtn2Id: 'free-start2',
+      msgId: 'free-msg',
+      sendBtnId: 'free-send',
+      errorOneId: 'err-free',
+      errorTransferId: 'err-free2',
+      onStart: (payload) => {
+        // TODO: integrate FlightAware later
+        window.parent.postMessage({ type: 'orienta_entry', payload: Object.assign({mode:'free'}, payload) }, '*');
+      },
+      onSend: (payload) => {
+        // TODO: integrate ChatGPT later
+        window.parent.postMessage({ type: 'orienta_entry', payload: Object.assign({mode:'free'}, payload) }, '*');
+      },
+    });
+
+    function focusFirstFree() {
+      // no default selection by design
+    }
+
+    // Login flow
+    const loginStep1 = document.getElementById('login-step1');
+    const loginStep2 = document.getElementById('login-step2');
+    const welcome = document.getElementById('welcome');
+    const loginAfter = document.getElementById('login-after');
+
+    const emailInput = document.getElementById('email');
+    const codeInput = document.getElementById('code');
+    const emailEcho = document.getElementById('emailEcho');
+
+    document.getElementById('send-otp').addEventListener('click', () => {
+      clearAllErrors();
+      const email = (emailInput.value || '').trim();
+      if (!email) return showErr('err-login1', '请输入邮箱。');
+      if (!email.includes('@')) return showErr('err-login1', '邮箱格式不正确。');
+
+      emailEcho.textContent = email;
+      loginStep1.style.display = 'none';
+      loginStep2.style.display = 'block';
+      codeInput.focus();
+    });
+
+    document.getElementById('verify').addEventListener('click', () => {
+      clearAllErrors();
+      const code = (codeInput.value || '').trim();
+      if (code !== '0000') return showErr('err-login2', '验证码错误（测试验证码为 0000）。');
+
+      loginStep2.style.display = 'none';
+      welcome.classList.add('show');
+      loginAfter.style.display = 'block';
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+
+    document.getElementById('change-email').addEventListener('click', () => {
+      clearAllErrors();
+      loginStep2.style.display = 'none';
+      loginStep1.style.display = 'block';
+      emailInput.focus();
+    });
+
+    document.getElementById('resend').addEventListener('click', () => {
+      alert('已重发（demo，验证码仍为 0000）');
+    });
+
+    function focusFirstLogin() {
+      if (loginAfter.style.display !== 'none') {
+        // already logged in
+      } else if (loginStep2.style.display !== 'none') {
+        codeInput.focus();
+      } else {
+        emailInput.focus();
+      }
+    }
+
+    // Paid selector (after login)
+    initTripSelector({
+      choiceRowId: 'choices-paid',
+      oneBoxId: 'paid-one',
+      transferBoxId: 'paid-transfer',
+      chatBoxId: 'paid-chat',
+      oneInputId: 'paid-flight',
+      transferArrId: 'paid-arr',
+      transferDepId: 'paid-dep',
+      startBtnId: 'paid-start',
+      startBtn2Id: 'paid-start2',
+      msgId: 'paid-msg',
+      sendBtnId: 'paid-send',
+      errorOneId: 'err-paid',
+      errorTransferId: 'err-paid2',
+      onStart: (payload) => {
+        // TODO: integrate FlightAware later (with auth token)
+        window.parent.postMessage({ type: 'orienta_entry', payload: Object.assign({mode:'paid'}, payload) }, '*');
+      },
+      onSend: (payload) => {
+        // TODO: integrate ChatGPT later (with auth token)
+        window.parent.postMessage({ type: 'orienta_entry', payload: Object.assign({mode:'paid'}, payload) }, '*');
+      },
+    });
+
+    // Global Enter (non-textarea)
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      if (document.activeElement && document.activeElement.tagName === 'TEXTAREA') return;
+
+      if (panelLogin.style.display !== 'none' && loginAfter.style.display === 'none') {
+        if (loginStep2.style.display !== 'none') document.getElementById('verify').click();
+        else document.getElementById('send-otp').click();
+      }
+    });
+
+    // Start
+    setMode('free');
+  </script>
+</body>
+</html>

@@ -1,0 +1,50 @@
+# Orienta v3 — local / offline stack (mirrors orienta_v2_step2 layout).
+#
+# PDR only (dashboard via npm on host):
+#   docker compose up -d orienta-pdr
+#   cd apps/dashboard && PDR_API_ORIGIN=http://127.0.0.1:10000 npm run dev:server
+#
+# Full stack in Docker (dashboard + PDR):
+#   docker compose up -d
+
+services:
+  orienta:
+    image: orienta-v3-dashboard:latest
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    ports:
+      - "${HOST_PORT:-5174}:5174"
+    environment:
+      PORT: "5174"
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env}"
+      ADMIN_CREDENTIALS: "${ADMIN_CREDENTIALS:?set ADMIN_CREDENTIALS}"
+      PAX_ACCOUNT_CREDENTIALS: "${PAX_ACCOUNT_CREDENTIALS:-}"
+      PDR_API_ORIGIN: "${PDR_API_ORIGIN:-http://orienta-pdr:10000}"
+      PAX_LEGACY_AUTH: "${PAX_LEGACY_AUTH:-0}"
+      ORIENTA_ALLOW_DEMO: "${ORIENTA_ALLOW_DEMO:-0}"
+      INDOOR_MAP_UPSTREAM: "${INDOOR_MAP_UPSTREAM:-}"
+      INDOOR_MAP_API_UPSTREAM: "${INDOOR_MAP_API_UPSTREAM:-}"
+      VITE_LOCAL_AIRPORT_MAP: "${VITE_LOCAL_AIRPORT_MAP:-0}"
+      ROUTE_SITE_DEFAULT_TENANT: "${ROUTE_SITE_DEFAULT_TENANT:-airchina}"
+      DB_PATH: /app/data/passengers.db
+    volumes:
+      - orienta-data:/app/data
+    depends_on:
+      orienta-pdr:
+        condition: service_started
+    restart: unless-stopped
+
+  orienta-pdr:
+    image: orienta-pdr:latest
+    build:
+      context: .
+      dockerfile: pdr_airchina/Dockerfile
+    ports:
+      - "${PDR_HOST_PORT:-10000}:10000"
+    environment:
+      PORT: "10000"
+    restart: unless-stopped
+
+volumes:
+  orienta-data:

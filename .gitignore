@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+apps/dashboard/dist/
+apps/dashboard/dist-server/
+apps/dashboard/.vite/
+**/*.tsbuildinfo
+
+# Passenger registry database (runtime data — do not commit)
+apps/dashboard/data/
+
+# Environment secrets — never commit real values
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Apple private key — rotate immediately if found in history
+*.p8
+
+# Python
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Editors
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/settings.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+Thumbs.db
+
+# Route-site video assets (large; copy locally from v2 or download at deploy)
+apps/dashboard/public/route_site/*.mp4
+apps/dashboard/public/route_site/dynamic/

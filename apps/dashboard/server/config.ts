@@ -1,0 +1,136 @@
+/**
+ * Server configuration — reads, validates, and exports all env vars.
+ *
+ * Fixes issue M1: no central config validation; missing vars fail silently at runtime.
+ * Solution: crash-fast at startup with a clear message if a required var is missing.
+ *
+ * Fixes issue L3: chaotic env variable naming — canonical names are VITE_*.
+ * Legacy aliases are read as fallbacks with deprecation warnings.
+ */
+
+function required(name: string, ...aliases: string[]): string {
+  const value = [name, ...aliases].map((k) => process.env[k]?.trim()).find(Boolean);
+  if (!value) {
+    throw new Error(
+      `[orienta] Missing required env var: ${name}${aliases.length ? ` (also checked: ${aliases.join(", ")})` : ""}.\n` +
+      `  Copy .env.example to .env and fill in the value.`
+    );
+  }
+  return value;
+}
+
+function optional(name: string, ...aliases: string[]): string {
+  const value = [name, ...aliases].map((k) => process.env[k]?.trim()).find(Boolean);
+  if (aliases.length) {
+    // Warn if a deprecated alias is being used instead of the canonical name
+    for (const alias of aliases) {
+      if (process.env[alias] && !process.env[name]) {
+        console.warn(`[orienta] Deprecated env var "${alias}" — rename to "${name}" in your .env.`);
+      }
+    }
+  }
+  return value ?? "";
+}
+
+function optionalInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : defaultValue;
+}
+
+/**
+ * Normalise PDR_API_ORIGIN: strip a trailing /api suffix that breaks the proxy.
+ * Previously this was done ad-hoc in server.ts with a console.warn.
+ * Now it's handled centrally and documented.
+ */
+function normalizePdrOrigin(raw: string): string {
+  let u = raw.trim().replace(/\/+$/, "");
+  if (/\/api$/i.test(u)) {
+    u = u.replace(/\/api$/i, "").replace(/\/+$/, "");
+    console.warn(
+      `[orienta] PDR_API_ORIGIN had a trailing /api — use the service root only. Normalized to: ${u}`
+    );
+  }
+  return u;
+}
+
+// ─── Validate and export ──────────────────────────────────────────────────────
+
+// Auth — required at startup
+export const JWT_SECRET = required("JWT_SECRET");
+/** "email:password,email2:password2" */
+export const ADMIN_CREDENTIALS = required("ADMIN_CREDENTIALS");
+
+// FlightAware — optional; API routes fall back to static data when missing
+export const FLIGHTAWARE_API_KEY = optional("FLIGHTAWARE_API_KEY", "VITE_FLIGHTAWARE_API_KEY");
+
+// VAPID for Web Push — optional; push routes return 503 when missing
+export const VAPID_PUBLIC_KEY = optional("VAPID_PUBLIC_KEY");
+export const VAPID_PRIVATE_KEY = optional("VAPID_PRIVATE_KEY");
+export const VAPID_SUBJECT = optional("VAPID_SUBJECT") || "mailto:ops@orienta.ai";
+
+// Temporary local premium account store for the first production-session slice.
+// Format: email:password,email2:password2. Replace with a real account table before deployment.
+export const PAX_ACCOUNT_CREDENTIALS = optional("PAX_ACCOUNT_CREDENTIALS");
+
+// PDR proxy — optional
+const rawPdrOrigin = optional("PDR_API_ORIGIN");
+export const PDR_API_ORIGIN = rawPdrOrigin ? normalizePdrOrigin(rawPdrOrigin) : "";
+
+// Indoor map — browser uses relative /indoor-map paths; backend proxies to the local map stack by default.
+export const INDOOR_MAP_UPSTREAM = optional("INDOOR_MAP_UPSTREAM") || "http://127.0.0.1:7801";
+export const INDOOR_MAP_API_UPSTREAM = optional("INDOOR_MAP_API_UPSTREAM") || "http://127.0.0.1:3001";
+export const VITE_LOCAL_AIRPORT_MAP = optional("VITE_LOCAL_AIRPORT_MAP") === "1";
+
+// Frontend public vars (passed through to Vite, already prefixed VITE_)
+export const VITE_INDOOR_MAP_URL = optional("VITE_INDOOR_MAP_URL", "VITE_ROUTE_SITE_INDOOR_MAP_URL") || "/indoor-map/airport-map.html";
+export const VITE_INDOOR_MAP_API_BASE = optional("VITE_INDOOR_MAP_API_BASE", "VITE_ROUTE_SITE_INDOOR_MAP_API_BASE") || "/indoor-map-api";
+export const VITE_INDOOR_MAP_TILE_URL = optional("VITE_INDOOR_MAP_TILE_URL", "VITE_ROUTE_SITE_INDOOR_TILE_URL");
+export const VITE_INDOOR_MAP_SAME_ORIGIN = optional("VITE_INDOOR_MAP_SAME_ORIGIN", "VITE_ROUTE_SITE_INDOOR_MAP_SAME_ORIGIN") === "1";
+
+// Server
+export const PORT = optionalInt("PORT", 5174);
+export const ROUTE_SITE_DEFAULT_TENANT = optional("ROUTE_SITE_DEFAULT_TENANT") || "airchina";
+
+/** Allow legacy pax.html / route_site to identify by passengerId without session JWT. Set to 0 in production. */
+export const PAX_LEGACY_AUTH = optional("PAX_LEGACY_AUTH") !== "0";
+
+/** Allow built-in demo/demo admin login. Off by default in production unless ORIENTA_ALLOW_DEMO=1. */
+export const ALLOW_DEMO_LOGIN =
+  optional("ORIENTA_ALLOW_DEMO") === "1"
+  || (optional("ORIENTA_ALLOW_DEMO") !== "0" && process.env.NODE_ENV !== "production");
+
+// Passenger registry database path
+export const DB_PATH = optional("DB_PATH") || "./data/passengers.db";
+
+// ─── Derived helpers ──────────────────────────────────────────────────────────
+
+/** Parse ADMIN_CREDENTIALS into a lookup map. */
+export function getAdminCredentials(): Map<string, { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string }> {
+  const map = new Map<string, { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string }>();
+
+  for (const pair of ADMIN_CREDENTIALS.split(",")) {
+    const [email, ...rest] = pair.trim().split(":");
+    const password = rest.join(":").trim(); // allow colons in passwords
+    if (!email || !password) continue;
+
+    const e = email.trim().toLowerCase();
+    const role: "admin" | "ops" | "viewer" = e.startsWith("ops") ? "ops" : "admin";
+    const displayName = role === "ops" ? "国航运行席位" : "国航管理员";
+    const org = "Air China";
+    map.set(e, { password, role, displayName, org });
+  }
+
+  // Optional demo login for local/staging (disabled in production unless ORIENTA_ALLOW_DEMO=1)
+  if (ALLOW_DEMO_LOGIN && !map.has("demo")) {
+    map.set("demo", { password: "demo", role: "viewer", displayName: "Demo User", org: "Orienta Demo" });
+  }
+
+  return map;
+}
+
+/** Check if VAPID push is configured. */
+export function isPushConfigured(): boolean {
+  return !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+}
