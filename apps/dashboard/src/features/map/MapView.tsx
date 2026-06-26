@@ -25,8 +25,8 @@ export type DashboardMapViewProps = {
   onHoverPassenger?(id: string | null): void;
   visible?: boolean;
   centerOverride?: LatLng;
-  airport?: "PEK" | "SFO";
-  /** Required for indoor iframe query sync; defaults PEK → airchina */
+  airport?: "PEK";
+  /** Defaults to airchina */
   tenantId?: string;
 };
 
@@ -49,7 +49,7 @@ function postToMapIframe(
 
 function IndoorMapEmbed(props: {
   baseUrl: string;
-  airport: "PEK" | "SFO";
+  airport: "PEK";
   tenantId: string;
   passengers: PassengerComputed[];
   selectedPassengerId: string | null;
@@ -220,7 +220,7 @@ function StandardMapView(props: DashboardMapViewProps) {
 export default function MapView(props: DashboardMapViewProps) {
   const indoor = INDOOR_MAP_URL;
   const airport = props.airport ?? "PEK";
-  const tenantId = props.tenantId ?? (airport === "PEK" ? "airchina" : "airchina_sfo");
+  const tenantId = props.tenantId ?? "airchina";
 
   if (indoor) {
     return (

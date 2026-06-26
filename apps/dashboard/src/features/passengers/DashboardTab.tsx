@@ -2,14 +2,11 @@ import { useMemo, useState } from "react";
 import type { Gate, Flight, PassengerComputed, PaxExtStatus } from "../../types/types";
 import { statusBadge, extStatusLabel } from "../../utils/statusDisplay";
 
-type Airport = "PEK" | "SFO";
-
 export default function DashboardTab({
-  airport, passengers, presence, riskCounts, priorityList,
+  passengers, presence, riskCounts, priorityList,
   onSelectPax, onSendSms, onRequestLocation, onOpenConversation,
   gatesById, flightsById,
 }: {
-  airport: Airport;
   passengers: PassengerComputed[];
   presence: Record<string, boolean>;
   riskCounts: Record<string, number>;
@@ -36,9 +33,7 @@ export default function DashboardTab({
   const extStatusOrder: Record<string, number> = { lost: 0, red: 1, yellow: 2, missed: 3, offline: 4, green: 5, gray: 6 };
   const sorted = [...displayed].sort((a, b) => (extStatusOrder[a.extStatus] ?? 9) - (extStatusOrder[b.extStatus] ?? 9));
 
-  const airportTitle = airport === "PEK"
-    ? "Transfer Control Dashboard — PEK T3E · International → International"
-    : "Transfer Control Dashboard — SFO · International → Domestic";
+  const airportTitle = "Transfer Control Dashboard — PEK T3E · International → International";
 
   const badgeItems = [
     { key: "green", label: "On Track", cls: "green" },

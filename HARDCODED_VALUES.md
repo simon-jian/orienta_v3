@@ -1,8 +1,19 @@
 # Orienta v3 — Hardcoded Values Audit
 
 > Created: 2026-06-07  
+> Updated: 2026-06-07 — SFO airport demo removed; **PEK-only**  
 > Scope: `apps/dashboard` (server, `src/`, `public/`)  
 > Purpose: catalogue hardcoded config, demo data, and magic strings so follow-up refactors can be done incrementally.
+
+---
+
+## Scope note (2026-06)
+
+**Supported hub:** PEK T3E only.
+
+**Removed:** `src/data/airports/sfo.ts`, SFO CSV assets, dual-hub branches in TS/server, `path_lonlat.json` (SFO coords), SFO branches in `route_site/index.html`.
+
+**Keep:** Flight/city **SFO** in demo data (e.g. inbound `CA7206 from SFO`) — that is origin city, not SFO airport support.
 
 ---
 
@@ -57,15 +68,16 @@ DB_PATH=./data/passengers.db
 
 ---
 
-### 2. Airport / hub branching (PEK vs SFO)
+### 2. Airport / hub (PEK-only today)
 
 | Location | Hardcoded value | Status |
 |----------|-----------------|--------|
-| `server/routes/flight.ts` ~30–47 | `PEK`/`ZBAA` vs `SFO`/`KSFO` branches for center & gates | todo |
-| `src/features/map/MapView.tsx` ~223 | PEK → tenant `airchina`, else → `airchina_sfo` | todo |
-| `src/features/passengers/useDashboard.ts` | `airport: "PEK" \| "SFO"` split logic | todo |
-| `public/route_site/index.html` ~949 | default hub `SFO` (inconsistent with Dashboard default PEK) | todo |
-| `public/pax.html` ~181 | `tenantId === "airchina" ? "PEK" : "SFO"` | todo |
+| `src/app/Dashboard.tsx` ~24–25 | `tenantId = "airchina"`, `airport = "PEK"` | todo |
+| `server/passengers/PaxAccountStore.ts` ~35, ~72 | SQL default + upsert fallback `"airchina"` | todo |
+| `public/route_site/index.html` | `__ROUTESITE_HUB__ = 'PEK'` (ignores non-PEK `?hub=`) | done |
+| `public/pax.html` | default hub `PEK` | done |
+
+**Note:** SFO airport module and `airchina_sfo` tenant mapping were removed. Future hubs need `AirportRegistry`.
 
 **Suggested fix:** single `AirportId` + `tenantForAirport()` in `src/config/` (or shared package).
 
@@ -90,17 +102,15 @@ Primary sources:
 
 | File | Contents |
 |------|----------|
-| `src/data/airports/pek.ts` | PEK flights (CA836…), premium IDs (TX1…), transfer gates (E16→E19), demo flight indices |
-| `src/data/airports/sfo.ts` | SFO flights, gate coord table, `SFO_FLIGHT_GATE_MAP`, premium IDs |
+| `src/data/airports/pek.ts` | PEK flights (CA836…), premium IDs (TX1…), transfer gates (E16→E19), `PEK_FLIGHT_GATE_MAP`, demo flight indices |
 
 **Consumers (non-exhaustive):**
 
 | Consumer | Usage |
 |----------|-------|
 | `server/routes/paxSessions.ts` | `buildPekFlights()` for session gate resolution |
-| `server/hub/wsHub.ts` | `SFO_FLIGHT_GATE_MAP` for WS gate inference |
-| `server/auth/paxAuthPolicy.ts` | `PEK_PREMIUM_IDS` / `SFO_PREMIUM_IDS` for legacy chat entitlement |
-| `src/features/passengers/useDashboard.ts` | `buildSFOPassengers()` |
+| `server/hub/wsHub.ts` | `PEK_FLIGHT_GATE_MAP` for WS nav_request |
+| `server/auth/paxAuthPolicy.ts` | `PEK_PREMIUM_IDS` for legacy chat entitlement |
 | `src/components/PaxEntryWrapper.tsx` | `PEK_PAX_DEMO_CONFIG`, `PEK_DEFAULT_TRANSFER_GATES` |
 | FIDS / flight services | static fallback when FlightAware unavailable |
 
@@ -167,8 +177,8 @@ Primary sources:
 |-------|----------|
 | PEK center `40.0748162, 116.6061088` | `src/services/pekPoiCoords.ts`, `server/lib/poiCache.ts`, `src/features/map/leafletAdapter.ts` |
 | PEK bbox `40.0694–40.0800, 116.6008–116.6108` | same files |
-| SFO center & bbox | `src/data/airports/sfo.ts` |
-| ~80 SFO gate lat/lng pairs | `src/data/airports/sfo.ts` |
+| SFO center & bbox | _(removed with sfo.ts)_ |
+| ~80 SFO gate lat/lng pairs | _(removed with sfo.ts)_ |
 | New passenger spawn radius `400` m | `server/passengers/PassengerRegistry.ts` |
 
 ### External third-party URLs
@@ -206,17 +216,13 @@ Primary sources:
 
 ## Largest hardcoded block: `public/route_site/index.html`
 
-~6500 lines. Embedded demo assets and logic include:
+~6500 lines. PEK-only after SFO cleanup (2026-06). Still embedded:
 
-- Video basenames (`PEK_T3E_F3_E32_...`, `PEK_gate_timestamp_merged.mp4`)
-- CSV name `PEK_gate_timestamp_full_with_E24_E36.csv`
-- Path polylines `PATH_LONLAT_PEK`, `PATH_LONLAT_SFO`
-- Gate graph / segment timing (`GATE_CHECKPOINTS`, `ROUTE_GATE_SEGMENTS`, stretch defaults)
-- Tenant, passenger aliases, default hub
-- Tencent Maps doc link, PDR embed params
-- Indoor map embed timeout defaults
+- Video basenames, CSV names, PEK path polylines, gate segment timing
+- Legacy canvas pixel paths (`PPL_PATH`, base64 floor images) — candidate for Phase 4 removal
+- Tenant, passenger aliases
 
-**Duplicates** data also in `src/data/airports/pek.ts` (e.g. TX1/TX2/TX3 transfer E16/E17/E18 → E19).
+**Duplicates** data in `src/data/airports/pek.ts` (e.g. TX1→E16/E19).
 
 **Long-term direction:** extract `route-site-config.json` (or per-hub JSON) + thin bootstrap script; keep HTML as shell only.
 
@@ -226,9 +232,9 @@ Primary sources:
 
 | Issue | Detail |
 |-------|--------|
-| CSV filename | `server/paths.ts` uses `PEK_gate_timestamp_full_with_E24_E36.csv`; repo also has `PEK_gate_timestamp.csv` (shorter, 19 rows) |
-| Default hub | Admin Dashboard defaults to PEK; `route_site` query default is SFO |
-| Premium entitlement | Session JWT has `capabilities`, but `paxAuthPolicy.ts` still checks static `PEK_PREMIUM_IDS` for legacy paths |
+| CSV filename | `server/paths.ts` uses `PEK_gate_timestamp_full_with_E24_E36.csv`; repo also has shorter `PEK_gate_timestamp.csv` |
+| Premium entitlement | Session JWT has `capabilities`, but `paxAuthPolicy.ts` still checks `PEK_PREMIUM_IDS` for legacy paths |
+| route_site canvas | `PPL_PATH` / base64 images are legacy pixel overlay data; refactor in Phase 4 |
 
 ---
 
@@ -243,7 +249,7 @@ apps/dashboard/
 ├── data/
 │   └── airports/
 │       ├── pek.demo.ts        # rename from pek.ts — explicit demo seed
-│       └── sfo.demo.ts
+│       └── (future hubs via registry, not sfo.ts)
 └── public/route_site/
     ├── config.pek.json        # future: gates, video names, aliases
     └── index.html             # thin loader only (long-term)
@@ -268,12 +274,12 @@ Use this as a checklist. Mark done in the **Status** column above.
 - [ ] **B1** Rename / document `src/data/airports/*.ts` as demo seed data
 - [ ] **B2** Remove `PEK_PREMIUM_IDS` from chat policy when `PAX_LEGACY_AUTH=0`
 - [ ] **B3** `resolveOutbound()` — configurable default gate or strict error
-- [ ] **B4** Align `route_site` default hub with admin default (or explicit `?hub=` only)
+- [ ] **B4** Align route_site hub with admin (done: forced PEK)
 - [ ] **B5** Resolve CSV naming: one canonical file + symlink or copy in docs
 
 ### Phase C — route_site decomposition (larger)
 
-- [ ] **C1** Extract PEK/SFO config JSON from `index.html`
+- [ ] **C1** Extract PEK config JSON from `index.html`; remove legacy canvas pixel overlay
 - [ ] **C2** Deduplicate TX1/TX2/TX3 gates — single source shared with `pek.demo.ts`
 - [ ] **C3** Implement or remove `/api/metrics/events`
 
@@ -291,7 +297,7 @@ Use this as a checklist. Mark done in the **Status** column above.
 |----------|---------------|
 | Server config | `server/config.ts`, `server/paths.ts` |
 | Tenant / airport UI | `src/app/Dashboard.tsx`, `src/features/map/MapView.tsx` |
-| Demo flights / passengers | `src/data/airports/pek.ts`, `src/data/airports/sfo.ts` |
+| Demo flights / passengers | `src/data/airports/pek.ts` |
 | Sessions | `server/routes/paxSessions.ts` |
 | WS / chat policy | `server/hub/wsHub.ts`, `server/auth/paxAuthPolicy.ts` |
 | POI / gates | `src/services/pekPoiCoords.ts`, `server/lib/poiCache.ts` |

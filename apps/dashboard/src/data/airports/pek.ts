@@ -32,6 +32,26 @@ export const PEK_OUTBOUND_FLIGHTS = [
   { id: "CA5281", to: "SIN", toCity: "Singapore",     gate: "E25", depOffset: 30,  status: "Boarding"   as const },
 ] as const;
 
+/** Flight id (and spaced variant) → departure gate for nav_request / transfer hints. */
+export const PEK_FLIGHT_GATE_MAP: Record<string, string> = (() => {
+  const map: Record<string, string> = {};
+  for (const f of PEK_OUTBOUND_FLIGHTS) {
+    map[f.id] = f.gate;
+    const spaced = f.id.replace(/^([A-Z]{2})(\d+)$/, "$1 $2");
+    if (spaced !== f.id) map[spaced] = f.gate;
+  }
+  // Inbound-only demo flights (arrival leg gate hints)
+  const inboundGates: Record<string, string> = {
+    CA836: "E16", CA856: "E17", CA901: "E18", CA902: "E17", CA921: "E19",
+    CA931: "E20", CA841: "E16", CA861: "E17", CA7206: "E32",
+  };
+  for (const [id, gate] of Object.entries(inboundGates)) {
+    map[id] = gate;
+    map[id.replace(/^([A-Z]{2})(\d+)$/, "$1 $2")] = gate;
+  }
+  return map;
+})();
+
 // ─── Premium IDs ──────────────────────────────────────────────────────────────
 
 export const PEK_PREMIUM_IDS = new Set([

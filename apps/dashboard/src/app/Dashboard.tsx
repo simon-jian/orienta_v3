@@ -59,7 +59,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     sendSms, sendChat, requestLocation, openConversation,
     toasts, dismissToast,
   } = useDashboard({
-    airport, tenantId, gates, flights, gatesById, flightsById,
+    tenantId, gates, flights, gatesById, flightsById,
     pekPoiReady, session,
   });
 
@@ -153,7 +153,6 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
           </div>
           <div style={{ flex: 1.5, minWidth: 400, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
             <DashboardTab
-              airport={airport}
               passengers={passengersFilteredByGate}
               presence={presence}
               riskCounts={riskCounts}

@@ -178,7 +178,7 @@ const passengerId =
   (params.get("pax") || params.get("pid") || params.get("pix") || "").trim();
 const hubFromQuery = (params.get("hub") || params.get("airport") || "").trim().toUpperCase();
 /** 与 pax-flight 抵达/出发机场一致：默认国航租户走 PEK 室内资源 */
-const routeSiteAirport = hubFromQuery || (tenantId === "airchina" ? "PEK" : "SFO");
+const routeSiteAirport = hubFromQuery || "PEK";
 const isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || !!navigator.standalone;
 
 function isPushSupported() {
@@ -613,10 +613,7 @@ function orientaUpdateMobileBrowserChromeInset_() {
     });
   }
   if (body) {
-    body.textContent =
-      routeSiteAirport === "PEK"
-        ? ""
-        : "当前为旧金山 SFO T1 演示资源（视频与时间轴）。";
+    body.textContent = routeSiteAirport === "PEK" ? "" : "Unsupported airport hub.";
   }
 })();
 

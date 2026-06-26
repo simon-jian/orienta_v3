@@ -20,7 +20,6 @@ import type {
 } from "../../types/types";
 import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
-import { buildSFOPassengers } from "../../data/airports/sfo";
 
 export type ToastItem = { id: string; title: string; body: string };
 
@@ -65,7 +64,6 @@ export type DashboardState = {
 };
 
 export function useDashboard(opts: {
-  airport: "PEK" | "SFO";
   tenantId: string;
   gates: Gate[];
   flights: Flight[];
@@ -75,7 +73,7 @@ export function useDashboard(opts: {
   session: AdminSession;
 }): DashboardState {
   const {
-    airport, tenantId, gatesById, flightsById,
+    tenantId, gatesById, flightsById,
     pekPoiReady,
   } = opts;
 
@@ -83,10 +81,6 @@ export function useDashboard(opts: {
   const [passengersRaw, setPassengersRaw] = useState<{ passengers: Passenger[] } | null>(null);
 
   const loadPassengers = useCallback(async () => {
-    if (airport === "SFO") {
-      setPassengersRaw({ passengers: buildSFOPassengers() });
-      return;
-    }
     try {
       const r = await fetch(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`);
       if (!r.ok) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
@@ -101,11 +95,11 @@ export function useDashboard(opts: {
     } catch {
       setPassengersRaw((w) => w ?? { passengers: [] });
     }
-  }, [airport, tenantId]);
+  }, [tenantId]);
 
-  // Reset when airport / gate data changes, then load
+  // Reset when gate data changes, then load
   useEffect(() => {
-    if (airport === "PEK" && !pekPoiReady) return;
+    if (!pekPoiReady) return;
     setPassengersRaw(null);
     setSelectedPaxId(null);
     setMapViewMode("all");
@@ -113,14 +107,13 @@ export function useDashboard(opts: {
     setPresence({});
     setPaxTrajectories({});
     void loadPassengers();
-  }, [airport, pekPoiReady, loadPassengers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pekPoiReady, loadPassengers]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Poll for newly connected passengers every 10 s (PEK only)
+  // Poll for newly connected passengers every 10 s
   useEffect(() => {
-    if (airport !== "PEK") return;
     const t = setInterval(() => void loadPassengers(), 10_000);
     return () => clearInterval(t);
-  }, [airport, loadPassengers]);
+  }, [loadPassengers]);
 
   // ── Realtime ───────────────────────────────────────────────────────────────
   const [rtUp, setRtUp] = useState(false);

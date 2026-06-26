@@ -8,7 +8,7 @@ type CreateOptions = {
   onHoverPassenger?(id: string | null): void;
 };
 
-// Default center (PEK T3E spine center). For SFO we pass an override.
+// Default center (PEK T3E spine center).
 const DEFAULT_CENTER: [number, number] = [40.0748162, 116.6061088]; // OSM centroid
 
 function extStatus(p: PassengerComputed): string {

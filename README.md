@@ -2,6 +2,8 @@
 
 Passenger + admin dashboard for airport indoor navigation and operations.
 
+**Hub scope:** PEK T3E only (SFO airport demo removed 2026-06). See [`PRODUCTION_ROADMAP.md`](./PRODUCTION_ROADMAP.md) and [`HARDCODED_VALUES.md`](./HARDCODED_VALUES.md).
+
 ## Layout
 
 ```text

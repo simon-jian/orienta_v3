@@ -7,7 +7,6 @@ import crypto from "node:crypto";
 import type { ChatMessage, ChatKind } from "../../src/types/types";
 import { HubStore } from "./HubStore";
 import { PEK_PREMIUM_IDS } from "../../src/data/airports/pek";
-import { SFO_PREMIUM_IDS } from "../../src/data/airports/sfo";
 
 const AI_REPLY_DELAY_MS = 800;
 
@@ -35,7 +34,7 @@ function aiAgentReply(_passengerId: string, body: string, _history: ChatMessage[
 function isPremium(store: HubStore, tenantId: string, passengerId: string): boolean {
   const meta = store.paxMeta.get(HubStore.key(tenantId, passengerId));
   if (meta?.plan) return meta.plan === "premium";
-  return PEK_PREMIUM_IDS.has(passengerId) || SFO_PREMIUM_IDS.has(passengerId);
+  return PEK_PREMIUM_IDS.has(passengerId);
 }
 
 /**

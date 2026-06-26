@@ -2,9 +2,7 @@
  * Flight & airport data routes.
  * Extracted from the monolithic apiRoutes.ts.
  *
- * Key change: gate coordinates are now imported from the single-source
- * airport config files (data/airports/pek.ts + sfo.ts) rather than
- * being duplicated here.
+ * Key change: gate coordinates are loaded from the PEK POI cache (T3E indoor map API).
  */
 import { existsSync, mkdirSync, statSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -13,38 +11,26 @@ import type { Router, Request, Response } from "express";
 import { FLIGHTAWARE_API_KEY } from "../config";
 import { DIST_DIR, ROUTE_SITE_DIR, PEK_CSV_PATH, PEK_VIDEO_CONCAT_SCRIPT } from "../paths";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
-import { SFO_CENTER, SFO_GATE_COORDS } from "../../src/data/airports/sfo";
 
-// ─── Airport data ─────────────────────────────────────────────────────────────
+// ─── Airport data (PEK / ZBAA only) ───────────────────────────────────────────
 
 function getPekCenter2(): [number, number] {
   const c = getPekCenter();
   return [c.lat, c.lng];
 }
 
-function getSfoCenter(): [number, number] {
-  return [SFO_CENTER.lat, SFO_CENTER.lng];
-}
-
 function getAirportCenter(airport: string): [number, number] | undefined {
   if (airport === "PEK" || airport === "ZBAA") return getPekCenter2();
-  if (airport === "SFO" || airport === "KSFO") return getSfoCenter();
   return undefined;
 }
 
-const SFO_GATE_COORDS_FLAT = Object.fromEntries(
-  Object.entries(SFO_GATE_COORDS).map(([k, v]) => [k, [v.lat, v.lng] as [number, number]])
-);
-
 function getAirportGates(airport: string): Record<string, [number, number]> | undefined {
   if (airport === "PEK" || airport === "ZBAA") return getAllGateCoords();
-  if (airport === "SFO" || airport === "KSFO") return SFO_GATE_COORDS_FLAT;
   return undefined;
 }
 
 function getAirportGateCoord(airport: string, gate: string): [number, number] | undefined {
   if (airport === "PEK" || airport === "ZBAA") return getGateCoord(gate) ?? undefined;
-  if (airport === "SFO" || airport === "KSFO") return SFO_GATE_COORDS_FLAT[gate];
   return undefined;
 }
 

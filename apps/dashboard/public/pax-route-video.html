@@ -98,12 +98,12 @@
       }
       const hint = document.getElementById("routeHint");
       if (hint) {
-        if (ap === "PEK") {
+        if (ap !== "PEK") {
+          hint.textContent = "Unsupported airport hub.";
+          hint.hidden = false;
+        } else {
           hint.textContent = "";
           hint.hidden = true;
-        } else {
-          hint.textContent = "旧金山 SFO T1 演示资源。";
-          hint.hidden = false;
         }
       }
       document.getElementById("fromG").textContent = fromGate;

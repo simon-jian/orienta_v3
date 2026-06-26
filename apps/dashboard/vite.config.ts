@@ -1,9 +1,28 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, type Plugin } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 
+/** Vite dev: /route_site/ must serve public/route_site/index.html, not the React SPA fallback. */
+function routeSiteDevIndex(): Plugin {
+  return {
+    name: "route-site-dev-index",
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const raw = req.url ?? "";
+        const q = raw.indexOf("?");
+        const pathname = q >= 0 ? raw.slice(0, q) : raw;
+        const search = q >= 0 ? raw.slice(q) : "";
+        if (pathname === "/route_site" || pathname === "/route_site/") {
+          req.url = `/route_site/index.html${search}`;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), routeSiteDevIndex()],
   resolve: {
     alias: { "@": path.resolve(__dirname, "./src") },
   },
