@@ -118,10 +118,9 @@ export function attachWsHub(
             set.add(ws);
             store.adminSockets.set(tenantId, set);
 
-            // Send current presence snapshot
-            for (const key of store.online) {
-              if (!key.startsWith(`${tenantId}::`)) continue;
-              const pid = key.split("::")[1] || "";
+            // Send current presence snapshot (cluster-wide when Redis is enabled)
+            for (const pid of await store.listOnlineGlobal(tenantId)) {
+              if (!pid) continue;
               wsSend(ws, { type: "presence", tenantId, passengerId: pid, online: true, at: Date.now() });
             }
             // Send current trajectories

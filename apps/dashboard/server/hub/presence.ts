@@ -45,6 +45,8 @@ export function setPresence(
   const wasOnline = store.online.has(key);
   if (isOnline) store.online.add(key);
   else store.online.delete(key);
+  // Mirror into the shared presence set so other instances see it.
+  store.recordPresence(tenantId, passengerId, isOnline);
   if (wasOnline !== isOnline) {
     store.broadcastAdmins(tenantId, {
       type: "presence",

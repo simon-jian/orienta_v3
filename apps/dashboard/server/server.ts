@@ -39,6 +39,9 @@ import { logger } from "./lib/logger";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
 import { getSqlDb } from "./db/sqlDb";
+import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
+import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
+import { REDIS_ENABLED, INSTANCE_ID } from "./config";
 import {
   applyAirportMapNoCacheHeaders,
   applyIframeSafeHtmlHeaders,
@@ -55,6 +58,19 @@ import { loadPoiCache } from "./lib/poiCache";
 const sqlDb = getSqlDb();
 const chatRepo = new ChatRepository(sqlDb);
 const store = new HubStore(chatRepo);
+
+// ─── Cross-instance coordination (P2-3) ──────────────────────────────────────
+// Redis enables shared presence + WS fan-out + rate limiting across instances.
+// Without REDIS_URL these are no-ops and the server runs single-instance.
+const redisCmd = getRedisCmd();
+const hubBus: HubBus = REDIS_ENABLED
+  ? new RedisHubBus(
+      createRedisConnection("hub-pub")!,
+      createRedisConnection("hub-sub")!,
+      (env) => store.deliverRemote(env),
+    )
+  : new MemoryHubBus();
+store.attachCluster({ bus: hubBus, redis: redisCmd });
 const accountStore = new PaxAccountStore(sqlDb);
 const auditLog = new AuditLog(sqlDb);
 const metricsRepo = new MetricsRepository(sqlDb);
@@ -63,11 +79,11 @@ const pushSubStore = new PushSubscriptionStore(sqlDb);
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(sqlDb);
 
-const authRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
-const paxRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
+const authRateLimit = createRateLimiter({ name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
+const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
 // P0-5: the merged-video route spawns ffmpeg/python on cache-miss — strict cap per IP.
-const mergedVideoRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 10 });
-const metricsRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 120 });
+const mergedVideoRateLimit = createRateLimiter({ name: "video", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
+const metricsRateLimit = createRateLimiter({ name: "metrics", windowMs: 60_000, maxRequests: 120, redis: redisCmd });
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 const app = express();
@@ -327,7 +343,7 @@ async function bootstrap(): Promise<void> {
     auditLog.init(),
     accountStore.init(),
   ]);
-  logger.info("db_ready", { dialect: sqlDb.dialect });
+  logger.info("db_ready", { dialect: sqlDb.dialect, redis: REDIS_ENABLED, instance: INSTANCE_ID });
 
   // Start background pruning only after tables exist.
   startMaintenanceJobs({ registry, chatRepo, metricsRepo });
@@ -372,6 +388,8 @@ function shutdown(signal: string): void {
       logger.error("shutdown_http_close_error", { error: String(err) });
       process.exit(1);
     }
+    try { hubBus.close(); } catch { /* ignore */ }
+    try { redisCmd?.disconnect(); } catch { /* ignore */ }
     void sqlDb.close().finally(() => {
       logger.info("shutdown_complete", { signal });
       process.exit(0);

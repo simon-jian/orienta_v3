@@ -60,8 +60,8 @@ export function registerPassengerRoutes(
     const tenantId = tenantFromQuery(req);
     const records  = await registry.list(tenantId);
 
-    // Overlay live online state from HubStore (more up-to-date than DB)
-    const onlineSet = new Set(store.listOnline(tenantId));
+    // Overlay live online state from HubStore (cluster-wide when Redis is enabled)
+    const onlineSet = new Set(await store.listOnlineGlobal(tenantId));
     const passengers: Passenger[] = records.map(
       // Strip registry-only fields that the Passenger type doesn't have.
       ({ tenantId: _tid, source: _src, createdAt: _ca, lastSeenAt: _ls, isOnline: _io, ...rest }) => rest,

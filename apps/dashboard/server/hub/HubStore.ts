@@ -10,6 +10,8 @@
 import { WebSocket } from "ws";
 import type { ChatMessage, MsgRecord } from "../../src/types/types";
 import type { ChatRepository } from "./ChatRepository";
+import type { HubBus, HubEnvelope } from "./HubBus";
+import type { Redis } from "../redis/redisClient";
 import { logger } from "../lib/logger";
 
 const MAX_CHAT_HISTORY = 100;
@@ -22,6 +24,21 @@ export type TrajectoryData = {
 
 export class HubStore {
   constructor(private readonly chatRepo?: ChatRepository) {}
+
+  // ── Cross-instance coordination (P2-3) ───────────────────────────────────────
+  // Both are null in single-instance mode (in-memory fan-out + local presence).
+  private bus: HubBus | null = null;
+  private redis: Redis | null = null;
+
+  /** Wire up Redis fan-out + shared presence. Called once at startup. */
+  attachCluster(opts: { bus: HubBus; redis: Redis | null }): void {
+    this.bus = opts.bus;
+    this.redis = opts.redis;
+  }
+
+  private presenceKey(tenantId: string): string {
+    return `orienta:presence:${tenantId}`;
+  }
 
   /** keyed by `tenantId::passengerId` → set of open WebSocket connections */
   readonly paxSockets = new Map<string, Set<WebSocket>>();
@@ -63,6 +80,36 @@ export class HubStore {
       }
     }
     return out;
+  }
+
+  /**
+   * Cluster-wide online list. With Redis, returns the union across instances;
+   * otherwise the local set. Always unioned with local for resilience.
+   */
+  async listOnlineGlobal(tenantId: string): Promise<string[]> {
+    const local = this.listOnline(tenantId);
+    if (!this.redis) return local;
+    try {
+      const members = await this.redis.smembers(this.presenceKey(tenantId));
+      return Array.from(new Set([...local, ...members]));
+    } catch {
+      return local;
+    }
+  }
+
+  /** Record presence in the shared store (Redis set). No-op without Redis. */
+  recordPresence(tenantId: string, passengerId: string, online: boolean): void {
+    if (!this.redis) return;
+    const key = this.presenceKey(tenantId);
+    const op = online
+      ? this.redis.sadd(key, passengerId)
+      : this.redis.srem(key, passengerId);
+    void op.catch((err: unknown) =>
+      logger.error("presence_redis_failed", {
+        passengerId,
+        error: err instanceof Error ? err.message : String(err),
+      }),
+    );
   }
 
   // ── Chat ────────────────────────────────────────────────────────────────────
@@ -118,6 +165,27 @@ export class HubStore {
   // ── Broadcast helpers ────────────────────────────────────────────────────────
 
   broadcastAdmins(tenantId: string, msg: unknown, excludeWs?: WebSocket): void {
+    this.deliverAdminsLocal(tenantId, msg, excludeWs);
+    // Propagate to other instances. excludeWs is local-only (remote instances
+    // don't hold that socket), so it isn't forwarded.
+    this.bus?.publish({ scope: "admins", tenantId, payload: msg });
+  }
+
+  broadcastPax(tenantId: string, passengerId: string, msg: unknown): void {
+    this.deliverPaxLocal(tenantId, passengerId, msg);
+    this.bus?.publish({ scope: "pax", tenantId, passengerId, payload: msg });
+  }
+
+  /** Deliver an envelope received from another instance to local sockets only. */
+  deliverRemote(env: HubEnvelope): void {
+    if (env.scope === "admins") {
+      this.deliverAdminsLocal(env.tenantId, env.payload);
+    } else {
+      this.deliverPaxLocal(env.tenantId, env.passengerId, env.payload);
+    }
+  }
+
+  private deliverAdminsLocal(tenantId: string, msg: unknown, excludeWs?: WebSocket): void {
     const set = this.adminSockets.get(tenantId);
     if (!set) return;
     const payload = JSON.stringify(msg);
@@ -127,7 +195,7 @@ export class HubStore {
     }
   }
 
-  broadcastPax(tenantId: string, passengerId: string, msg: unknown): void {
+  private deliverPaxLocal(tenantId: string, passengerId: string, msg: unknown): void {
     const key = HubStore.key(tenantId, passengerId);
     const set = this.paxSockets.get(key);
     if (!set) return;
