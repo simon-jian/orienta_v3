@@ -74,15 +74,16 @@ Admin: http://localhost:5174
 
 ## Health check
 
-`GET /health` returns process + SQLite status (and reports PDR / indoor-map mode):
+`GET /health` returns process + database status (and reports PDR / indoor-map mode):
 
 ```bash
 curl http://localhost:5174/health
-# {"status":"ok","uptime_s":42,"checks":{"process":"ok","sqlite":"ok","pdr_proxy":"configured","indoor_map":"bundled"},...}
+# {"status":"ok","uptime_s":42,"checks":{"process":"ok","db":"ok","db_dialect":"sqlite","pdr_proxy":"configured","indoor_map":"bundled"},...}
 ```
 
-Returns `200` when SQLite responds, `503` when degraded. The Docker `HEALTHCHECK`
-and Compose `depends_on: condition: service_healthy` both rely on this endpoint.
+Returns `200` when the database (SQLite or Postgres) responds, `503` when degraded.
+The Docker `HEALTHCHECK` and Compose `depends_on: condition: service_healthy` both
+rely on this endpoint.
 
 ## Indoor map topology
 
@@ -144,6 +145,39 @@ cp ./backups/passengers-YYYY-MM-DD.db ./data/passengers.db
 
 Schedule the `.backup` command via cron/systemd-timer and ship the file off-box.
 Snapshot the `orienta-data` volume as a coarser fallback.
+
+## Horizontal scale-out (Postgres + Redis)
+
+Single-machine deploys need nothing here — the server uses SQLite + in-memory
+state by default. To run **2+ app instances** behind a load balancer, point them
+at shared Postgres + Redis (the data access layer and the WS/presence/rate-limit
+coordination are backend-agnostic):
+
+| Var | Effect |
+|-----|--------|
+| `DATABASE_URL` | `postgres://…` → all persistence uses Postgres instead of SQLite (P2-1) |
+| `REDIS_URL` | `redis://…` → cross-instance WS fan-out, shared presence, shared rate limit (P2-3) |
+| `VIDEO_OUTPUT_DIR` | shared volume path where the video worker writes merged mp4s (P2-4) |
+
+Bundled stack (Postgres, Redis, and the video worker) ships under the `scale`
+Compose profile:
+
+```bash
+# Bring up Postgres + Redis + the video-merge worker alongside the app:
+DATABASE_URL=postgres://orienta:orienta@postgres:5432/orienta \
+REDIS_URL=redis://redis:6379 \
+VIDEO_OUTPUT_DIR=/shared/video \
+docker compose --profile scale up -d --build
+```
+
+Notes:
+- Tables auto-migrate on boot (`db_ready` log shows `dialect` + `redis`).
+- `GET /health` reports `db_dialect` (`sqlite`/`pg`) and pings the active DB.
+- Video merges run in `orienta-video-worker` (separate container); the web process
+  only enqueues and serves the result. Without Redis the merge runs as a
+  non-blocking child process in the web container.
+- Known single-instance-only state (live updates still propagate via the bus):
+  in-memory one-way push `msg`/ack records and trajectory snapshots.
 
 ## Production
 

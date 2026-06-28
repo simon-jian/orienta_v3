@@ -131,6 +131,14 @@ export const REDIS_ENABLED = !!REDIS_URL;
 /** Optional instance id for logs / WS fan-out de-dup. */
 export const INSTANCE_ID = optional("INSTANCE_ID") || `inst_${Math.random().toString(16).slice(2, 8)}`;
 
+// ─── Video merge job service (P2-4) ───────────────────────────────────────────
+// When DATABASE_URL/REDIS_URL drive multi-instance, the CPU-heavy PEK video merge
+// is offloaded to a separate worker (scripts/pek_video_worker.py) via a Redis
+// queue. These let the web + worker agree on the shared output/source dirs.
+// Empty → use the in-repo route_site paths (single-machine default).
+export const VIDEO_OUTPUT_DIR = optional("VIDEO_OUTPUT_DIR");
+export const VIDEO_SOURCE_DIR = optional("VIDEO_SOURCE_DIR");
+
 // ─── Derived helpers ──────────────────────────────────────────────────────────
 
 /** Parse ADMIN_CREDENTIALS into a lookup map. */

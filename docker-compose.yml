@@ -32,8 +32,12 @@ services:
       # Enable with: docker compose --profile scale up -d
       DATABASE_URL: "${DATABASE_URL:-}"
       REDIS_URL: "${REDIS_URL:-}"
+      # P2-4: when set (e.g. /shared/video), video merges are served from the
+      # shared volume produced by the orienta-video-worker.
+      VIDEO_OUTPUT_DIR: "${VIDEO_OUTPUT_DIR:-}"
     volumes:
       - orienta-data:/app/data
+      - orienta-video:/shared/video
     depends_on:
       orienta-pdr:
         # Wait for the PDR /health probe (baked into pdr_airchina/Dockerfile) to pass.
@@ -74,6 +78,26 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Video-merge worker (P2-4): runs the CPU-heavy ffmpeg concat off the web process.
+  orienta-video-worker:
+    image: orienta-video-worker:latest
+    profiles: ["scale"]
+    build:
+      context: .
+      dockerfile: apps/dashboard/worker/Dockerfile
+    environment:
+      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
+      VIDEO_OUTPUT_DIR: /shared/video
+      VIDEO_SOURCE_DIR: /src/route_site
+      VIDEO_CSV_NAME: "${VIDEO_CSV_NAME:-PEK_gate_timestamp_full_with_E24_E36.csv}"
+    volumes:
+      - orienta-video:/shared/video
+      - ./apps/dashboard/public/route_site:/src/route_site:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
   orienta-pdr:
     image: orienta-pdr:latest
     build:
@@ -89,3 +113,4 @@ volumes:
   orienta-data:
   orienta-pg:
   orienta-redis:
+  orienta-video:

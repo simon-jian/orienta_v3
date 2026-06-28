@@ -41,7 +41,7 @@ import { registerMetricsRoutes } from "./routes/metrics";
 import { getSqlDb } from "./db/sqlDb";
 import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
 import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
-import { REDIS_ENABLED, INSTANCE_ID } from "./config";
+import { REDIS_ENABLED, INSTANCE_ID, VIDEO_OUTPUT_DIR } from "./config";
 import {
   applyAirportMapNoCacheHeaders,
   applyIframeSafeHtmlHeaders,
@@ -301,6 +301,15 @@ app.get("/health", async (_req, res) => {
 });
 
 // ─── Static assets + SPA fallback ─────────────────────────────────────────────
+// When the video worker writes to a shared volume (P2-4), serve it here so the
+// generated mp4s are reachable at the same /route_site/dynamic URL.
+if (VIDEO_OUTPUT_DIR) {
+  app.use("/route_site/dynamic", express.static(VIDEO_OUTPUT_DIR, {
+    setHeaders(res, filePath) {
+      if (/\.mp4$/i.test(filePath)) res.setHeader("Content-Type", "video/mp4");
+    },
+  }));
+}
 app.use(express.static(DIST_DIR, {
   setHeaders(res, filePath) {
     if (/\.mp4$/i.test(filePath)) res.setHeader("Content-Type", "video/mp4");

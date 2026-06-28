@@ -4,13 +4,10 @@
  *
  * Key change: gate coordinates are loaded from the PEK POI cache (T3E indoor map API).
  */
-import { existsSync, mkdirSync, statSync } from "node:fs";
-import { spawnSync } from "node:child_process";
-import path from "node:path";
 import type { Router, Request, Response } from "express";
-import { DIST_DIR, ROUTE_SITE_DIR, PEK_CSV_PATH, PEK_VIDEO_CONCAT_SCRIPT } from "../paths";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
 import { type FlightResult, normalizeFlight, fetchFlightAware } from "../services/flightAware";
+import { requestMerge, type MergeSpec } from "../services/videoMerge";
 
 // ─── Airport data (PEK / ZBAA only) ───────────────────────────────────────────
 
@@ -153,7 +150,7 @@ function normalizeGateToken(raw: string): string {
 }
 
 export function registerOrientaRoutes(router: Router): void {
-  router.get("/pek-merged-video", (req: Request, res: Response) => {
+  router.get("/pek-merged-video", async (req: Request, res: Response) => {
     const from    = normalizeGateToken(String(req.query.from || req.query.gateFrom || req.query.origin || ""));
     const to      = normalizeGateToken(String(req.query.to   || req.query.gateTo   || req.query.destination || req.query.dest || ""));
     const fromIdx = parseInt(String(req.query.fromIdx ?? req.query.from_index ?? ""), 10);
@@ -161,35 +158,18 @@ export function registerOrientaRoutes(router: Router): void {
     const useIdx  = Number.isFinite(fromIdx) && Number.isFinite(toIdx) && fromIdx >= 0 && toIdx > fromIdx;
     if (!useIdx && (!from || !to)) return res.status(400).json({ ok: false, error: "missing_from_or_to_gate_or_index" });
 
-    const distRouteSite = path.join(DIST_DIR, "route_site");
-    const outDir = existsSync(distRouteSite)
-      ? path.join(distRouteSite, "dynamic")
-      : path.join(ROUTE_SITE_DIR, "dynamic");
-    const outName = useIdx
-      ? `PEK_gate_timestamp_merged_idx_${fromIdx}_to_${toIdx}.mp4`
-      : `PEK_gate_timestamp_merged_${from}_to_${to}.mp4`;
-    const outPath = path.join(outDir, outName);
-    const pyArgs = useIdx
-      ? [PEK_VIDEO_CONCAT_SCRIPT, "--csv", PEK_CSV_PATH, "--src-dir", ROUTE_SITE_DIR, "--out", outPath, "--from-index", String(fromIdx), "--to-index", String(toIdx)]
-      : [PEK_VIDEO_CONCAT_SCRIPT, "--csv", PEK_CSV_PATH, "--src-dir", ROUTE_SITE_DIR, "--out", outPath, "--from-gate", from, "--to-gate", to];
+    const spec: MergeSpec = useIdx
+      ? { mode: "index", fromIdx, toIdx }
+      : { mode: "gate", from, to };
 
     try {
-      mkdirSync(outDir, { recursive: true });
-      if (existsSync(outPath)) {
-        const st = statSync(outPath);
-        if (st.isFile() && st.size > 0) {
-          return res.json({ ok: true, url: `/route_site/dynamic/${outName}`, cached: true, bytes: st.size });
-        }
-      }
-      const run = spawnSync("python3", pyArgs, { encoding: "utf8", timeout: 120_000 });
-      if (run.status !== 0) {
-        return res.status(500).json({ ok: false, error: "merge_failed", details: (run.stderr || run.stdout || "").slice(-1200) });
-      }
-      const st2 = statSync(outPath);
-      return res.json({ ok: true, url: `/route_site/dynamic/${outName}`, cached: false, bytes: st2.size });
+      // CPU work runs in the worker (Redis) or a non-blocking child process.
+      const result = await requestMerge(spec);
+      return res.json({ ok: true, ...result });
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
-      return res.status(500).json({ ok: false, error: "merge_exception", message });
+      const error = message === "merge_timeout" ? "merge_timeout" : "merge_failed";
+      return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error, message: message.slice(-1200) });
     }
   });
 

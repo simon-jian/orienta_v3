@@ -156,10 +156,10 @@ ADMIN_CREDENTIALS=<real-accounts>
 
 | Item | Description | Status |
 |------|-------------|--------|
-| **P2-1** PostgreSQL option | Replace SQLite for multi-instance / HA | todo |
-| **P2-2** Push subscription persistence | SQLite-backed (`PushSubscriptionStore`); survives restarts, prunes 404/410 endpoints | done |
-| **P2-3** Shared rate limit / presence | Redis or sticky sessions for horizontal scale | todo |
-| **P2-4** Video merge as job service | Python concat outside Node container | todo |
+| **P2-1** PostgreSQL option | Async `SqlDb` layer (`server/db/sqlDb.ts`) with sqlite + pg dialects; all repos migrated; `DATABASE_URL` switches to Postgres. Default stays SQLite | done |
+| **P2-2** Push subscription persistence | `SqlDb`-backed (`PushSubscriptionStore`); survives restarts, prunes 404/410 endpoints | done |
+| **P2-3** Shared rate limit / presence | Redis fan-out bus (`HubBus`) + shared presence set + Redis fixed-window rate limit (`REDIS_URL`); in-memory fallback. Verified across 2 instances | done |
+| **P2-4** Video merge as job service | `requestMerge` enqueues to Redis; separate `pek_video_worker.py` container runs ffmpeg; non-blocking `spawn` fallback single-machine | done |
 | **P2-5** Error tracking | Sentry or equivalent | todo |
 
 ---

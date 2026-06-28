@@ -35,5 +35,5 @@ export const LOCAL_INDOOR_MAP_TILES_DIR = path.resolve(dashboardRoot, "../../ind
 export const ROUTE_SITE_DIR = path.join(PUBLIC_DIR, "route_site");
 export const PEK_CSV_PATH   = path.join(ROUTE_SITE_DIR, "PEK_gate_timestamp_full_with_E24_E36.csv");
 
-/** Python concat script for PEK merged-video generation. */
-export const PEK_VIDEO_CONCAT_SCRIPT = path.resolve(dashboardRoot, "../../../scripts/concat_pek_video_from_csv.py");
+/** Python concat script for PEK merged-video generation (repo: orienta_v3/scripts). */
+export const PEK_VIDEO_CONCAT_SCRIPT = path.resolve(dashboardRoot, "../../scripts/concat_pek_video_from_csv.py");
