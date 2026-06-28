@@ -1,0 +1,20 @@
+{
+  "hubKey": "PEK",
+  "tenantId": "airchina",
+  "terminal": "T3E",
+  "poiTerminalQuery": "T3E",
+  "defaultRouteGates": { "from": "E16", "to": "E19" },
+  "paxAliases": { "DA8X3": "TX1", "DB5K7": "TX3", "DC2N9": "TX2" },
+  "video": {
+    "gateCsv": "PEK_gate_timestamp_full_with_E24_E36.csv",
+    "mergedFromCsvBasename": "PEK_gate_timestamp_merged.mp4",
+    "mergeEndpoint": "/api/orienta/pek-merged-video"
+  },
+  "pathLonLatFallback": [
+    [116.610013, 40.079188],
+    [116.609573, 40.07885],
+    [116.608943, 40.078642],
+    [116.608302, 40.07826],
+    [116.607674, 40.077897]
+  ]
+}

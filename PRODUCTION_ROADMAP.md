@@ -251,9 +251,11 @@ type AirportDefinition = {
 
 ```
 public/route_site/
-  index.html              # thin shell (~200 lines)
-  bootstrap.js            # ?hub= → load config
-  config/pek.json         # route_site constants
+  index.html              # thin shell (106 lines) ✅
+  route-site.css          # extracted styles (634 lines) ✅
+  config-bootstrap.js     # ?hub= → window.__ROUTESITE_CONFIG__ (PEK-only) ✅
+  config/pek.json         # route_site constants ✅
+  route-site-app.js       # extracted app logic (~5043 lines) ✅
 ```
 
 ---
@@ -266,7 +268,7 @@ public/route_site/
 | **1** | `Dashboard.tsx` + `MapView.tsx` resolve airport/tenant via `config/client.ts` (`VITE_DEFAULT_AIRPORT`/`VITE_ORIENTA_TENANT`); POI `terminal` centralized (client → registry `terminalQuery`, server → `DEFAULT_TERMINAL` env); route_site hub already forced PEK. Behavior-preserving (PEK/T3E/airchina) | 1–2 d | Low | done |
 | **2** | Server unified on registry: `fidsService.resolveOutbound(…, airportId)` + `paxSessions` pass `airportForTenant(tenantId)`; `flight.ts` dispatch via `getAirport().poi.mode`; `wsHub` nav gate map + `PassengerRegistry` spawn radius from registry. Behavior-preserving (PEK); guarded by `fidsService.test.ts` | 3–5 d | Med | done |
 | **3** | `PoiService` (airport-aware facade, dispatches by `poi.mode`) with `pekPoiCoords` as the PEK adapter; `gateService` delegates; `MapView`/`PaxAppPage` rewired (drops hardcoded PEK center); `useDashboard` passenger source extracted to `passengerSource`. Guarded by `PoiService.test.ts` | 3–5 d | Med | done |
-| **4** | Split `route_site/index.html` into config JSON + engines | 1–2 wk | High | todo |
+| **4** | `route_site/index.html` decomposed: CSS → `route-site.css`, the ~5k-line inline script → `route-site-app.js`, constants → `config/pek.json` loaded by `config-bootstrap.js` (exposes `window.__ROUTESITE_CONFIG__`; app reads tenant/default-gates/terminal/video/polyline/pax-aliases from it with PEK fallbacks). `index.html` is now a 106-line shell. Build-verified + JS syntax-checked; runtime QA pending (needs indoor-map/video/PDR stack). Remaining: split `route-site-app.js` into engine modules; generalize merged-video endpoint; hub still forced PEK | 1–2 wk | High | done* |
 | **5** | `GET /api/config/tenant/:tenantId` (`server/routes/config.ts`) returns tenant/airport/terminals/defaults (no demo data); pax session JWT now carries `airportId` (`airportForTenant(tenantId)`) + surfaced in `/api/pax/session`. Onboarding: see "Adding airport #3" | 2–3 d | Low | done |
 
 ### Adding airport #3 (target state — e.g. LHR)
@@ -308,7 +310,7 @@ public/route_site/
 | `server/auth/paxAuthPolicy.ts` | Capabilities over static premium IDs |
 | `src/services/gateService.ts` | Delegate to PoiService |
 | `public/pax.html` | Tenant config instead of inline PEK/SFO |
-| `public/route_site/index.html` | Phase 4: strip to shell |
+| `public/route_site/index.html` | Phase 4: stripped to 106-line shell ✅ (app→`route-site-app.js`, css→`route-site.css`, constants→`config/pek.json`) |
 
 See [`HARDCODED_VALUES.md`](./HARDCODED_VALUES.md) for the full hardcoded inventory and Phase A–D checklist.
 
