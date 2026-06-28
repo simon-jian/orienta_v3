@@ -199,12 +199,10 @@ function orientaRouteSiteDebugLog_(msg, bad) {
   } catch (eLog) {}
 }
 (function(){
+  // config-bootstrap.js resolves the hub; only fall back here if it didn't run.
+  if (typeof window.__ROUTESITE_HUB__ === 'string' && window.__ROUTESITE_HUB__) return;
   var sp = new URLSearchParams(location.search);
-  var requested = (sp.get('airport') || sp.get('hub') || 'PEK').toUpperCase();
-  if (requested !== 'PEK') {
-    console.warn('[route_site] Only PEK is supported; ignoring hub/airport=', requested);
-  }
-  window.__ROUTESITE_HUB__ = 'PEK';
+  window.__ROUTESITE_HUB__ = (sp.get('airport') || sp.get('hub') || 'PEK').toUpperCase();
 })();
 /** Resolved route_site config (from config-bootstrap.js → config/<hub>.json). */
 function orientaRouteSiteCfg_() { return (window.__ROUTESITE_CONFIG__ || {}); }
@@ -247,12 +245,17 @@ function orientaPickPekVideoBasenameFromQuery_() {
 function orientaApiUrl_(p) {
   return typeof window.orientaUrl === "function" ? window.orientaUrl(p) : p;
 }
+/** Merged-video endpoint (config-driven; falls back to the legacy PEK alias). */
+function orientaMergeEndpoint_() {
+  var v = orientaRouteSiteCfg_().video;
+  return (v && v.mergeEndpoint) || '/api/orienta/pek-merged-video';
+}
 function orientaPickPekDynamicMergedFromApiSync_(fromIdx, toIdx) {
   try {
     var u = '';
     if (Number.isFinite(fromIdx) && Number.isFinite(toIdx) && fromIdx >= 0 && toIdx > fromIdx) {
       u =
-        orientaApiUrl_('/api/orienta/pek-merged-video?fromIdx=' +
+        orientaApiUrl_(orientaMergeEndpoint_() + '?fromIdx=' +
         encodeURIComponent(String(fromIdx)) +
         '&toIdx=' +
         encodeURIComponent(String(toIdx)));
@@ -261,7 +264,7 @@ function orientaPickPekDynamicMergedFromApiSync_(fromIdx, toIdx) {
       var from = orientaNormalizeGate_(sp.get('from') || sp.get('origin') || sp.get('gateFrom') || '');
       var to = orientaNormalizeGate_(sp.get('to') || sp.get('dest') || sp.get('destination') || sp.get('gateTo') || '');
       if (!from || !to) return '';
-      u = orientaApiUrl_('/api/orienta/pek-merged-video?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
+      u = orientaApiUrl_(orientaMergeEndpoint_() + '?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to));
     }
     var x = new XMLHttpRequest();
     x.open('GET', u, false);

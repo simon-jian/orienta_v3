@@ -134,6 +134,7 @@ app.use("/flight", flightRouter);
 // ─── Orienta-specific routes ──────────────────────────────────────────────────
 // Strict limiter on the expensive video-merge endpoint (must precede the router mount).
 app.use("/api/orienta/pek-merged-video", mergedVideoRateLimit);
+app.use("/api/orienta/:airportId/merged-video", mergedVideoRateLimit);
 const orientaRouter = express.Router();
 registerOrientaRoutes(orientaRouter);
 app.use("/api/orienta", orientaRouter);

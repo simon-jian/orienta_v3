@@ -36,12 +36,17 @@
   };
 
   var sp = new URLSearchParams(location.search);
-  var requested = (sp.get("airport") || sp.get("hub") || "PEK").toUpperCase();
+  var hub = (sp.get("airport") || sp.get("hub") || "PEK").toUpperCase();
 
-  // Only PEK is supported today; anything else falls back to PEK (logged).
-  var hub = "PEK";
-  if (requested !== "PEK") {
-    console.warn("[route_site] Only PEK is supported; ignoring hub/airport=", requested);
+  // PEK is the only hub with bundled config/assets today. Other hubs are no
+  // longer hard-rejected: we honor the requested hub and try to load its JSON
+  // (config/<hub>.json). PEK's built-in is used as the synchronous fallback so
+  // the page never blocks; PEK-specific features self-disable for other hubs.
+  if (!BUILTIN[hub]) {
+    console.warn(
+      "[route_site] No bundled config for hub=" + hub +
+      "; trying config/" + hub.toLowerCase() + ".json (PEK assets unavailable)."
+    );
   }
 
   window.__ROUTESITE_HUB__ = hub;

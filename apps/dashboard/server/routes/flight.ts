@@ -154,29 +154,48 @@ function normalizeGateToken(raw: string): string {
   return String(raw || "").trim().toUpperCase().replace(/\s+/g, "").replace(/^GATE_/, "");
 }
 
+/**
+ * Merged route-video handler, airport-aware (Multi-airport Phase 4).
+ *
+ * `airportId` is undefined for the legacy `/pek-merged-video` alias (→ PEK) and
+ * set from the path param for the generalized `/:airportId/merged-video`. The
+ * merge assets/script are PEK-only today, so other (valid) airports return 501.
+ */
+async function handleMergedVideo(req: Request, res: Response, airportId?: string): Promise<Response> {
+  const requested = String(airportId || "PEK").toUpperCase();
+  const def = getAirport(requested);
+  if (!def) return res.status(404).json({ ok: false, error: "unknown_airport", airportId: requested });
+  if (def.id !== "PEK") {
+    return res.status(501).json({ ok: false, error: "merge_not_supported_for_airport", airportId: def.id });
+  }
+
+  const from    = normalizeGateToken(String(req.query.from || req.query.gateFrom || req.query.origin || ""));
+  const to      = normalizeGateToken(String(req.query.to   || req.query.gateTo   || req.query.destination || req.query.dest || ""));
+  const fromIdx = parseInt(String(req.query.fromIdx ?? req.query.from_index ?? ""), 10);
+  const toIdx   = parseInt(String(req.query.toIdx   ?? req.query.to_index   ?? ""), 10);
+  const useIdx  = Number.isFinite(fromIdx) && Number.isFinite(toIdx) && fromIdx >= 0 && toIdx > fromIdx;
+  if (!useIdx && (!from || !to)) return res.status(400).json({ ok: false, error: "missing_from_or_to_gate_or_index" });
+
+  const spec: MergeSpec = useIdx
+    ? { mode: "index", fromIdx, toIdx }
+    : { mode: "gate", from, to };
+
+  try {
+    // CPU work runs in the worker (Redis) or a non-blocking child process.
+    const result = await requestMerge(spec);
+    return res.json({ ok: true, ...result });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    const error = message === "merge_timeout" ? "merge_timeout" : "merge_failed";
+    return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error, message: message.slice(-1200) });
+  }
+}
+
 export function registerOrientaRoutes(router: Router): void {
-  router.get("/pek-merged-video", async (req: Request, res: Response) => {
-    const from    = normalizeGateToken(String(req.query.from || req.query.gateFrom || req.query.origin || ""));
-    const to      = normalizeGateToken(String(req.query.to   || req.query.gateTo   || req.query.destination || req.query.dest || ""));
-    const fromIdx = parseInt(String(req.query.fromIdx ?? req.query.from_index ?? ""), 10);
-    const toIdx   = parseInt(String(req.query.toIdx   ?? req.query.to_index   ?? ""), 10);
-    const useIdx  = Number.isFinite(fromIdx) && Number.isFinite(toIdx) && fromIdx >= 0 && toIdx > fromIdx;
-    if (!useIdx && (!from || !to)) return res.status(400).json({ ok: false, error: "missing_from_or_to_gate_or_index" });
-
-    const spec: MergeSpec = useIdx
-      ? { mode: "index", fromIdx, toIdx }
-      : { mode: "gate", from, to };
-
-    try {
-      // CPU work runs in the worker (Redis) or a non-blocking child process.
-      const result = await requestMerge(spec);
-      return res.json({ ok: true, ...result });
-    } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      const error = message === "merge_timeout" ? "merge_timeout" : "merge_failed";
-      return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error, message: message.slice(-1200) });
-    }
-  });
+  // Generalized, airport-scoped endpoint (Multi-airport Phase 4).
+  router.get("/:airportId/merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, req.params.airportId));
+  // Legacy PEK alias (kept for existing route_site links / QR codes).
+  router.get("/pek-merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, "PEK"));
 
   router.get("/route-site-map-embed", (req: Request, res: Response) => {
     const host    = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();

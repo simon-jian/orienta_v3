@@ -175,7 +175,7 @@ There is **no canonical tenant ↔ airport map** in code yet. Today everything a
 ```
 tenantId "airchina"  →  airport PEK (Dashboard, pax pages, route_site)
 ROUTE_SITE_DEFAULT_TENANT env → "airchina" (server)
-route_site forces __ROUTESITE_HUB__ = 'PEK' (non-PEK query params ignored)
+route_site: hub from ?hub=/?airport= via config-bootstrap.js (PEK default + only bundled config; Phase 4)
 ```
 
 Session JWT carries `tenantId` but **not** `airportId`.
@@ -245,7 +245,7 @@ type AirportDefinition = {
 
 - ✅ `GET /api/config/tenant/:tenantId` → `{ tenant, airport, terminals, defaults }` (Phase 5, `server/routes/config.ts`)
 - ✅ `airportId` in pax session JWT claims (Phase 5, `airportForTenant(tenantId)`)
-- ⬜ Generalize `/api/orienta/pek-merged-video` → `/api/orienta/:airportId/merged-video` (keep PEK alias)
+- ✅ Generalize `/api/orienta/pek-merged-video` → `/api/orienta/:airportId/merged-video` (Phase 4; PEK alias kept, unknown→404, non-PEK→501)
 
 #### `route_site` decoupling (largest coupling)
 
@@ -268,7 +268,7 @@ public/route_site/
 | **1** | `Dashboard.tsx` + `MapView.tsx` resolve airport/tenant via `config/client.ts` (`VITE_DEFAULT_AIRPORT`/`VITE_ORIENTA_TENANT`); POI `terminal` centralized (client → registry `terminalQuery`, server → `DEFAULT_TERMINAL` env); route_site hub already forced PEK. Behavior-preserving (PEK/T3E/airchina) | 1–2 d | Low | done |
 | **2** | Server unified on registry: `fidsService.resolveOutbound(…, airportId)` + `paxSessions` pass `airportForTenant(tenantId)`; `flight.ts` dispatch via `getAirport().poi.mode`; `wsHub` nav gate map + `PassengerRegistry` spawn radius from registry. Behavior-preserving (PEK); guarded by `fidsService.test.ts` | 3–5 d | Med | done |
 | **3** | `PoiService` (airport-aware facade, dispatches by `poi.mode`) with `pekPoiCoords` as the PEK adapter; `gateService` delegates; `MapView`/`PaxAppPage` rewired (drops hardcoded PEK center); `useDashboard` passenger source extracted to `passengerSource`. Guarded by `PoiService.test.ts` | 3–5 d | Med | done |
-| **4** | `route_site/index.html` decomposed: CSS → `route-site.css`, the ~5k-line inline script → `route-site-app.js`, constants → `config/pek.json` loaded by `config-bootstrap.js` (exposes `window.__ROUTESITE_CONFIG__`; app reads tenant/default-gates/terminal/video/polyline/pax-aliases from it with PEK fallbacks). `index.html` is now a 106-line shell. Build-verified + JS syntax-checked; runtime QA pending (needs indoor-map/video/PDR stack). Remaining: split `route-site-app.js` into engine modules; generalize merged-video endpoint; hub still forced PEK | 1–2 wk | High | done* |
+| **4** | `route_site/index.html` decomposed: CSS → `route-site.css`, the ~5k-line inline script → `route-site-app.js`, constants → `config/pek.json` loaded by `config-bootstrap.js` (exposes `window.__ROUTESITE_CONFIG__`; app reads tenant/default-gates/terminal/video/polyline/pax-aliases from it with PEK fallbacks). `index.html` is now a 106-line shell. Merged-video endpoint generalized to `/api/orienta/:airportId/merged-video` (client uses `config.video.mergeEndpoint`); hub no longer hard-forced to PEK (`config-bootstrap.js` honors `?hub=`/`?airport=` and loads `config/<hub>.json`, PEK stays default + only bundled assets). Build-verified + JS syntax-checked + endpoint smoke-tested; runtime QA pending (needs indoor-map/video/PDR stack). Optional remaining (code-org only, no multi-airport benefit): split `route-site-app.js` into engine modules | 1–2 wk | High | done* |
 | **5** | `GET /api/config/tenant/:tenantId` (`server/routes/config.ts`) returns tenant/airport/terminals/defaults (no demo data); pax session JWT now carries `airportId` (`airportForTenant(tenantId)`) + surfaced in `/api/pax/session`. Onboarding: see "Adding airport #3" | 2–3 d | Low | done |
 
 ### Adding airport #3 (target state — e.g. LHR)
