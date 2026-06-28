@@ -16,10 +16,10 @@ export function startMaintenanceJobs(input: {
   chatRepo: ChatRepository;
   metricsRepo?: MetricsRepository;
 }): () => void {
-  const run = () => {
+  const run = async () => {
     const removedPassengers = input.registry.deleteStaleTemporaryPassengers(TEMP_PASSENGER_MAX_AGE_MS);
     const removedChats = input.chatRepo.pruneOlderThan(CHAT_RETENTION_MS);
-    const removedMetrics = input.metricsRepo?.pruneOlderThan(METRICS_RETENTION_MS) ?? 0;
+    const removedMetrics = input.metricsRepo ? await input.metricsRepo.pruneOlderThan(METRICS_RETENTION_MS) : 0;
     if (removedPassengers > 0 || removedChats > 0 || removedMetrics > 0) {
       logger.info("maintenance_pruned", {
         passengers: removedPassengers,
@@ -29,7 +29,7 @@ export function startMaintenanceJobs(input: {
     }
   };
 
-  run();
-  const timer = setInterval(run, CLEANUP_INTERVAL_MS);
+  void run();
+  const timer = setInterval(() => { void run(); }, CLEANUP_INTERVAL_MS);
   return () => clearInterval(timer);
 }

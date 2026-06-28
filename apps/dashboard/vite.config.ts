@@ -47,5 +47,10 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.ts", "server/**/*.test.ts"],
+    // config.ts crash-fails on missing required vars; provide dummies for unit tests.
+    env: {
+      JWT_SECRET: "test-secret",
+      ADMIN_CREDENTIALS: "admin@test.com:test",
+    },
   },
 });

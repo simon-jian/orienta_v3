@@ -1,9 +1,13 @@
 /**
- * Admin audit log — records security-sensitive operator actions.
+ * Admin/passenger audit log — records security-sensitive actions (P1-4),
+ * backed by the async SqlDb (P2-1).
+ *
+ * `record()` is fire-and-forget friendly: it never rejects, so callers may
+ * `void auditLog.record(...)` without awaiting.
  */
-import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
+import type { SqlDb } from "./../db/sqlDb";
+import { autoIncrementPk } from "./../db/sqlDb";
+import { logger } from "./logger";
 
 export type AuditEvent = {
   actorEmail: string;
@@ -14,43 +18,44 @@ export type AuditEvent = {
 };
 
 export class AuditLog {
-  private readonly db: Database.Database;
+  constructor(private readonly db: SqlDb) {}
 
-  constructor(dbPath: string) {
-    const dir = path.dirname(dbPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
+  async init(): Promise<void> {
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS admin_audit_log (
-        id            INTEGER PRIMARY KEY AUTOINCREMENT,
+        id            ${autoIncrementPk(this.db.dialect)},
         actor_email   TEXT NOT NULL,
         action        TEXT NOT NULL,
         tenant_id     TEXT,
         passenger_id  TEXT,
         detail        TEXT,
-        created_at    INTEGER NOT NULL
+        created_at    BIGINT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_admin_audit_created
-        ON admin_audit_log (created_at DESC);
     `);
+    await this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log (created_at DESC);",
+    );
   }
 
-  record(event: AuditEvent): void {
-    this.db.prepare(`
-      INSERT INTO admin_audit_log (actor_email, action, tenant_id, passenger_id, detail, created_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(
-      event.actorEmail,
-      event.action,
-      event.tenantId ?? null,
-      event.passengerId ?? null,
-      event.detail ?? null,
-      Date.now(),
-    );
+  async record(event: AuditEvent): Promise<void> {
+    try {
+      await this.db.run(
+        `INSERT INTO admin_audit_log (actor_email, action, tenant_id, passenger_id, detail, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          event.actorEmail,
+          event.action,
+          event.tenantId ?? null,
+          event.passengerId ?? null,
+          event.detail ?? null,
+          Date.now(),
+        ],
+      );
+    } catch (err) {
+      logger.error("audit_write_failed", {
+        action: event.action,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 }

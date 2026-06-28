@@ -1,13 +1,11 @@
 /**
- * Persists client metrics events to SQLite (P1-5).
+ * Persists client metrics events (P1-5), backed by the async SqlDb (P2-1).
  *
  * The browser SDK (public/orienta-metrics.js) batches events and POSTs them to
- * /api/metrics/events. This store gives that endpoint a real sink; rows are
- * pruned by the maintenance job (see jobs/maintenance.ts).
+ * /api/metrics/events. Rows are pruned by the maintenance job.
  */
-import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
+import type { SqlDb } from "../db/sqlDb";
+import { autoIncrementPk } from "../db/sqlDb";
 
 export type MetricEvent = {
   name: string;
@@ -23,67 +21,59 @@ const MAX_NAME_LEN = 120;
 const MAX_PROPS_BYTES = 2000;
 
 export class MetricsRepository {
-  private readonly db: Database.Database;
+  constructor(private readonly db: SqlDb) {}
 
-  constructor(dbPath: string) {
-    const dir = path.dirname(dbPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
+  async init(): Promise<void> {
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS metrics_events (
-        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        id          ${autoIncrementPk(this.db.dialect)},
         name        TEXT NOT NULL,
         role        TEXT,
         category    TEXT,
         duration_ms REAL,
         ok          INTEGER,
         props       TEXT,
-        created_at  INTEGER NOT NULL
+        created_at  BIGINT NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_metrics_created ON metrics_events (created_at DESC);
     `);
+    await this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_metrics_created ON metrics_events (created_at DESC);",
+    );
   }
 
-  /** Insert a validated batch in one transaction. Returns rows written. */
-  insertBatch(events: MetricEvent[]): number {
-    const stmt = this.db.prepare(`
-      INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at)
-      VALUES (@name, @role, @category, @duration_ms, @ok, @props, @created_at)
-    `);
+  /** Insert a validated batch. Returns rows written. */
+  async insertBatch(events: MetricEvent[]): Promise<number> {
     const now = Date.now();
-    const insertMany = this.db.transaction((rows: MetricEvent[]) => {
-      let n = 0;
-      for (const ev of rows) {
-        const name = String(ev?.name || "").slice(0, MAX_NAME_LEN);
-        if (!name) continue;
-        let props: string | null = null;
-        if (ev.props && typeof ev.props === "object") {
-          const s = JSON.stringify(ev.props);
-          props = s.length > MAX_PROPS_BYTES ? s.slice(0, MAX_PROPS_BYTES) : s;
-        }
-        stmt.run({
-          name,
-          role: ev.role ? String(ev.role).slice(0, 40) : null,
-          category: ev.category ? String(ev.category).slice(0, 40) : null,
-          duration_ms: typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) ? ev.durationMs : null,
-          ok: typeof ev.ok === "boolean" ? (ev.ok ? 1 : 0) : null,
-          props,
-          created_at: typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : now,
-        });
-        n += 1;
+    let written = 0;
+    for (const ev of events) {
+      const name = String(ev?.name || "").slice(0, MAX_NAME_LEN);
+      if (!name) continue;
+      let props: string | null = null;
+      if (ev.props && typeof ev.props === "object") {
+        const s = JSON.stringify(ev.props);
+        props = s.length > MAX_PROPS_BYTES ? s.slice(0, MAX_PROPS_BYTES) : s;
       }
-      return n;
-    });
-    return insertMany(events);
+      await this.db.run(
+        `INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          name,
+          ev.role ? String(ev.role).slice(0, 40) : null,
+          ev.category ? String(ev.category).slice(0, 40) : null,
+          typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) ? ev.durationMs : null,
+          typeof ev.ok === "boolean" ? (ev.ok ? 1 : 0) : null,
+          props,
+          typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : now,
+        ],
+      );
+      written += 1;
+    }
+    return written;
   }
 
-  pruneOlderThan(maxAgeMs: number): number {
+  async pruneOlderThan(maxAgeMs: number): Promise<number> {
     const cutoff = Date.now() - maxAgeMs;
-    return this.db.prepare("DELETE FROM metrics_events WHERE created_at < ?").run(cutoff).changes;
+    const r = await this.db.run("DELETE FROM metrics_events WHERE created_at < ?", [cutoff]);
+    return r.changes;
   }
 }

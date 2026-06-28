@@ -112,13 +112,14 @@ export function registerPaxSessionRoutes(
   accountStore: PaxAccountStore,
   auditLog?: AuditLog,
 ): void {
-  const auditSession = (tenantId: string, passengerId: string, accountType: AccountType, plan: PaxPlan) =>
-    auditLog?.record({
+  const auditSession = (tenantId: string, passengerId: string, accountType: AccountType, plan: PaxPlan) => {
+    void auditLog?.record({
       actorEmail: `pax:${passengerId}`,
       action: "pax_session_create",
       tenantId, passengerId,
       detail: `${accountType}/${plan}`,
     });
+  };
 
   router.post("/scan", async (req: Request, res: Response) => {
     try {
@@ -216,7 +217,7 @@ export function registerPaxSessionRoutes(
     if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
     if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
 
-    const account = accountStore.verifyLogin(email, password);
+    const account = await accountStore.verifyLogin(email, password);
     if (!account) {
       return res.status(401).json({ ok: false, error: "invalid_credentials" });
     }
@@ -247,30 +248,30 @@ export function registerPaxSessionRoutes(
   });
 
   // ── Admin: premium account management (P0-13) — beyond the env seed ──────────
-  router.get("/accounts", requireRole("admin", "ops"), (_req: Request, res: Response) => {
-    res.json({ ok: true, accounts: accountStore.listAccounts() });
+  router.get("/accounts", requireRole("admin", "ops"), async (_req: Request, res: Response) => {
+    res.json({ ok: true, accounts: await accountStore.listAccounts() });
   });
 
-  router.post("/accounts", requireRole("admin"), (req: Request, res: Response) => {
+  router.post("/accounts", requireRole("admin"), async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
-    const account = accountStore.upsertAccount({
+    const account = await accountStore.upsertAccount({
       email,
       password,
       tenantId: String(body.tenantId || body.tenant_id || "").trim() || undefined,
       displayName: String(body.displayName || body.display_name || "").trim() || undefined,
     });
-    auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_upsert", detail: email });
+    void auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_upsert", detail: email });
     return res.status(201).json({ ok: true, account });
   });
 
-  router.delete("/accounts/:email", requireRole("admin"), (req: Request, res: Response) => {
+  router.delete("/accounts/:email", requireRole("admin"), async (req: Request, res: Response) => {
     const email = String(req.params.email || "");
-    const deleted = accountStore.deleteAccount(email);
+    const deleted = await accountStore.deleteAccount(email);
     if (!deleted) return res.status(404).json({ ok: false, error: "account_not_found" });
-    auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_delete", detail: email });
+    void auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_delete", detail: email });
     return res.json({ ok: true });
   });
 

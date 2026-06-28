@@ -10,7 +10,7 @@ import type { MetricsRepository, MetricEvent } from "../lib/MetricsRepository";
 const MAX_EVENTS_PER_BATCH = 50;
 
 export function registerMetricsRoutes(router: Router, repo: MetricsRepository): void {
-  router.post("/events", (req: Request, res: Response) => {
+  router.post("/events", async (req: Request, res: Response) => {
     // sendBeacon may deliver as text; express.json handles the common case.
     let body: unknown = req.body;
     if (typeof body === "string") {
@@ -21,7 +21,7 @@ export function registerMetricsRoutes(router: Router, repo: MetricsRepository): 
     if (events.length > MAX_EVENTS_PER_BATCH) {
       return res.status(413).json({ ok: false, error: "batch_too_large" });
     }
-    const written = repo.insertBatch(events as MetricEvent[]);
+    const written = await repo.insertBatch(events as MetricEvent[]);
     return res.status(202).json({ ok: true, accepted: written });
   });
 }

@@ -102,7 +102,7 @@ export function registerPassengerRoutes(
       source: "manual",
     });
 
-    auditLog?.record({
+    void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_create",
       tenantId, passengerId: id,
@@ -126,7 +126,7 @@ export function registerPassengerRoutes(
     const updated = registry.update(tenantId, passengerId, patch);
     if (!updated) return res.status(404).json({ ok: false, error: "passenger_not_found" });
 
-    auditLog?.record({
+    void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_update",
       tenantId, passengerId,
@@ -141,7 +141,7 @@ export function registerPassengerRoutes(
     const passengerId = req.params.id;
     const deleted = registry.delete(tenantId, passengerId);
     if (!deleted) return res.status(404).json({ ok: false, error: "passenger_not_found" });
-    auditLog?.record({
+    void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_delete",
       tenantId, passengerId,

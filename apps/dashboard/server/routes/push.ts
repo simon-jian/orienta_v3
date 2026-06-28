@@ -38,7 +38,7 @@ async function sendAwayPush(
   const vapid = getVapid();
   if (!vapid) return;
   const key = HubStore.key(tenantId, passengerId);
-  const subs = pushSubs.list(key);
+  const subs = await pushSubs.list(key);
   if (!subs.length) return;
 
   const payload = JSON.stringify({
@@ -56,7 +56,7 @@ async function sendAwayPush(
       const code = typeof err.statusCode === "number" ? err.statusCode
         : typeof err.status === "number" ? err.status : 0;
       // Drop endpoints the push service has permanently rejected.
-      if (code === 404 || code === 410) pushSubs.removeEndpoint(key, sub.endpoint);
+      if (code === 404 || code === 410) await pushSubs.removeEndpoint(key, sub.endpoint);
     }
   }
 }
@@ -118,7 +118,7 @@ export function registerPushRoutes(
     const subscription = body.subscription as PushSub | undefined;
     if (!subscription?.endpoint) return res.status(400).json({ ok: false, error: "missing_subscription" });
     const key = HubStore.key(identity.tenantId, identity.passengerId);
-    pushSubs.upsert(key, subscription);
+    await pushSubs.upsert(key, subscription);
     return res.json({ ok: true });
   });
 
@@ -165,7 +165,7 @@ export function registerPushRoutes(
     const gateRef = typeof body.gateRef === "string" ? body.gateRef : undefined;
     const msg = handlePaxOutboundChat(store, identity.tenantId, identity.passengerId, textBody, kind, gateRef);
     if (!msg) return res.status(503).json({ ok: false, error: "chat_hub_unavailable" });
-    auditLog?.record({
+    void auditLog?.record({
       actorEmail: `pax:${identity.passengerId}`,
       action: "pax_chat_send",
       tenantId: identity.tenantId, passengerId: identity.passengerId,

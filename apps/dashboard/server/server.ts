@@ -38,6 +38,7 @@ import { requestLog } from "./middleware/requestLog";
 import { logger } from "./lib/logger";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
+import { getSqlDb } from "./db/sqlDb";
 import {
   applyAirportMapNoCacheHeaders,
   applyIframeSafeHtmlHeaders,
@@ -49,13 +50,15 @@ import {
 } from "./indoorMapProxyUtils";
 import { loadPoiCache } from "./lib/poiCache";
 
-// ─── Shared hub store + SQLite services ──────────────────────────────────────
-const chatRepo = new ChatRepository(DB_PATH);
+// ─── Shared hub store + persistence services ─────────────────────────────────
+// SqlDb is Postgres when DATABASE_URL is set, else SQLite (P2-1).
+const sqlDb = getSqlDb();
+const chatRepo = new ChatRepository(DB_PATH); // stage-3 migration target (still SQLite)
 const store = new HubStore(chatRepo);
-const accountStore = new PaxAccountStore(DB_PATH);
-const auditLog = new AuditLog(DB_PATH);
-const metricsRepo = new MetricsRepository(DB_PATH);
-const pushSubStore = new PushSubscriptionStore(DB_PATH);
+const accountStore = new PaxAccountStore(sqlDb);
+const auditLog = new AuditLog(sqlDb);
+const metricsRepo = new MetricsRepository(sqlDb);
+const pushSubStore = new PushSubscriptionStore(sqlDb);
 
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(DB_PATH);
@@ -313,9 +316,21 @@ if (pdrProxy) {
 }
 
 const wss = attachWsHub(server, store, registry);
-startMaintenanceJobs({ registry, chatRepo, metricsRepo });
 
-loadPoiCache().then(() => {
+async function bootstrap(): Promise<void> {
+  // Run SqlDb migrations (creates tables in SQLite or Postgres) before serving.
+  await Promise.all([
+    metricsRepo.init(),
+    pushSubStore.init(),
+    auditLog.init(),
+    accountStore.init(),
+  ]);
+  logger.info("db_ready", { dialect: sqlDb.dialect });
+
+  // Start background pruning only after tables exist.
+  startMaintenanceJobs({ registry, chatRepo, metricsRepo });
+
+  await loadPoiCache();
   server.listen(PORT, "0.0.0.0", () => {
     logger.info("server_listening", {
       url: `http://0.0.0.0:${PORT}`,
@@ -323,6 +338,11 @@ loadPoiCache().then(() => {
       pax: `http://localhost:${PORT}/pax?pid=TX1&direct=1`,
     });
   });
+}
+
+void bootstrap().catch((err) => {
+  logger.error("bootstrap_failed", { error: err instanceof Error ? err.message : String(err) });
+  process.exit(1);
 });
 
 // ─── Graceful shutdown (P1-6) ─────────────────────────────────────────────────
@@ -350,8 +370,10 @@ function shutdown(signal: string): void {
       logger.error("shutdown_http_close_error", { error: String(err) });
       process.exit(1);
     }
-    logger.info("shutdown_complete", { signal });
-    process.exit(0);
+    void sqlDb.close().finally(() => {
+      logger.info("shutdown_complete", { signal });
+      process.exit(0);
+    });
   });
 }
 

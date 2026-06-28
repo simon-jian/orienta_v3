@@ -1,13 +1,10 @@
 /**
- * SQLite-backed Web Push subscriptions (P2-2).
+ * Web Push subscriptions (P2-2), backed by the async SqlDb (P2-1).
  *
- * Previously subscriptions lived in an in-memory Map and were lost on every
- * restart, silently disabling away-notifications. Persisting them lets pushes
- * survive restarts and (eventually) work across instances sharing the DB file.
+ * Persisting subscriptions lets pushes survive restarts and work across
+ * instances sharing the same database.
  */
-import Database from "better-sqlite3";
-import { existsSync, mkdirSync } from "node:fs";
-import path from "node:path";
+import type { SqlDb } from "../db/sqlDb";
 
 export type PushSub = {
   endpoint: string;
@@ -15,55 +12,53 @@ export type PushSub = {
   keys?: { p256dh?: string; auth?: string };
 };
 
+type Row = { endpoint: string; p256dh: string | null; auth: string | null; expiration: number | null };
+
 export class PushSubscriptionStore {
-  private readonly db: Database.Database;
+  constructor(private readonly db: SqlDb) {}
 
-  constructor(dbPath: string) {
-    const dir = path.dirname(dbPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.migrate();
-  }
-
-  private migrate(): void {
-    this.db.exec(`
+  async init(): Promise<void> {
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS push_subscriptions (
         sub_key     TEXT NOT NULL,
         endpoint    TEXT NOT NULL,
         p256dh      TEXT,
         auth        TEXT,
-        expiration  INTEGER,
-        created_at  INTEGER NOT NULL,
+        expiration  BIGINT,
+        created_at  BIGINT NOT NULL,
         PRIMARY KEY (sub_key, endpoint)
       );
-      CREATE INDEX IF NOT EXISTS idx_push_sub_key ON push_subscriptions (sub_key);
     `);
+    await this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_push_sub_key ON push_subscriptions (sub_key);",
+    );
   }
 
   /** Insert or refresh a subscription for a passenger key (tenant::pid). */
-  upsert(key: string, sub: PushSub): void {
-    this.db.prepare(`
-      INSERT INTO push_subscriptions (sub_key, endpoint, p256dh, auth, expiration, created_at)
-      VALUES (@sub_key, @endpoint, @p256dh, @auth, @expiration, @created_at)
-      ON CONFLICT(sub_key, endpoint) DO UPDATE SET
-        p256dh = excluded.p256dh,
-        auth = excluded.auth,
-        expiration = excluded.expiration
-    `).run({
-      sub_key: key,
-      endpoint: sub.endpoint,
-      p256dh: sub.keys?.p256dh ?? null,
-      auth: sub.keys?.auth ?? null,
-      expiration: typeof sub.expirationTime === "number" ? sub.expirationTime : null,
-      created_at: Date.now(),
-    });
+  async upsert(key: string, sub: PushSub): Promise<void> {
+    await this.db.run(
+      `INSERT INTO push_subscriptions (sub_key, endpoint, p256dh, auth, expiration, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (sub_key, endpoint) DO UPDATE SET
+         p256dh = excluded.p256dh,
+         auth = excluded.auth,
+         expiration = excluded.expiration`,
+      [
+        key,
+        sub.endpoint,
+        sub.keys?.p256dh ?? null,
+        sub.keys?.auth ?? null,
+        typeof sub.expirationTime === "number" ? sub.expirationTime : null,
+        Date.now(),
+      ],
+    );
   }
 
-  list(key: string): PushSub[] {
-    const rows = this.db.prepare(
+  async list(key: string): Promise<PushSub[]> {
+    const rows = await this.db.all<Row>(
       "SELECT endpoint, p256dh, auth, expiration FROM push_subscriptions WHERE sub_key = ?",
-    ).all(key) as Array<{ endpoint: string; p256dh: string | null; auth: string | null; expiration: number | null }>;
+      [key],
+    );
     return rows.map((r) => ({
       endpoint: r.endpoint,
       expirationTime: r.expiration,
@@ -72,7 +67,10 @@ export class PushSubscriptionStore {
   }
 
   /** Remove a single dead endpoint (e.g. after a 404/410 from the push service). */
-  removeEndpoint(key: string, endpoint: string): void {
-    this.db.prepare("DELETE FROM push_subscriptions WHERE sub_key = ? AND endpoint = ?").run(key, endpoint);
+  async removeEndpoint(key: string, endpoint: string): Promise<void> {
+    await this.db.run(
+      "DELETE FROM push_subscriptions WHERE sub_key = ? AND endpoint = ?",
+      [key, endpoint],
+    );
   }
 }
