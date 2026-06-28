@@ -19,7 +19,8 @@ import {
 } from "./presence";
 import { handlePaxOutboundChat } from "./chat";
 import { storeAndBroadcastTrajectory } from "./trajectory";
-import { PEK_FLIGHT_GATE_MAP } from "../../src/data/airports/pek";
+import { airportForTenant } from "../../src/config/tenants/registry";
+import { getAirportOrDefault } from "../../src/config/airports/registry";
 import type { ChatKind, MsgRecord, MsgStatus } from "../../src/types/types";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { resolvePaxWsHello } from "../passengers/paxWsIdentity";
@@ -331,10 +332,11 @@ export function attachWsHub(
         let fromGate = "—";
         let toGate = "—";
         if (kind === "transfer") {
+          const gateMap = getAirportOrDefault(airportForTenant(tenantId)).demo?.flightGateMap ?? {};
           const a = String(msg.arrivalFlight || "").toUpperCase().trim();
           const d = String(msg.departureFlight || "").toUpperCase().trim();
-          fromGate = PEK_FLIGHT_GATE_MAP[a] || PEK_FLIGHT_GATE_MAP[a.replace(/\s+/g, "")] || "—";
-          toGate   = PEK_FLIGHT_GATE_MAP[d] || PEK_FLIGHT_GATE_MAP[d.replace(/\s+/g, "")] || "—";
+          fromGate = gateMap[a] || gateMap[a.replace(/\s+/g, "")] || "—";
+          toGate   = gateMap[d] || gateMap[d.replace(/\s+/g, "")] || "—";
         } else {
           const q = String(msg.query || "");
           const m = q.toUpperCase().match(/\b([A-Z]\d{1,2})\b/g) || [];

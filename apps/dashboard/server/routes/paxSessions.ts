@@ -7,6 +7,7 @@ import type { PaxAccountStore } from "../passengers/PaxAccountStore";
 import { parseBcbp } from "../passengers/bcbpParser";
 import { bearerTokenFromHeader, PAX_SESSION_AUDIENCE, verifyPaxSessionToken } from "../passengers/paxSessionToken";
 import { resolveOutbound as resolveOutboundFlight } from "../services/fidsService";
+import { airportForTenant } from "../../src/config/tenants/registry";
 import { requireRole, adminEmailFromRequest } from "./auth";
 import type { AuditLog } from "../lib/auditLog";
 import type { PaxPlan } from "../../src/types/types";
@@ -135,6 +136,7 @@ export function registerPaxSessionRoutes(
         String(body.departureFlight || outboundLeg.flightId),
         String(body.gateId || "").trim() || undefined,
         outboundLeg.toAirport,
+        airportForTenant(tenantId),
       );
       const passengerId = passengerIdFromStableParts("TMP", [
         tenantId,
@@ -178,7 +180,7 @@ export function registerPaxSessionRoutes(
     if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
     if (!arrivalFlight) return res.status(400).json({ ok: false, error: "missing_arrival_flight" });
 
-    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined);
+    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("BASIC", [
       tenantId,
       arrivalFlight,
@@ -222,7 +224,7 @@ export function registerPaxSessionRoutes(
       return res.status(401).json({ ok: false, error: "invalid_credentials" });
     }
 
-    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined);
+    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
     const passenger = await registry.getOrCreate({
       id: passengerId,

@@ -8,27 +8,32 @@ import type { Router, Request, Response } from "express";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
 import { type FlightResult, normalizeFlight, fetchFlightAware } from "../services/flightAware";
 import { requestMerge, type MergeSpec } from "../services/videoMerge";
+import { getAirport } from "../../src/config/airports/registry";
 
-// ─── Airport data (PEK / ZBAA only) ───────────────────────────────────────────
+// ─── Airport data (registry-driven; PEK is the only indoor_api hub today) ──────
 
-function getPekCenter2(): [number, number] {
+/**
+ * Whether an airport code (id / IATA / ICAO, e.g. "PEK" or "ZBAA") resolves to a
+ * hub whose gate coordinates are served from the POI cache. Today only PEK, but
+ * this no longer hardcodes the airport string (Multi-airport Phase 2).
+ */
+function isPoiCacheAirport(airport: string): boolean {
+  const def = getAirport(airport);
+  return !!def && def.poi.mode === "indoor_api";
+}
+
+function getAirportCenter(airport: string): [number, number] | undefined {
+  if (!isPoiCacheAirport(airport)) return undefined;
   const c = getPekCenter();
   return [c.lat, c.lng];
 }
 
-function getAirportCenter(airport: string): [number, number] | undefined {
-  if (airport === "PEK" || airport === "ZBAA") return getPekCenter2();
-  return undefined;
-}
-
 function getAirportGates(airport: string): Record<string, [number, number]> | undefined {
-  if (airport === "PEK" || airport === "ZBAA") return getAllGateCoords();
-  return undefined;
+  return isPoiCacheAirport(airport) ? getAllGateCoords() : undefined;
 }
 
 function getAirportGateCoord(airport: string, gate: string): [number, number] | undefined {
-  if (airport === "PEK" || airport === "ZBAA") return getGateCoord(gate) ?? undefined;
-  return undefined;
+  return isPoiCacheAirport(airport) ? (getGateCoord(gate) ?? undefined) : undefined;
 }
 
 // ─── FlightAware (client extracted to ../services/flightAware) ─────────────────

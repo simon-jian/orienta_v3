@@ -12,6 +12,10 @@
  */
 import type { SqlDb } from "../db/sqlDb";
 import { getGateCoord, getPekCenter, getPekBbox } from "../lib/poiCache";
+import { airportForTenant } from "../../src/config/tenants/registry";
+import { getAirportOrDefault } from "../../src/config/airports/registry";
+
+const DEFAULT_SPAWN_RADIUS_M = 400;
 
 function randomNearby(center: { lat: number; lng: number }, maxM: number) {
   const dLat = (maxM / 111000) * (Math.random() * 2 - 1);
@@ -204,7 +208,8 @@ export class PassengerRegistry {
       ? { lat: gateEntry[0], lng: gateEntry[1] }
       : getPekCenter();
     const bbox = getPekBbox();
-    const location = clampToBbox(randomNearby(gateCoord, 400), bbox);
+    const spawnRadiusM = getAirportOrDefault(airportForTenant(input.tenantId)).poi.spawnRadiusM ?? DEFAULT_SPAWN_RADIUS_M;
+    const location = clampToBbox(randomNearby(gateCoord, spawnRadiusM), bbox);
 
     const now = Date.now();
     await this.db.run(
