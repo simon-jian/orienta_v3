@@ -3,6 +3,8 @@ import { JWT_SECRET } from "../config";
 
 export type PaxSessionClaims = JWTPayload & {
   tenantId: string;
+  /** Hub the passenger belongs to (Multi-airport Phase 5). Optional for tokens issued before it was added. */
+  airportId?: string;
   accountType: "temporary" | "registered";
   plan: "premium" | "free";
   capabilities: string[];

@@ -38,6 +38,7 @@ import { requestLog } from "./middleware/requestLog";
 import { logger } from "./lib/logger";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
+import { registerConfigRoutes } from "./routes/config";
 import { getSqlDb } from "./db/sqlDb";
 import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
 import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
@@ -113,6 +114,11 @@ app.use(cookieParser());
 const metricsRouter = express.Router();
 registerMetricsRoutes(metricsRouter, metricsRepo);
 app.use("/api/metrics", metricsRateLimit, metricsRouter);
+
+// ─── Public tenant/airport config (P5 multi-airport) ──────────────────────────
+const configRouter = express.Router();
+registerConfigRoutes(configRouter);
+app.use("/api/config", configRouter);
 
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 const authRouter = express.Router();

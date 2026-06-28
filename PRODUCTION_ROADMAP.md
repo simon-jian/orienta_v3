@@ -243,9 +243,9 @@ type AirportDefinition = {
 
 #### API additions
 
-- `GET /api/config/tenant/:tenantId` → `{ tenant, airport, terminals, defaults }`
-- Optional: include `airportId` in pax session JWT claims
-- Generalize `/api/orienta/pek-merged-video` → `/api/orienta/:airportId/merged-video` (keep PEK alias)
+- ✅ `GET /api/config/tenant/:tenantId` → `{ tenant, airport, terminals, defaults }` (Phase 5, `server/routes/config.ts`)
+- ✅ `airportId` in pax session JWT claims (Phase 5, `airportForTenant(tenantId)`)
+- ⬜ Generalize `/api/orienta/pek-merged-video` → `/api/orienta/:airportId/merged-video` (keep PEK alias)
 
 #### `route_site` decoupling (largest coupling)
 
@@ -267,7 +267,7 @@ public/route_site/
 | **2** | Server unified on registry: `fidsService.resolveOutbound(…, airportId)` + `paxSessions` pass `airportForTenant(tenantId)`; `flight.ts` dispatch via `getAirport().poi.mode`; `wsHub` nav gate map + `PassengerRegistry` spawn radius from registry. Behavior-preserving (PEK); guarded by `fidsService.test.ts` | 3–5 d | Med | done |
 | **3** | `PoiService` (airport-aware facade, dispatches by `poi.mode`) with `pekPoiCoords` as the PEK adapter; `gateService` delegates; `MapView`/`PaxAppPage` rewired (drops hardcoded PEK center); `useDashboard` passenger source extracted to `passengerSource`. Guarded by `PoiService.test.ts` | 3–5 d | Med | done |
 | **4** | Split `route_site/index.html` into config JSON + engines | 1–2 wk | High | todo |
-| **5** | Onboarding doc + `GET /api/config/tenant/:id`; session JWT `airportId` | 2–3 d | Low | todo |
+| **5** | `GET /api/config/tenant/:tenantId` (`server/routes/config.ts`) returns tenant/airport/terminals/defaults (no demo data); pax session JWT now carries `airportId` (`airportForTenant(tenantId)`) + surfaced in `/api/pax/session`. Onboarding: see "Adding airport #3" | 2–3 d | Low | done |
 
 ### Adding airport #3 (target state — e.g. LHR)
 

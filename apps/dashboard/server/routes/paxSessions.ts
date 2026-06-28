@@ -58,6 +58,7 @@ function passengerIdFromStableParts(prefix: string, parts: string[]): string {
 async function signPaxSession(input: {
   passengerId: string;
   tenantId: string;
+  airportId: string;
   accountType: AccountType;
   plan: PaxPlan;
   capabilities: PaxCapability[];
@@ -68,6 +69,7 @@ async function signPaxSession(input: {
   return new SignJWT({
     sid: sessionId,
     tenantId: input.tenantId,
+    airportId: input.airportId,
     accountType: input.accountType,
     plan: input.plan,
     capabilities: input.capabilities,
@@ -92,6 +94,7 @@ async function createSessionResponse(input: {
   const token = await signPaxSession({
     passengerId: input.passenger.id,
     tenantId: input.tenantId,
+    airportId: airportForTenant(input.tenantId),
     accountType: input.accountType,
     plan: input.plan,
     capabilities,
@@ -296,6 +299,7 @@ export function registerPaxSessionRoutes(
         accountType: payload.accountType,
         plan: payload.plan,
         capabilities: payload.capabilities,
+        airportId: payload.airportId ?? airportForTenant(tenantId),
         expiresAt: typeof payload.exp === "number" ? payload.exp * 1000 : null,
       },
     });
