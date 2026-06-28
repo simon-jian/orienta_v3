@@ -143,7 +143,7 @@ export function registerPaxSessionRoutes(
         outboundLeg.julianDate,
         outboundLeg.sequenceNumber,
       ]);
-      const passenger = registry.getOrCreate({
+      const passenger = await registry.getOrCreate({
         id: passengerId,
         tenantId,
         name: parsed.passengerName || String(body.name || "").trim() || "Unknown",
@@ -185,7 +185,7 @@ export function registerPaxSessionRoutes(
       departureFlight,
       String(body.name || "").trim(),
     ]);
-    const passenger = registry.getOrCreate({
+    const passenger = await registry.getOrCreate({
       id: passengerId,
       tenantId,
       name: String(body.name || "").trim() || "Guest",
@@ -224,7 +224,7 @@ export function registerPaxSessionRoutes(
 
     const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined);
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
-    const passenger = registry.getOrCreate({
+    const passenger = await registry.getOrCreate({
       id: passengerId,
       tenantId,
       name: String(body.name || account.displayName || "").trim() || "Premium Passenger",
@@ -284,7 +284,7 @@ export function registerPaxSessionRoutes(
 
     const tenantId = String(payload.tenantId || "");
     const passengerId = String(payload.sub || "");
-    const passenger = tenantId && passengerId ? registry.get(tenantId, passengerId) : null;
+    const passenger = tenantId && passengerId ? await registry.get(tenantId, passengerId) : null;
     if (!passenger) return res.status(404).json({ ok: false, error: "passenger_not_found" });
     return res.json({
       ok: true,

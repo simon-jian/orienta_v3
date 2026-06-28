@@ -168,7 +168,7 @@ export function attachWsHub(
               const flightId = String(msg.flightId || msg.dep || msg.flight || "").trim();
               const gateId   = String(msg.gateId   || msg.gateTo || "").trim();
               if (flightId && gateId) {
-                registry.getOrCreate({
+                await registry.getOrCreate({
                   id: passengerId, tenantId,
                   name:            String(msg.name || msg.displayName || "").trim() || undefined,
                   locale:          String(msg.locale || "").trim() || undefined,
@@ -182,7 +182,7 @@ export function attachWsHub(
                   source: "qr_scan",
                 });
               }
-              registry.markOnline(tenantId, passengerId);
+              await registry.markOnline(tenantId, passengerId);
             }
 
             const set = store.paxSockets.get(key) || new Set<WebSocket>();
@@ -230,7 +230,7 @@ export function attachWsHub(
             }
 
             // Send chat history (last 20)
-            const hist = store.getChatHistory(tenantId, passengerId).slice(-20);
+            const hist = (await store.ensureChatHistory(tenantId, passengerId)).slice(-20);
             wsSend(ws, { type: "chat_history", passengerId, messages: hist });
           })();
           return;
@@ -399,8 +399,11 @@ export function attachWsHub(
             ? passengerId
             : String(msg.passengerId ?? "").trim();
         if (!pid) return;
-        const hist = store.getChatHistory(tenantId, pid).slice(-20);
-        wsSend(ws, { type: "chat_history", passengerId: pid, messages: hist });
+        const tid = tenantId;
+        void (async () => {
+          const hist = (await store.ensureChatHistory(tid, pid)).slice(-20);
+          wsSend(ws, { type: "chat_history", passengerId: pid, messages: hist });
+        })();
         return;
       }
     });
@@ -424,7 +427,7 @@ export function attachWsHub(
         const still = store.paxSockets.get(key);
         if (!still || still.size === 0) {
           schedulePaxOffline(store, tenantId, passengerId);
-          registry?.markOffline(tenantId, passengerId);
+          void registry?.markOffline(tenantId, passengerId);
         }
       }
     });

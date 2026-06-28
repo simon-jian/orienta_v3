@@ -56,9 +56,9 @@ export function registerPassengerRoutes(
 ): void {
 
   /** GET /api/passengers — list all passengers for a tenant */
-  router.get("/", requireAdmin, (req: Request, res: Response) => {
+  router.get("/", requireAdmin, async (req: Request, res: Response) => {
     const tenantId = tenantFromQuery(req);
-    const records  = registry.list(tenantId);
+    const records  = await registry.list(tenantId);
 
     // Overlay live online state from HubStore (more up-to-date than DB)
     const onlineSet = new Set(store.listOnline(tenantId));
@@ -76,7 +76,7 @@ export function registerPassengerRoutes(
   });
 
   /** POST /api/passengers — pre-register a passenger (admin/ops; not viewer) */
-  router.post("/", requireRole("admin", "ops"), (req: Request, res: Response) => {
+  router.post("/", requireRole("admin", "ops"), async (req: Request, res: Response) => {
     const tenantId = tenantFromQuery(req);
     const body     = req.body || {};
 
@@ -88,7 +88,7 @@ export function registerPassengerRoutes(
     if (!flightId) return res.status(400).json({ ok: false, error: "missing_flightId" });
     if (!gateId)   return res.status(400).json({ ok: false, error: "missing_gateId" });
 
-    const record = registry.getOrCreate({
+    const record = await registry.getOrCreate({
       id, tenantId,
       name:             String(body.name     || "").trim()  || undefined,
       nationality:      String(body.nationality || "").trim() || undefined,
@@ -111,7 +111,7 @@ export function registerPassengerRoutes(
   });
 
   /** PATCH /api/passengers/:id — update extStatus, activity, plan, etc. (admin/ops) */
-  router.patch("/:id", requireRole("admin", "ops"), (req: Request, res: Response) => {
+  router.patch("/:id", requireRole("admin", "ops"), async (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
     const passengerId = req.params.id;
     const body        = req.body || {};
@@ -123,7 +123,7 @@ export function registerPassengerRoutes(
       if (body[key] !== undefined) patch[key] = body[key];
     }
 
-    const updated = registry.update(tenantId, passengerId, patch);
+    const updated = await registry.update(tenantId, passengerId, patch);
     if (!updated) return res.status(404).json({ ok: false, error: "passenger_not_found" });
 
     void auditLog?.record({
@@ -136,10 +136,10 @@ export function registerPassengerRoutes(
   });
 
   /** DELETE /api/passengers/:id — admin only */
-  router.delete("/:id", requireRole("admin"), (req: Request, res: Response) => {
+  router.delete("/:id", requireRole("admin"), async (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
     const passengerId = req.params.id;
-    const deleted = registry.delete(tenantId, passengerId);
+    const deleted = await registry.delete(tenantId, passengerId);
     if (!deleted) return res.status(404).json({ ok: false, error: "passenger_not_found" });
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),

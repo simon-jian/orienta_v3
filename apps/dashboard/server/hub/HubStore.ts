@@ -10,6 +10,7 @@
 import { WebSocket } from "ws";
 import type { ChatMessage, MsgRecord } from "../../src/types/types";
 import type { ChatRepository } from "./ChatRepository";
+import { logger } from "../lib/logger";
 
 const MAX_CHAT_HISTORY = 100;
 
@@ -66,12 +67,21 @@ export class HubStore {
 
   // ── Chat ────────────────────────────────────────────────────────────────────
 
+  /** Synchronous, cache-only read. Call ensureChatHistory() first to warm it. */
   getChatHistory(tenantId: string, passengerId: string): ChatMessage[] {
+    return this.chatHistories.get(HubStore.key(tenantId, passengerId)) ?? [];
+  }
+
+  /**
+   * Load chat history from the repository into the in-memory cache if not
+   * already warm, and return it. Awaited from WS hello / chat_fetch handlers.
+   */
+  async ensureChatHistory(tenantId: string, passengerId: string): Promise<ChatMessage[]> {
     const key = HubStore.key(tenantId, passengerId);
     const cached = this.chatHistories.get(key);
     if (cached?.length) return cached;
     if (!this.chatRepo) return [];
-    const loaded = this.chatRepo.loadRecent(tenantId, passengerId, MAX_CHAT_HISTORY);
+    const loaded = await this.chatRepo.loadRecent(tenantId, passengerId, MAX_CHAT_HISTORY);
     if (loaded.length) this.chatHistories.set(key, loaded);
     return loaded;
   }
@@ -82,7 +92,13 @@ export class HubStore {
     hist.push(msg);
     if (hist.length > MAX_CHAT_HISTORY) hist.splice(0, hist.length - MAX_CHAT_HISTORY);
     this.chatHistories.set(key, hist);
-    this.chatRepo?.append(tenantId, passengerId, msg);
+    // Persist asynchronously; the in-memory cache is authoritative for live reads.
+    void this.chatRepo?.append(tenantId, passengerId, msg).catch((err) => {
+      logger.error("chat_persist_failed", {
+        passengerId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
   }
 
   // ── Trajectories ─────────────────────────────────────────────────────────────

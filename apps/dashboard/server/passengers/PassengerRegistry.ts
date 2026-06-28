@@ -10,9 +10,7 @@
  * (activity, ext_status, location) so operators can override status
  * without disrupting the running simulation.
  */
-import Database from "better-sqlite3";
-import { mkdirSync, existsSync } from "node:fs";
-import path from "node:path";
+import type { SqlDb } from "../db/sqlDb";
 import { getGateCoord, getPekCenter, getPekBbox } from "../lib/poiCache";
 
 function randomNearby(center: { lat: number; lng: number }, maxM: number) {
@@ -73,22 +71,12 @@ export type PassengerPatch = Partial<Pick<
 // ─── PassengerRegistry ────────────────────────────────────────────────────────
 
 export class PassengerRegistry {
-  private db: Database.Database;
-
-  constructor(dbPath: string) {
-    const dir = path.dirname(dbPath);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-
-    this.db = new Database(dbPath);
-    this.db.pragma("journal_mode = WAL");
-    this.db.pragma("foreign_keys = ON");
-    this.migrate();
-  }
+  constructor(private readonly db: SqlDb) {}
 
   // ── Schema ──────────────────────────────────────────────────────────────────
 
-  private migrate(): void {
-    this.db.exec(`
+  async init(): Promise<void> {
+    await this.db.exec(`
       CREATE TABLE IF NOT EXISTS passengers (
         id              TEXT    NOT NULL,
         tenant_id       TEXT    NOT NULL,
@@ -107,11 +95,11 @@ export class PassengerRegistry {
         location_lat    REAL    NOT NULL DEFAULT 0,
         location_lng    REAL    NOT NULL DEFAULT 0,
         source          TEXT    NOT NULL DEFAULT 'qr_scan',
-        created_at      INTEGER NOT NULL,
-        last_seen_at    INTEGER,
+        created_at      BIGINT  NOT NULL,
+        last_seen_at    BIGINT,
         is_online       INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (id, tenant_id)
-      )
+      );
     `);
   }
 
@@ -121,27 +109,29 @@ export class PassengerRegistry {
    * Return existing passenger or create from input.
    * Safe to call on every WS hello — only writes if the passenger is new.
    */
-  getOrCreate(input: CreatePassengerInput): PassengerRecord {
-    const existing = this.get(input.tenantId, input.id);
+  async getOrCreate(input: CreatePassengerInput): Promise<PassengerRecord> {
+    const existing = await this.get(input.tenantId, input.id);
     if (existing) return existing;
     return this.create(input);
   }
 
-  get(tenantId: string, passengerId: string): PassengerRecord | null {
-    const row = this.db
-      .prepare("SELECT * FROM passengers WHERE id = ? AND tenant_id = ?")
-      .get(passengerId, tenantId) as DbRow | undefined;
+  async get(tenantId: string, passengerId: string): Promise<PassengerRecord | null> {
+    const row = await this.db.get<DbRow>(
+      "SELECT * FROM passengers WHERE id = ? AND tenant_id = ?",
+      [passengerId, tenantId],
+    );
     return row ? rowToRecord(row) : null;
   }
 
-  list(tenantId: string): PassengerRecord[] {
-    const rows = this.db
-      .prepare("SELECT * FROM passengers WHERE tenant_id = ? ORDER BY created_at ASC")
-      .all(tenantId) as DbRow[];
+  async list(tenantId: string): Promise<PassengerRecord[]> {
+    const rows = await this.db.all<DbRow>(
+      "SELECT * FROM passengers WHERE tenant_id = ? ORDER BY created_at ASC",
+      [tenantId],
+    );
     return rows.map(rowToRecord);
   }
 
-  update(tenantId: string, passengerId: string, patch: PassengerPatch): PassengerRecord | null {
+  async update(tenantId: string, passengerId: string, patch: PassengerPatch): Promise<PassengerRecord | null> {
     const sets: string[] = [];
     const vals: unknown[] = [];
 
@@ -160,49 +150,54 @@ export class PassengerRegistry {
     if (sets.length === 0) return this.get(tenantId, passengerId);
 
     vals.push(passengerId, tenantId);
-    this.db
-      .prepare(`UPDATE passengers SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`)
-      .run(...vals);
+    await this.db.run(
+      `UPDATE passengers SET ${sets.join(", ")} WHERE id = ? AND tenant_id = ?`,
+      vals,
+    );
 
     return this.get(tenantId, passengerId);
   }
 
-  delete(tenantId: string, passengerId: string): boolean {
-    const r = this.db
-      .prepare("DELETE FROM passengers WHERE id = ? AND tenant_id = ?")
-      .run(passengerId, tenantId);
+  async delete(tenantId: string, passengerId: string): Promise<boolean> {
+    const r = await this.db.run(
+      "DELETE FROM passengers WHERE id = ? AND tenant_id = ?",
+      [passengerId, tenantId],
+    );
     return r.changes > 0;
   }
 
   // ── Online state helpers ─────────────────────────────────────────────────────
 
-  markOnline(tenantId: string, passengerId: string): void {
-    this.db
-      .prepare("UPDATE passengers SET is_online = 1, last_seen_at = ? WHERE id = ? AND tenant_id = ?")
-      .run(Date.now(), passengerId, tenantId);
+  async markOnline(tenantId: string, passengerId: string): Promise<void> {
+    await this.db.run(
+      "UPDATE passengers SET is_online = 1, last_seen_at = ? WHERE id = ? AND tenant_id = ?",
+      [Date.now(), passengerId, tenantId],
+    );
   }
 
-  markOffline(tenantId: string, passengerId: string): void {
-    this.db
-      .prepare("UPDATE passengers SET is_online = 0, last_seen_at = ? WHERE id = ? AND tenant_id = ?")
-      .run(Date.now(), passengerId, tenantId);
+  async markOffline(tenantId: string, passengerId: string): Promise<void> {
+    await this.db.run(
+      "UPDATE passengers SET is_online = 0, last_seen_at = ? WHERE id = ? AND tenant_id = ?",
+      [Date.now(), passengerId, tenantId],
+    );
   }
 
   /** Removes offline temporary passengers older than maxAgeMs. */
-  deleteStaleTemporaryPassengers(maxAgeMs: number): number {
+  async deleteStaleTemporaryPassengers(maxAgeMs: number): Promise<number> {
     const cutoff = Date.now() - maxAgeMs;
-    const result = this.db.prepare(`
-      DELETE FROM passengers
-      WHERE is_online = 0
-        AND (id LIKE 'TMP_%' OR id LIKE 'BASIC_%')
-        AND COALESCE(last_seen_at, created_at) < ?
-    `).run(cutoff);
-    return result.changes;
+    const r = await this.db.run(
+      `DELETE FROM passengers
+       WHERE is_online = 0
+         AND (id LIKE 'TMP_%' OR id LIKE 'BASIC_%')
+         AND COALESCE(last_seen_at, created_at) < ?`,
+      [cutoff],
+    );
+    return r.changes;
   }
 
   // ── Private helpers ──────────────────────────────────────────────────────────
 
-  private create(input: CreatePassengerInput): PassengerRecord {
+  private async create(input: CreatePassengerInput): Promise<PassengerRecord> {
     // Derive spawn location near the destination gate
     const gateEntry = getGateCoord(input.gateId);
     const gateCoord = gateEntry
@@ -212,37 +207,38 @@ export class PassengerRegistry {
     const location = clampToBbox(randomNearby(gateCoord, 400), bbox);
 
     const now = Date.now();
-    this.db.prepare(`
-      INSERT INTO passengers (
+    await this.db.run(
+      `INSERT INTO passengers (
         id, tenant_id, name, nationality, locale, needs_wheelchair,
         plan, flight_id, gate_id, inbound_flight, inbound_from, outbound_to,
         activity, ext_status,
         location_lat, location_lng,
         source, created_at, is_online
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      input.id,
-      input.tenantId,
-      input.name ?? "Unknown",
-      input.nationality ?? "",
-      input.locale ?? "en-US",
-      input.needsWheelchair ? 1 : 0,
-      input.plan ?? "free",
-      input.flightId,
-      input.gateId,
-      input.inboundFlightId ?? null,
-      input.inboundFrom ?? null,
-      input.outboundTo ?? null,
-      "moving",
-      "green",
-      location.lat,
-      location.lng,
-      input.source ?? "qr_scan",
-      now,
-      1, // created on connect → online immediately
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        input.id,
+        input.tenantId,
+        input.name ?? "Unknown",
+        input.nationality ?? "",
+        input.locale ?? "en-US",
+        input.needsWheelchair ? 1 : 0,
+        input.plan ?? "free",
+        input.flightId,
+        input.gateId,
+        input.inboundFlightId ?? null,
+        input.inboundFrom ?? null,
+        input.outboundTo ?? null,
+        "moving",
+        "green",
+        location.lat,
+        location.lng,
+        input.source ?? "qr_scan",
+        now,
+        1, // created on connect → online immediately
+      ],
     );
 
-    return this.get(input.tenantId, input.id)!;
+    return (await this.get(input.tenantId, input.id))!;
   }
 }
 

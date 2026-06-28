@@ -16,7 +16,7 @@ import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createProxyMiddleware } from "http-proxy-middleware";
 
-import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP, DB_PATH } from "./config";
+import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP } from "./config";
 import {
   DIST_DIR, REPO_AIRPORT_MAP_PATH,
   LOCAL_INDOOR_MAP_API_DIR, LOCAL_INDOOR_MAP_TILES_DIR,
@@ -53,7 +53,7 @@ import { loadPoiCache } from "./lib/poiCache";
 // ─── Shared hub store + persistence services ─────────────────────────────────
 // SqlDb is Postgres when DATABASE_URL is set, else SQLite (P2-1).
 const sqlDb = getSqlDb();
-const chatRepo = new ChatRepository(DB_PATH); // stage-3 migration target (still SQLite)
+const chatRepo = new ChatRepository(sqlDb);
 const store = new HubStore(chatRepo);
 const accountStore = new PaxAccountStore(sqlDb);
 const auditLog = new AuditLog(sqlDb);
@@ -61,8 +61,7 @@ const metricsRepo = new MetricsRepository(sqlDb);
 const pushSubStore = new PushSubscriptionStore(sqlDb);
 
 // ─── Passenger registry ───────────────────────────────────────────────────────
-const registry = new PassengerRegistry(DB_PATH);
-logger.info("passenger_registry_ready", { dbPath: DB_PATH });
+const registry = new PassengerRegistry(sqlDb);
 
 const authRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 20 });
 const paxRateLimit = createRateLimiter({ windowMs: 60_000, maxRequests: 60 });
@@ -265,17 +264,18 @@ if (PDR_API_ORIGIN) {
 }
 
 // ─── Health probe (P0-8) ──────────────────────────────────────────────────────
-// Process alive + SQLite ping. PDR is reported best-effort and never fails the probe.
+// Process alive + DB ping. PDR is reported best-effort and never fails the probe.
 const SERVER_START_MS = Date.now();
-app.get("/health", (_req, res) => {
+app.get("/health", async (_req, res) => {
   let dbOk = false;
-  try { dbOk = chatRepo.ping(); } catch { dbOk = false; }
+  try { dbOk = await sqlDb.ping(); } catch { dbOk = false; }
   const body = {
     status: dbOk ? "ok" : "degraded",
     uptime_s: Math.round((Date.now() - SERVER_START_MS) / 1000),
     checks: {
       process: "ok",
-      sqlite: dbOk ? "ok" : "fail",
+      db: dbOk ? "ok" : "fail",
+      db_dialect: sqlDb.dialect,
       pdr_proxy: PDR_API_ORIGIN ? "configured" : "disabled",
       indoor_map: INDOOR_MAP_UPSTREAM ? "upstream" : "bundled",
     },
@@ -320,6 +320,8 @@ const wss = attachWsHub(server, store, registry);
 async function bootstrap(): Promise<void> {
   // Run SqlDb migrations (creates tables in SQLite or Postgres) before serving.
   await Promise.all([
+    registry.init(),
+    chatRepo.init(),
     metricsRepo.init(),
     pushSubStore.init(),
     auditLog.init(),
