@@ -21,6 +21,7 @@ import type {
 import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
 import { apiUrl } from "../../config/api";
+import { fetchPassengers } from "../../services/passengers/passengerSource";
 
 export type ToastItem = { id: string; title: string; body: string };
 
@@ -82,20 +83,14 @@ export function useDashboard(opts: {
   const [passengersRaw, setPassengersRaw] = useState<{ passengers: Passenger[] } | null>(null);
 
   const loadPassengers = useCallback(async () => {
-    try {
-      const r = await fetch(apiUrl(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`));
-      if (!r.ok) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
-      const j = await r.json();
-      if (!j.ok || !Array.isArray(j.passengers)) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
-      setPassengersRaw((prev) => {
-        if (!prev) return { passengers: j.passengers as Passenger[] };
-        const existing = new Map(prev.passengers.map((p) => [p.id, p]));
-        const merged = (j.passengers as Passenger[]).map((p) => existing.get(p.id) ?? p);
-        return { passengers: merged };
-      });
-    } catch {
-      setPassengersRaw((w) => w ?? { passengers: [] });
-    }
+    const incoming = await fetchPassengers(tenantId);
+    if (incoming === null) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
+    setPassengersRaw((prev) => {
+      if (!prev) return { passengers: incoming };
+      const existing = new Map(prev.passengers.map((p) => [p.id, p]));
+      const merged = incoming.map((p) => existing.get(p.id) ?? p);
+      return { passengers: merged };
+    });
   }, [tenantId]);
 
   // Reset when gate data changes, then load

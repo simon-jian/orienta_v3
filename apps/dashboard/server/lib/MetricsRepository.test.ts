@@ -2,19 +2,27 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { createSqliteDb } from "../db/sqlDb";
+import { createSqliteDb, type SqlDb } from "../db/sqlDb";
 import { MetricsRepository } from "./MetricsRepository";
 
 const dirs: string[] = [];
+const dbs: SqlDb[] = [];
 async function newRepo(): Promise<MetricsRepository> {
   const dir = mkdtempSync(path.join(tmpdir(), "orienta-metrics-"));
   dirs.push(dir);
-  const repo = new MetricsRepository(createSqliteDb(path.join(dir, "test.db")));
+  const db = createSqliteDb(path.join(dir, "test.db"));
+  dbs.push(db);
+  const repo = new MetricsRepository(db);
   await repo.init();
   return repo;
 }
 
-afterEach(() => {
+// Close DB handles before deleting temp dirs — leaving better-sqlite3
+// connections open can stop vitest's worker pool from exiting cleanly.
+afterEach(async () => {
+  while (dbs.length) {
+    try { await dbs.pop()!.close(); } catch { /* ignore */ }
+  }
   while (dirs.length) {
     const d = dirs.pop()!;
     try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }

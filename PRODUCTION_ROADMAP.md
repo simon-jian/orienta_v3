@@ -265,7 +265,7 @@ public/route_site/
 | **0** | Registry scaffold (`src/config/airports/{types,registry,pek.config}.ts`, `tenants/registry.ts`, `client.ts`); PEK entry reuses `data/airports/pek.ts`; `airportForTenant("airchina")→PEK`; no consumers wired (bundle unchanged) | 1–2 d | Low | done |
 | **1** | `Dashboard.tsx` + `MapView.tsx` resolve airport/tenant via `config/client.ts` (`VITE_DEFAULT_AIRPORT`/`VITE_ORIENTA_TENANT`); POI `terminal` centralized (client → registry `terminalQuery`, server → `DEFAULT_TERMINAL` env); route_site hub already forced PEK. Behavior-preserving (PEK/T3E/airchina) | 1–2 d | Low | done |
 | **2** | Server unified on registry: `fidsService.resolveOutbound(…, airportId)` + `paxSessions` pass `airportForTenant(tenantId)`; `flight.ts` dispatch via `getAirport().poi.mode`; `wsHub` nav gate map + `PassengerRegistry` spawn radius from registry. Behavior-preserving (PEK); guarded by `fidsService.test.ts` | 3–5 d | Med | done |
-| **3** | Dashboard + `useDashboard` strategy; `gateService` → `PoiService`; rename PEK POI adapters | 3–5 d | Med | todo |
+| **3** | `PoiService` (airport-aware facade, dispatches by `poi.mode`) with `pekPoiCoords` as the PEK adapter; `gateService` delegates; `MapView`/`PaxAppPage` rewired (drops hardcoded PEK center); `useDashboard` passenger source extracted to `passengerSource`. Guarded by `PoiService.test.ts` | 3–5 d | Med | done |
 | **4** | Split `route_site/index.html` into config JSON + engines | 1–2 wk | High | todo |
 | **5** | Onboarding doc + `GET /api/config/tenant/:id`; session JWT `airportId` | 2–3 d | Low | todo |
 

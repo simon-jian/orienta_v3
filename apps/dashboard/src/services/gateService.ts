@@ -1,22 +1,17 @@
 /**
- * Gate service — loads PEK T3E gates from POI API.
- * Updated to import from types/index and pekPoiCoords.
+ * Gate service — thin compatibility shim over the airport-aware PoiService.
+ *
+ * @deprecated Prefer `PoiService.loadGates(airportId)` directly. Retained so the
+ * dashboard's existing call site keeps working (Multi-airport Phase 3).
  */
-import type { Gate, LatLng } from "../types/types";
-import { preloadPekPoiFromMapApi, getPekGateCoords } from "./pekPoiCoords";
+import type { Gate } from "../types/types";
+import { loadGates as poiLoadGates, buildGatesFromCoords } from "./poi/PoiService";
 
-/** Build Gate[] from loaded POI coordinates. */
-export function buildGatesFromCoords(coords: Record<string, LatLng>): Gate[] {
-  return Object.entries(coords).map(([id, coordinate]) => ({
-    id,
-    name: id,
-    coordinate,
-  }));
-}
+export { buildGatesFromCoords };
 
-export async function loadGates(): Promise<{ gates: Gate[]; source: "t3e_hardcoded" | "overpass" | "synthetic" }> {
-  await preloadPekPoiFromMapApi();
-  const coords = getPekGateCoords();
-  const gates = buildGatesFromCoords(coords);
+export async function loadGates(
+  airportId?: string,
+): Promise<{ gates: Gate[]; source: "t3e_hardcoded" | "overpass" | "synthetic" }> {
+  const { gates } = await poiLoadGates(airportId);
   return { gates, source: "t3e_hardcoded" };
 }

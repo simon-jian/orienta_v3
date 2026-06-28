@@ -10,7 +10,7 @@ import {
   stopPdrSession,
   type PdrTrajectoryUpdate,
 } from "../../services/pdrClient";
-import { getPekGateCoord, preloadPekPoiFromMapApi } from "../../services/pekPoiCoords";
+import { getGateCoord as getPoiGateCoord, preloadPoi, getCenter as getPoiCenter } from "../../services/poi/PoiService";
 import {
   clearPaxSession,
   fetchPaxSession,
@@ -19,6 +19,7 @@ import {
   type PaxSession,
 } from "./session";
 import { apiUrl } from "../../config/api";
+import { clientDefaultAirport } from "../../config/client";
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -168,7 +169,7 @@ export default function PaxAppPage() {
 
   useEffect(() => {
     let cancelled = false;
-    preloadPekPoiFromMapApi()
+    preloadPoi()
       .then(() => { if (!cancelled) setPoiReady(true); })
       .catch(() => { if (!cancelled) setPoiReady(true); });
     checkPdrBackendAvailable()
@@ -196,8 +197,8 @@ export default function PaxAppPage() {
 
   useEffect(() => {
     if (!session || !poiReady) return;
-    const gateCoord = getPekGateCoord(session.passenger.gateId);
-    const anchor = gateCoord ?? { lat: 40.0748162, lng: 116.6061088 };
+    const gateCoord = getPoiGateCoord(session.passenger.gateId);
+    const anchor = gateCoord ?? getPoiCenter();
 
     void configurePdrSession({
       anchor,
@@ -254,7 +255,7 @@ export default function PaxAppPage() {
   const mapSrc = useMemo(() => {
     if (!session) return "";
     const u = new URL(INDOOR_MAP_URL, window.location.href);
-    u.searchParams.set("airport", "PEK");
+    u.searchParams.set("airport", clientDefaultAirport().iata);
     u.searchParams.set("tenant", session.passenger.tenantId);
     u.searchParams.set("mapRole", "passenger");
     u.searchParams.set("apiBase", INDOOR_MAP_API_BASE);
@@ -263,7 +264,7 @@ export default function PaxAppPage() {
     u.searchParams.set("dep", session.passenger.flightId);
     u.searchParams.set("pax", session.passenger.id);
     u.searchParams.set("parentOrigin", window.location.origin);
-    const anchor = getPekGateCoord(session.passenger.gateId);
+    const anchor = getPoiGateCoord(session.passenger.gateId);
     if (anchor) {
       u.searchParams.set("pdrOriginLat", String(anchor.lat));
       u.searchParams.set("pdrOriginLng", String(anchor.lng));

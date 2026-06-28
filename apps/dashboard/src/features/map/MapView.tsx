@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Gate, PassengerComputed, LatLng } from "../../types/types";
-import { getT3ESpineCenter } from "../../services/pekPoiCoords";
+import { getCenter as getPoiCenter } from "../../services/poi/PoiService";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../config/indoorMap";
 import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT } from "../../config/client";
 import LeafletAdapter from "./leafletAdapter";
@@ -148,7 +148,7 @@ function IndoorMapEmbed(props: {
 function StandardMapView(props: DashboardMapViewProps) {
   const { gates, passengers, selectedGateId = null, selectedPassengerId, onSelectGate = () => {}, onSelectPassenger } = props;
 
-  const center = props.centerOverride ?? getT3ESpineCenter();
+  const center = props.centerOverride ?? getPoiCenter(props.airport);
   const containerRef = useRef<HTMLDivElement>(null);
   const adapterRef = useRef<LeafletAdapter | null>(null);
 
