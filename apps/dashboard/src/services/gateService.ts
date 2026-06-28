@@ -3,11 +3,7 @@
  * Updated to import from types/index and pekPoiCoords.
  */
 import type { Gate, LatLng } from "../types/types";
-import { preloadPekPoiFromMapApi, getT3ESpineCenter, getPekGateCoords } from "./pekPoiCoords";
-
-export function getPekT3Center(): LatLng {
-  return getT3ESpineCenter();
-}
+import { preloadPekPoiFromMapApi, getPekGateCoords } from "./pekPoiCoords";
 
 /** Build Gate[] from loaded POI coordinates. */
 export function buildGatesFromCoords(coords: Record<string, LatLng>): Gate[] {

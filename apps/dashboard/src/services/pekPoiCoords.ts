@@ -124,10 +124,6 @@ export async function preloadPekPoiFromMapApi(): Promise<void> {
   }
 }
 
-export function isPekPoiLoaded(): boolean {
-  return gateCache != null && Object.keys(gateCache).length > 0;
-}
-
 export function getPekGateCoords(): Record<string, LatLng> {
   return gateCache ? { ...gateCache } : {};
 }
@@ -137,14 +133,6 @@ export function getPekGateCoord(gateName: string): LatLng | null {
   return gateCache?.[gate] ?? null;
 }
 
-export function getPekIndoorAmenities(): LatLng[] {
-  return amenityCache?.length ? [...amenityCache] : [];
-}
-
 export function getT3ESpineCenter(): LatLng {
   return spineCache ? { ...spineCache } : { ...DEFAULT_SPINE };
-}
-
-export function getT3EBbox(): typeof DEFAULT_BBOX {
-  return bboxCache ? { ...bboxCache } : { ...DEFAULT_BBOX };
 }

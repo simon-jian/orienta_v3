@@ -8,23 +8,6 @@ import { apiUrl } from "../config/api";
 
 const STORAGE_KEY = "orienta_session";
 
-/** Read cached session from sessionStorage. Returns null if expired or missing. */
-export function getSession(): AdminSession | null {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const s = JSON.parse(raw) as AdminSession;
-    if (!s?.user || !s?.exp) return null;
-    if (Date.now() > s.exp) {
-      sessionStorage.removeItem(STORAGE_KEY);
-      return null;
-    }
-    return s;
-  } catch {
-    return null;
-  }
-}
-
 function cacheSession(session: AdminSession): AdminSession {
   const { exp, user } = session;
   const safe = { exp, user };
