@@ -20,12 +20,7 @@ import type { ChatKind } from "../../src/types/types";
 import { requireAdmin } from "./auth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import type { AuditLog } from "../lib/auditLog";
-
-type PushSub = {
-  endpoint: string;
-  expirationTime?: number | null;
-  keys?: { p256dh?: string; auth?: string };
-};
+import { PushSubscriptionStore, type PushSub } from "../passengers/PushSubscriptionStore";
 
 // ─── VAPID helpers ────────────────────────────────────────────────────────────
 
@@ -36,14 +31,14 @@ function getVapid(): { publicKey: string } | null {
 }
 
 async function sendAwayPush(
-  pushSubs: Map<string, PushSub[]>,
+  pushSubs: PushSubscriptionStore,
   tenantId: string,
   passengerId: string
 ): Promise<void> {
   const vapid = getVapid();
   if (!vapid) return;
   const key = HubStore.key(tenantId, passengerId);
-  const subs = pushSubs.get(key) || [];
+  const subs = pushSubs.list(key);
   if (!subs.length) return;
 
   const payload = JSON.stringify({
@@ -53,19 +48,17 @@ async function sendAwayPush(
     url: `/pax/app?tenant=${encodeURIComponent(tenantId)}&pid=${encodeURIComponent(passengerId)}`,
   });
 
-  const keep: PushSub[] = [];
   for (const sub of subs) {
     try {
       await webpush.sendNotification(sub as Parameters<typeof webpush.sendNotification>[0], payload);
-      keep.push(sub);
     } catch (e: unknown) {
       const err = e as Record<string, unknown>;
       const code = typeof err.statusCode === "number" ? err.statusCode
         : typeof err.status === "number" ? err.status : 0;
-      if (code !== 404 && code !== 410) keep.push(sub);
+      // Drop endpoints the push service has permanently rejected.
+      if (code === 404 || code === 410) pushSubs.removeEndpoint(key, sub.endpoint);
     }
   }
-  pushSubs.set(key, keep);
 }
 
 /**
@@ -103,9 +96,12 @@ async function paxIdentityFromRequest(req: Request, res: Response, body: Record<
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
-export function registerPushRoutes(router: Router, store: HubStore, auditLog?: AuditLog): void {
-  // In-memory push subscription store (keyed by tenant::pid)
-  const pushSubs  = new Map<string, PushSub[]>();
+export function registerPushRoutes(
+  router: Router,
+  store: HubStore,
+  pushSubs: PushSubscriptionStore,
+  auditLog?: AuditLog,
+): void {
   const awayTokens = new Map<string, string>();
 
   // ── VAPID public key ────────────────────────────────────────────────────────
@@ -122,9 +118,7 @@ export function registerPushRoutes(router: Router, store: HubStore, auditLog?: A
     const subscription = body.subscription as PushSub | undefined;
     if (!subscription?.endpoint) return res.status(400).json({ ok: false, error: "missing_subscription" });
     const key = HubStore.key(identity.tenantId, identity.passengerId);
-    const existing = pushSubs.get(key) || [];
-    const dedup = [subscription, ...existing].filter((s, i, arr) => arr.findIndex((x) => x.endpoint === s.endpoint) === i);
-    pushSubs.set(key, dedup);
+    pushSubs.upsert(key, subscription);
     return res.json({ ok: true });
   });
 

@@ -30,6 +30,7 @@ import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
 import { PassengerRegistry } from "./passengers/PassengerRegistry";
 import { PaxAccountStore } from "./passengers/PaxAccountStore";
+import { PushSubscriptionStore } from "./passengers/PushSubscriptionStore";
 import { AuditLog } from "./lib/auditLog";
 import { startMaintenanceJobs } from "./jobs/maintenance";
 import { createRateLimiter } from "./middleware/rateLimit";
@@ -54,6 +55,7 @@ const store = new HubStore(chatRepo);
 const accountStore = new PaxAccountStore(DB_PATH);
 const auditLog = new AuditLog(DB_PATH);
 const metricsRepo = new MetricsRepository(DB_PATH);
+const pushSubStore = new PushSubscriptionStore(DB_PATH);
 
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(DB_PATH);
@@ -113,7 +115,7 @@ app.use("/api/pax", paxRateLimit);
 app.use("/api/pax", paxSessionRouter);
 
 const pushRouter = express.Router();
-registerPushRoutes(pushRouter, store, auditLog);
+registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
 app.use("/api/push",               pushRouter);
 app.use("/api/pax",                pushRouter);
 app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tourist-*

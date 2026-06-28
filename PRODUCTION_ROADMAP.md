@@ -157,7 +157,7 @@ ADMIN_CREDENTIALS=<real-accounts>
 | Item | Description | Status |
 |------|-------------|--------|
 | **P2-1** PostgreSQL option | Replace SQLite for multi-instance / HA | todo |
-| **P2-2** Push subscription persistence | Survive restarts | todo |
+| **P2-2** Push subscription persistence | SQLite-backed (`PushSubscriptionStore`); survives restarts, prunes 404/410 endpoints | done |
 | **P2-3** Shared rate limit / presence | Redis or sticky sessions for horizontal scale | todo |
 | **P2-4** Video merge as job service | Python concat outside Node container | todo |
 | **P2-5** Error tracking | Sentry or equivalent | todo |
