@@ -15,14 +15,15 @@ import { loadGates } from "../services/gateService";
 import { buildPekFlights } from "../services/flightService";
 import { PEK_SIM_PAX } from "../data/airports/pek";
 import { logout as authLogout } from "../services/auth";
+import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT, clientDefaultAirport } from "../config/client";
 
 type DashTab = "dashboard" | "map";
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 
 export default function Dashboard({ session, onLogout }: { session: AdminSession; onLogout(): void }) {
-  const airport = "PEK" as const;
-  const tenantId = "airchina";
+  const airport = CLIENT_DEFAULT_AIRPORT;
+  const tenantId = CLIENT_DEFAULT_TENANT;
 
   const [tab, setTab] = useState<DashTab>("dashboard");
 
@@ -107,7 +108,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     [selectedPaxId, passengers],
   );
 
-  const airportLabel = "国航 Demo · PEK T3E · 国际→国际";
+  const airportLabel = `国航 Demo · ${clientDefaultAirport().iata} ${clientDefaultAirport().defaultTerminal} · 国际→国际`;
   const simPax = PEK_SIM_PAX;
 
   // ─── Render ────────────────────────────────────────────────────────────────

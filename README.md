@@ -179,6 +179,22 @@ Notes:
 - Known single-instance-only state (live updates still propagate via the bus):
   in-memory one-way push `msg`/ack records and trajectory snapshots.
 
+## Error tracking (P2-5)
+
+Optional Sentry integration. Leave the DSNs empty to disable — errors still go to
+the structured logger, and the app runs with no external dependency.
+
+| Var | Effect |
+| --- | --- |
+| `SENTRY_DSN` | Backend SDK (`@sentry/node`): Express errors, `unhandledRejection`/`uncaughtException`, captured + flushed on shutdown |
+| `VITE_SENTRY_DSN` | Browser SDK (`@sentry/react`): React `ErrorBoundary` + uncaught client errors |
+| `SENTRY_ENVIRONMENT` | Optional; defaults to `NODE_ENV` / Vite `MODE` |
+| `SENTRY_RELEASE` / `VITE_SENTRY_RELEASE` | Optional release tag for grouping |
+| `SENTRY_TRACES_SAMPLE_RATE` | Optional perf sampling `0..1` (default `0` = errors only) |
+
+When enabled, the `error_tracking_ready` log line is emitted at boot; events are
+tagged with the `INSTANCE_ID` so multi-instance deploys are distinguishable.
+
 ## Production
 
 ```bash

@@ -160,7 +160,7 @@ ADMIN_CREDENTIALS=<real-accounts>
 | **P2-2** Push subscription persistence | `SqlDb`-backed (`PushSubscriptionStore`); survives restarts, prunes 404/410 endpoints | done |
 | **P2-3** Shared rate limit / presence | Redis fan-out bus (`HubBus`) + shared presence set + Redis fixed-window rate limit (`REDIS_URL`); in-memory fallback. Verified across 2 instances | done |
 | **P2-4** Video merge as job service | `requestMerge` enqueues to Redis; separate `pek_video_worker.py` container runs ffmpeg; non-blocking `spawn` fallback single-machine | done |
-| **P2-5** Error tracking | Sentry or equivalent | todo |
+| **P2-5** Error tracking | Optional Sentry SDK (`@sentry/node` + `@sentry/react`); Express error handler, `unhandledRejection`/`uncaughtException` guards, flush on shutdown, browser `ErrorBoundary`; no-op + structured logs when `SENTRY_DSN`/`VITE_SENTRY_DSN` unset | done |
 
 ---
 
@@ -262,8 +262,8 @@ public/route_site/
 
 | Phase | Scope | Effort | Risk | Status |
 |-------|-------|--------|------|--------|
-| **0** | Registry scaffold; PEK entry only; no behavior change | 1–2 d | Low | todo |
-| **1** | Env: `VITE_DEFAULT_AIRPORT`, `VITE_ORIENTA_TENANT`; unify `terminal=T3E`; align route_site default hub | 1–2 d | Low | todo |
+| **0** | Registry scaffold (`src/config/airports/{types,registry,pek.config}.ts`, `tenants/registry.ts`, `client.ts`); PEK entry reuses `data/airports/pek.ts`; `airportForTenant("airchina")→PEK`; no consumers wired (bundle unchanged) | 1–2 d | Low | done |
+| **1** | `Dashboard.tsx` + `MapView.tsx` resolve airport/tenant via `config/client.ts` (`VITE_DEFAULT_AIRPORT`/`VITE_ORIENTA_TENANT`); POI `terminal` centralized (client → registry `terminalQuery`, server → `DEFAULT_TERMINAL` env); route_site hub already forced PEK. Behavior-preserving (PEK/T3E/airchina) | 1–2 d | Low | done |
 | **2** | Server: `flight.ts`, `paxSessions.ts`, `PassengerRegistry` spawn, `wsHub` nav → registry | 3–5 d | Med | todo |
 | **3** | Dashboard + `useDashboard` strategy; `gateService` → `PoiService`; rename PEK POI adapters | 3–5 d | Med | todo |
 | **4** | Split `route_site/index.html` into config JSON + engines | 1–2 wk | High | todo |

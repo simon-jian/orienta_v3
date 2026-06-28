@@ -1,7 +1,7 @@
 /**
  * Server-side POI coordinate cache — loaded from INDOOR_MAP_API_UPSTREAM at startup.
  */
-import { INDOOR_MAP_API_UPSTREAM } from "../config";
+import { INDOOR_MAP_API_UPSTREAM, DEFAULT_TERMINAL } from "../config";
 import {
   extractPekGateKey,
   isPekGateCategory,
@@ -70,7 +70,7 @@ export async function loadPoiCache(): Promise<void> {
     return;
   }
   try {
-    const url = `${base}/api/poi?terminal=T3E`;
+    const url = `${base}/api/poi?terminal=${encodeURIComponent(DEFAULT_TERMINAL)}`;
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = (await res.json()) as { features?: unknown[] };

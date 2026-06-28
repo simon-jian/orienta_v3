@@ -91,6 +91,9 @@ export const VITE_INDOOR_MAP_SAME_ORIGIN = optional("VITE_INDOOR_MAP_SAME_ORIGIN
 
 // Server
 export const PORT = optionalInt("PORT", 5174);
+
+/** Default airport terminal for POI lookups (Multi-airport Phase 1). Defaults to PEK's T3E. */
+export const DEFAULT_TERMINAL = optional("DEFAULT_TERMINAL") || "T3E";
 export const ROUTE_SITE_DEFAULT_TENANT = optional("ROUTE_SITE_DEFAULT_TENANT") || "airchina";
 
 /**
@@ -130,6 +133,21 @@ export const REDIS_ENABLED = !!REDIS_URL;
 
 /** Optional instance id for logs / WS fan-out de-dup. */
 export const INSTANCE_ID = optional("INSTANCE_ID") || `inst_${Math.random().toString(16).slice(2, 8)}`;
+
+// ─── Error tracking (P2-5) ────────────────────────────────────────────────────
+// Optional Sentry integration. When SENTRY_DSN is unset, error tracking is a
+// no-op (errors are still logged via the structured logger) so local/offline
+// dev needs no external service. VITE_SENTRY_DSN wires the browser SDK.
+export const SENTRY_DSN = optional("SENTRY_DSN");
+export const SENTRY_ENVIRONMENT = optional("SENTRY_ENVIRONMENT") || process.env.NODE_ENV || "development";
+export const SENTRY_RELEASE = optional("SENTRY_RELEASE");
+/** Performance trace sampling 0..1. Default 0 = errors only, no perf overhead. */
+export const SENTRY_TRACES_SAMPLE_RATE = (() => {
+  const raw = process.env.SENTRY_TRACES_SAMPLE_RATE;
+  if (!raw) return 0;
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0;
+})();
 
 // ─── Video merge job service (P2-4) ───────────────────────────────────────────
 // When DATABASE_URL/REDIS_URL drive multi-instance, the CPU-heavy PEK video merge

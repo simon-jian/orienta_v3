@@ -52,6 +52,12 @@ import {
   transformAirportMapHtmlFromSource,
 } from "./indoorMapProxyUtils";
 import { loadPoiCache } from "./lib/poiCache";
+import { initErrorTracking, expressErrorHandler, flushErrorTracking, captureException } from "./lib/errorTracking";
+
+// ─── Error tracking (P2-5) ───────────────────────────────────────────────────
+// Boot Sentry + process-level guards as early as possible so failures during
+// the rest of startup are captured. No-op when SENTRY_DSN is unset.
+initErrorTracking();
 
 // ─── Shared hub store + persistence services ─────────────────────────────────
 // SqlDb is Postgres when DATABASE_URL is set, else SQLite (P2-1).
@@ -322,6 +328,11 @@ app.get("*", (req, res) => {
   res.sendFile(`${DIST_DIR}/index.html`);
 });
 
+// ─── Error handling (P2-5) ────────────────────────────────────────────────────
+// Terminal middleware: capture any error thrown/forwarded by a route and return
+// a generic 500. Must be the last app.use so it sees errors from all routes.
+app.use(expressErrorHandler);
+
 // ─── HTTP server + WebSocket hub ──────────────────────────────────────────────
 const server = http.createServer(app);
 
@@ -369,7 +380,8 @@ async function bootstrap(): Promise<void> {
 
 void bootstrap().catch((err) => {
   logger.error("bootstrap_failed", { error: err instanceof Error ? err.message : String(err) });
-  process.exit(1);
+  captureException(err, { phase: "bootstrap" });
+  void flushErrorTracking(2000).finally(() => process.exit(1));
 });
 
 // ─── Graceful shutdown (P1-6) ─────────────────────────────────────────────────
@@ -399,7 +411,7 @@ function shutdown(signal: string): void {
     }
     try { hubBus.close(); } catch { /* ignore */ }
     try { redisCmd?.disconnect(); } catch { /* ignore */ }
-    void sqlDb.close().finally(() => {
+    void Promise.allSettled([sqlDb.close(), flushErrorTracking(2000)]).then(() => {
       logger.info("shutdown_complete", { signal });
       process.exit(0);
     });

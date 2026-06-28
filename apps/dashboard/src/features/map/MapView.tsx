@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Gate, PassengerComputed, LatLng } from "../../types/types";
 import { getT3ESpineCenter } from "../../services/pekPoiCoords";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../config/indoorMap";
+import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT } from "../../config/client";
 import LeafletAdapter from "./leafletAdapter";
 
 function statusColor(p: PassengerComputed) {
@@ -25,8 +26,9 @@ export type DashboardMapViewProps = {
   onHoverPassenger?(id: string | null): void;
   visible?: boolean;
   centerOverride?: LatLng;
-  airport?: "PEK";
-  /** Defaults to airchina */
+  /** Airport id (e.g. "PEK"). Defaults to the build's CLIENT_DEFAULT_AIRPORT. */
+  airport?: string;
+  /** Defaults to the build's CLIENT_DEFAULT_TENANT. */
   tenantId?: string;
 };
 
@@ -49,7 +51,7 @@ function postToMapIframe(
 
 function IndoorMapEmbed(props: {
   baseUrl: string;
-  airport: "PEK";
+  airport: string;
   tenantId: string;
   passengers: PassengerComputed[];
   selectedPassengerId: string | null;
@@ -219,8 +221,8 @@ function StandardMapView(props: DashboardMapViewProps) {
 
 export default function MapView(props: DashboardMapViewProps) {
   const indoor = INDOOR_MAP_URL;
-  const airport = props.airport ?? "PEK";
-  const tenantId = props.tenantId ?? "airchina";
+  const airport = props.airport ?? CLIENT_DEFAULT_AIRPORT;
+  const tenantId = props.tenantId ?? CLIENT_DEFAULT_TENANT;
 
   if (indoor) {
     return (

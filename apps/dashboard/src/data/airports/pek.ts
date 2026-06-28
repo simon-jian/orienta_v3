@@ -6,7 +6,7 @@ import type { PaxPlan } from "../../types/types";
 
 // ─── Flights ──────────────────────────────────────────────────────────────────
 
-const PEK_INBOUND_FLIGHTS = [
+export const PEK_INBOUND_FLIGHTS = [
   { id: "CA836",  from: "LHR", fromCity: "London",        arr: -85 },
   { id: "CA856",  from: "FRA", fromCity: "Frankfurt",     arr: -70 },
   { id: "CA901",  from: "NRT", fromCity: "Tokyo",         arr: -60 },
