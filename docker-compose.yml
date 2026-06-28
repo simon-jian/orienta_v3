@@ -28,12 +28,50 @@ services:
       VITE_LOCAL_AIRPORT_MAP: "${VITE_LOCAL_AIRPORT_MAP:-0}"
       ROUTE_SITE_DEFAULT_TENANT: "${ROUTE_SITE_DEFAULT_TENANT:-airchina}"
       DB_PATH: /app/data/passengers.db
+      # Multi-instance backends (P2-1/P2-3). Empty → single-machine SQLite + in-memory.
+      # Enable with: docker compose --profile scale up -d
+      DATABASE_URL: "${DATABASE_URL:-}"
+      REDIS_URL: "${REDIS_URL:-}"
     volumes:
       - orienta-data:/app/data
     depends_on:
       orienta-pdr:
         # Wait for the PDR /health probe (baked into pdr_airchina/Dockerfile) to pass.
         condition: service_healthy
+    restart: unless-stopped
+
+  # ── Scale-out backends (opt-in: `docker compose --profile scale up -d`) ────────
+  postgres:
+    image: postgres:16-alpine
+    profiles: ["scale"]
+    environment:
+      POSTGRES_USER: "${POSTGRES_USER:-orienta}"
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-orienta}"
+      POSTGRES_DB: "${POSTGRES_DB:-orienta}"
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - orienta-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orienta} -d ${POSTGRES_DB:-orienta}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    profiles: ["scale"]
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_HOST_PORT:-6379}:6379"
+    volumes:
+      - orienta-redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   orienta-pdr:
@@ -49,3 +87,5 @@ services:
 
 volumes:
   orienta-data:
+  orienta-pg:
+  orienta-redis:

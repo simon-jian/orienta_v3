@@ -112,8 +112,24 @@ export const ALLOW_DEMO_LOGIN =
   optional("ORIENTA_ALLOW_DEMO") === "1"
   || (optional("ORIENTA_ALLOW_DEMO") !== "0" && process.env.NODE_ENV !== "production");
 
-// Passenger registry database path
+// Passenger registry database path (SQLite — used when DATABASE_URL is unset)
 export const DB_PATH = optional("DB_PATH") || "./data/passengers.db";
+
+// ─── Multi-instance backends (P2-1 / P2-3) ────────────────────────────────────
+// When set, the server uses Postgres for persistence and Redis for shared
+// rate-limit / presence / WS fan-out. When unset, it falls back to single-machine
+// SQLite + in-memory (the default for local dev).
+export const DATABASE_URL = optional("DATABASE_URL");
+export const REDIS_URL = optional("REDIS_URL");
+
+/** Persistence dialect: "pg" when DATABASE_URL is set, else "sqlite". */
+export const DB_DIALECT: "pg" | "sqlite" = DATABASE_URL ? "pg" : "sqlite";
+
+/** Whether shared Redis coordination is enabled (multi-instance). */
+export const REDIS_ENABLED = !!REDIS_URL;
+
+/** Optional instance id for logs / WS fan-out de-dup. */
+export const INSTANCE_ID = optional("INSTANCE_ID") || `inst_${Math.random().toString(16).slice(2, 8)}`;
 
 // ─── Derived helpers ──────────────────────────────────────────────────────────
 
