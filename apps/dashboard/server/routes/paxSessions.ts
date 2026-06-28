@@ -6,7 +6,9 @@ import type { PassengerRegistry, PassengerRecord } from "../passengers/Passenger
 import type { PaxAccountStore } from "../passengers/PaxAccountStore";
 import { parseBcbp } from "../passengers/bcbpParser";
 import { bearerTokenFromHeader, PAX_SESSION_AUDIENCE, verifyPaxSessionToken } from "../passengers/paxSessionToken";
-import { buildPekFlights } from "../../src/services/flightService";
+import { resolveOutbound as resolveOutboundFlight } from "../services/fidsService";
+import { requireRole, adminEmailFromRequest } from "./auth";
+import type { AuditLog } from "../lib/auditLog";
 import type { PaxPlan } from "../../src/types/types";
 
 type AccountType = "temporary" | "registered";
@@ -41,17 +43,6 @@ function capabilitiesFor(plan: PaxPlan): PaxCapability[] {
 
 function normalizeFlightId(raw: string): string {
   return raw.toUpperCase().replace(/\s+/g, "");
-}
-
-function resolveOutbound(rawFlightId: string, fallbackGateId?: string, fallbackTo?: string) {
-  const flightId = normalizeFlightId(rawFlightId);
-  const flight = buildPekFlights().find((f) => normalizeFlightId(f.id) === flightId);
-  return {
-    flightId,
-    gateId: fallbackGateId || flight?.gateId || flight?.gateRef || "E19",
-    outboundTo: flight?.destination || fallbackTo || "",
-    scheduledDepMs: flight ? new Date(flight.scheduledDep).getTime() : Date.now() + 90 * 60_000,
-  };
 }
 
 function temporaryExpiryFromDeparture(scheduledDepMs: number): number {
@@ -119,7 +110,16 @@ export function registerPaxSessionRoutes(
   router: Router,
   registry: PassengerRegistry,
   accountStore: PaxAccountStore,
+  auditLog?: AuditLog,
 ): void {
+  const auditSession = (tenantId: string, passengerId: string, accountType: AccountType, plan: PaxPlan) =>
+    auditLog?.record({
+      actorEmail: `pax:${passengerId}`,
+      action: "pax_session_create",
+      tenantId, passengerId,
+      detail: `${accountType}/${plan}`,
+    });
+
   router.post("/scan", async (req: Request, res: Response) => {
     try {
       const body = (req.body || {}) as Record<string, unknown>;
@@ -130,7 +130,7 @@ export function registerPaxSessionRoutes(
       const parsed = parseBcbp(payload);
       const firstLeg = parsed.legs[0]!;
       const outboundLeg = parsed.legs[parsed.legs.length - 1]!;
-      const outbound = resolveOutbound(
+      const outbound = await resolveOutboundFlight(
         String(body.departureFlight || outboundLeg.flightId),
         String(body.gateId || "").trim() || undefined,
         outboundLeg.toAirport,
@@ -162,6 +162,7 @@ export function registerPaxSessionRoutes(
         plan: "premium",
         expiresAt: temporaryExpiryFromDeparture(outbound.scheduledDepMs),
       });
+      auditSession(tenantId, passenger.id, "temporary", "premium");
       return res.status(201).json({ ok: true, bcbp: parsed, session });
     } catch (err) {
       return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : "scan_failed" });
@@ -176,7 +177,7 @@ export function registerPaxSessionRoutes(
     if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
     if (!arrivalFlight) return res.status(400).json({ ok: false, error: "missing_arrival_flight" });
 
-    const outbound = resolveOutbound(departureFlight, String(body.gateId || "").trim() || undefined);
+    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined);
     const passengerId = passengerIdFromStableParts("BASIC", [
       tenantId,
       arrivalFlight,
@@ -202,6 +203,7 @@ export function registerPaxSessionRoutes(
       plan: "free",
       expiresAt: temporaryExpiryFromDeparture(outbound.scheduledDepMs),
     });
+    auditSession(tenantId, passenger.id, "temporary", "free");
     return res.status(201).json({ ok: true, session });
   });
 
@@ -219,7 +221,7 @@ export function registerPaxSessionRoutes(
       return res.status(401).json({ ok: false, error: "invalid_credentials" });
     }
 
-    const outbound = resolveOutbound(departureFlight, String(body.gateId || "").trim() || undefined);
+    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined);
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
     const passenger = registry.getOrCreate({
       id: passengerId,
@@ -240,7 +242,36 @@ export function registerPaxSessionRoutes(
       plan: "premium",
       expiresAt: Date.now() + REGISTERED_SESSION_TTL_MS,
     });
+    auditSession(tenantId, passenger.id, "registered", "premium");
     return res.status(201).json({ ok: true, session });
+  });
+
+  // ── Admin: premium account management (P0-13) — beyond the env seed ──────────
+  router.get("/accounts", requireRole("admin", "ops"), (_req: Request, res: Response) => {
+    res.json({ ok: true, accounts: accountStore.listAccounts() });
+  });
+
+  router.post("/accounts", requireRole("admin"), (req: Request, res: Response) => {
+    const body = (req.body || {}) as Record<string, unknown>;
+    const email = String(body.email || "").trim().toLowerCase();
+    const password = String(body.password || "");
+    if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
+    const account = accountStore.upsertAccount({
+      email,
+      password,
+      tenantId: String(body.tenantId || body.tenant_id || "").trim() || undefined,
+      displayName: String(body.displayName || body.display_name || "").trim() || undefined,
+    });
+    auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_upsert", detail: email });
+    return res.status(201).json({ ok: true, account });
+  });
+
+  router.delete("/accounts/:email", requireRole("admin"), (req: Request, res: Response) => {
+    const email = String(req.params.email || "");
+    const deleted = accountStore.deleteAccount(email);
+    if (!deleted) return res.status(404).json({ ok: false, error: "account_not_found" });
+    auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_delete", detail: email });
+    return res.json({ ok: true });
   });
 
   router.get("/session", async (req: Request, res: Response) => {

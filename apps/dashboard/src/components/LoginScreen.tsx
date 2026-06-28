@@ -9,15 +9,19 @@ export default function LoginScreen(props: {
   onSSO(): Promise<unknown>;
 }) {
   const { onLogin, onSSO } = props;
-  const [user, setUser] = useState("admin@airchina.com");
-  const [pass, setPass] = useState("orienta123");
+  // Demo conveniences (pre-filled creds, hint text, SSO button) are dev-only.
+  const isDev = import.meta.env.DEV;
+  const [user, setUser] = useState(isDev ? "admin@airchina.com" : "");
+  const [pass, setPass] = useState(isDev ? "orienta123" : "");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const hint = useMemo(
     () =>
-      "Demo 账号：admin@airchina.com / orienta123（或 ops@airchina.com / orienta123）\n也可一键使用国航 SSO（模拟）登录。",
-    []
+      isDev
+        ? "Demo 账号：admin@airchina.com / orienta123（或 ops@airchina.com / orienta123）\n也可一键使用国航 SSO（模拟）登录。"
+        : "",
+    [isDev]
   );
 
   const submit = async (e: React.FormEvent) => {
@@ -88,24 +92,28 @@ export default function LoginScreen(props: {
               <button className="btn primary" type="submit" disabled={loading}>
                 {loading ? "登录中…" : "登录"}
               </button>
-              <button
-                className="btn"
-                type="button"
-                disabled={loading}
-                onClick={async () => {
-                  setErr(null);
-                  setLoading(true);
-                  try { await onSSO(); } catch (ex: any) { setErr(ex?.message || "SSO 失败"); } finally { setLoading(false); }
-                }}
-                title="模拟企业 SSO"
-              >
-                国航 SSO（模拟）
-              </button>
+              {isDev ? (
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={loading}
+                  onClick={async () => {
+                    setErr(null);
+                    setLoading(true);
+                    try { await onSSO(); } catch (ex: any) { setErr(ex?.message || "SSO 失败"); } finally { setLoading(false); }
+                  }}
+                  title="模拟企业 SSO"
+                >
+                  国航 SSO（模拟）
+                </button>
+              ) : null}
             </div>
 
-            <div className="loginHint">
-              <pre>{hint}</pre>
-            </div>
+            {hint ? (
+              <div className="loginHint">
+                <pre>{hint}</pre>
+              </div>
+            ) : null}
           </form>
         </div>
 

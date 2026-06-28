@@ -1,3 +1,5 @@
+import { apiUrl } from "../config/api";
+
 export type PdrTrajectoryUpdate = {
   position: { lat: number; lng: number };
   path: { lat: number; lng: number }[];
@@ -44,7 +46,7 @@ export function loadPdrClientScript(): Promise<void> {
       return;
     }
     const script = document.createElement("script");
-    script.src = "/orienta-pdr-client.js";
+    script.src = apiUrl("/orienta-pdr-client.js");
     script.async = true;
     script.dataset.orientaPdrClient = "1";
     script.onload = () => resolve();
@@ -56,7 +58,7 @@ export function loadPdrClientScript(): Promise<void> {
 
 export async function checkPdrBackendAvailable(): Promise<boolean> {
   try {
-    const res = await fetch("/pdr-api/health", { method: "GET" });
+    const res = await fetch(apiUrl("/pdr-api/health"), { method: "GET" });
     if (!res.ok) return false;
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean };
     return data.ok === true;

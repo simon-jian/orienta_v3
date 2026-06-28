@@ -11,10 +11,11 @@
  * outboundDep filled in from the live flight schedule.
  */
 import type { Router, Request, Response } from "express";
-import { requireAdmin } from "./auth";
+import { requireAdmin, requireRole, adminEmailFromRequest } from "./auth";
 import { ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import type { HubStore } from "../hub/HubStore";
+import type { AuditLog } from "../lib/auditLog";
 import { buildPekFlights } from "../../src/services/flightService";
 import type { Passenger } from "../../src/types/types";
 
@@ -51,6 +52,7 @@ export function registerPassengerRoutes(
   router: Router,
   store: HubStore,
   registry: PassengerRegistry,
+  auditLog?: AuditLog,
 ): void {
 
   /** GET /api/passengers — list all passengers for a tenant */
@@ -73,8 +75,8 @@ export function registerPassengerRoutes(
     });
   });
 
-  /** POST /api/passengers — pre-register a passenger (admin) */
-  router.post("/", requireAdmin, (req: Request, res: Response) => {
+  /** POST /api/passengers — pre-register a passenger (admin/ops; not viewer) */
+  router.post("/", requireRole("admin", "ops"), (req: Request, res: Response) => {
     const tenantId = tenantFromQuery(req);
     const body     = req.body || {};
 
@@ -100,11 +102,16 @@ export function registerPassengerRoutes(
       source: "manual",
     });
 
+    auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "passenger_create",
+      tenantId, passengerId: id,
+    });
     return res.status(201).json({ ok: true, passenger: record });
   });
 
-  /** PATCH /api/passengers/:id — update extStatus, activity, plan, etc. */
-  router.patch("/:id", requireAdmin, (req: Request, res: Response) => {
+  /** PATCH /api/passengers/:id — update extStatus, activity, plan, etc. (admin/ops) */
+  router.patch("/:id", requireRole("admin", "ops"), (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
     const passengerId = req.params.id;
     const body        = req.body || {};
@@ -119,15 +126,26 @@ export function registerPassengerRoutes(
     const updated = registry.update(tenantId, passengerId, patch);
     if (!updated) return res.status(404).json({ ok: false, error: "passenger_not_found" });
 
+    auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "passenger_update",
+      tenantId, passengerId,
+      detail: Object.keys(patch).join(","),
+    });
     return res.json({ ok: true, passenger: updated });
   });
 
-  /** DELETE /api/passengers/:id */
-  router.delete("/:id", requireAdmin, (req: Request, res: Response) => {
+  /** DELETE /api/passengers/:id — admin only */
+  router.delete("/:id", requireRole("admin"), (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
     const passengerId = req.params.id;
     const deleted = registry.delete(tenantId, passengerId);
     if (!deleted) return res.status(404).json({ ok: false, error: "passenger_not_found" });
+    auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "passenger_delete",
+      tenantId, passengerId,
+    });
     return res.json({ ok: true });
   });
 }

@@ -32,7 +32,8 @@ services:
       - orienta-data:/app/data
     depends_on:
       orienta-pdr:
-        condition: service_started
+        # Wait for the PDR /health probe (baked into pdr_airchina/Dockerfile) to pass.
+        condition: service_healthy
     restart: unless-stopped
 
   orienta-pdr:

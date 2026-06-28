@@ -8,6 +8,7 @@ import LoginScreen from "../components/LoginScreen";
 import PaxAppPage from "../features/pax/PaxAppPage";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
 import { fetchSession, logout as authLogout, cacheSession } from "../services/auth";
+import { apiUrl } from "../config/api";
 import type { AdminSession } from "../types/types";
 
 export default function App() {
@@ -68,7 +69,7 @@ async function loginWithCredentials(
   email: string,
   password: string
 ): Promise<AdminSession | null> {
-  const res = await fetch("/api/auth/login", {
+  const res = await fetch(apiUrl("/api/auth/login"), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),

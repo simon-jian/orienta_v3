@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import PaxEntryWrapper from "../../components/PaxEntryWrapper";
 import { legacyPaxHref, savePaxSession, type PaxSession, type PaxSessionApiResult } from "./session";
+import { apiUrl } from "../../config/api";
 
 const legacyQueryKeys = [
   "pid", "pax", "pix", "direct", "skip", "demo", "view",
@@ -13,7 +14,7 @@ function hasLegacyPaxQuery(): boolean {
 }
 
 async function postPaxSession(path: string, body: Record<string, unknown>): Promise<PaxSession> {
-  const res = await fetch(path, {
+  const res = await fetch(apiUrl(path), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -159,9 +160,12 @@ export default function PaxEntryPage() {
             <a className="btn primary" style={{ textAlign: "center", textDecoration: "none" }} href="/pax/app">
               进入新版旅客端
             </a>
-            <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
-              使用 legacy 旅客页
-            </a>
+            {/* P1-8: legacy page link is dev-only; React /pax/app is canonical in production. */}
+            {import.meta.env.DEV ? (
+              <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
+                使用 legacy 旅客页 (dev)
+              </a>
+            ) : null}
           </section>
         ) : null}
       </main>

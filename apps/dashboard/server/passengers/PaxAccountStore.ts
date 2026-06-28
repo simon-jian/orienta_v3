@@ -112,6 +112,36 @@ export class PaxAccountStore {
     };
   }
 
+  /** Admin: list all premium accounts (no password material). */
+  listAccounts(): PaxAccountRecord[] {
+    const rows = this.db.prepare(`
+      SELECT email, tenant_id, display_name, plan, created_at, updated_at
+      FROM pax_accounts ORDER BY email
+    `).all() as Array<{
+      email: string;
+      tenant_id: string;
+      display_name: string;
+      plan: string;
+      created_at: number;
+      updated_at: number;
+    }>;
+    return rows.map((row) => ({
+      email: row.email,
+      tenantId: row.tenant_id,
+      displayName: row.display_name,
+      plan: "premium",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  /** Admin: delete an account. Returns true when a row was removed. */
+  deleteAccount(email: string): boolean {
+    const result = this.db.prepare("DELETE FROM pax_accounts WHERE email = ?")
+      .run(email.trim().toLowerCase());
+    return result.changes > 0;
+  }
+
   verifyLogin(email: string, password: string): PaxAccountRecord | null {
     const normalized = email.trim().toLowerCase();
     const row = this.db.prepare(`

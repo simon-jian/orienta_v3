@@ -12,6 +12,7 @@ import {
   normalizePekGate,
   readFeatureLatLng,
 } from "../lib/pekPoiParse";
+import { apiUrl } from "../config/api";
 
 /** Same POI source as route_site / airport-map (`/indoor-map-api/api/poi?terminal=T3E`). */
 export function pekPoiApiBase(): string {
@@ -107,7 +108,7 @@ function pickAmenityPoints(gates: Record<string, LatLng>, waypoints: LatLng[]): 
 export async function preloadPekPoiFromMapApi(): Promise<void> {
   if (loadPromise) return loadPromise;
   loadPromise = (async () => {
-    const url = `${pekPoiApiBase()}/api/poi?terminal=T3E`;
+    const url = apiUrl(`${pekPoiApiBase()}/api/poi?terminal=T3E`);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`POI HTTP ${res.status}`);
     const data = (await res.json()) as { features?: unknown[] };

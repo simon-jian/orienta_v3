@@ -19,5 +19,5 @@ COPY --from=build /app/public ./public
 RUN mkdir -p /app/data
 EXPOSE 5174
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:5174/pdr-api/health >/dev/null 2>&1 || wget -qO- http://127.0.0.1:5174/ >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:5174/health >/dev/null 2>&1 || exit 1
 CMD ["node", "dist-server/server/server.js"]

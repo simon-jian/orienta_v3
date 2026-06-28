@@ -66,9 +66,9 @@ export function attachWsHub(
   server: ViteDevServer | HttpServer,
   store: HubStore,
   registry?: PassengerRegistry,
-): void {
+): WebSocketServer | null {
   const httpServer = "httpServer" in server ? server.httpServer : server;
-  if (!httpServer) return;
+  if (!httpServer) return null;
 
   // Disable permessage-deflate: compressed frames break many tunnel clients
   const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
@@ -433,4 +433,6 @@ export function attachWsHub(
   httpServer.once("close", () => {
     try { wss.close(); } catch { /* ignore close errors */ }
   });
+
+  return wss;
 }

@@ -7,13 +7,9 @@ import type {
   MsgRecord, MsgStatus, MsgStatusEvent, ChatMessage, ChatKind,
   PresenceEvent, PaxTrajectoryData,
 } from "../types/types";
+import { wsUrl } from "../config/api";
 
 export type { MsgRecord, MsgStatus, MsgStatusEvent, ChatMessage, ChatKind, PresenceEvent, PaxTrajectoryData };
-
-function wsUrl() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/ws`;
-}
 
 interface WsServerMsg {
   type: string;

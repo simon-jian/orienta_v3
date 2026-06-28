@@ -85,4 +85,10 @@ export class ChatRepository {
     const result = this.db.prepare("DELETE FROM chat_messages WHERE created_at < ?").run(cutoff);
     return result.changes;
   }
+
+  /** Lightweight liveness probe for GET /health. Throws if the DB is unreachable. */
+  ping(): boolean {
+    const row = this.db.prepare("SELECT 1 AS ok").get() as { ok: number } | undefined;
+    return row?.ok === 1;
+  }
 }

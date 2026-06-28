@@ -20,6 +20,7 @@ import type {
 } from "../../types/types";
 import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
+import { apiUrl } from "../../config/api";
 
 export type ToastItem = { id: string; title: string; body: string };
 
@@ -82,7 +83,7 @@ export function useDashboard(opts: {
 
   const loadPassengers = useCallback(async () => {
     try {
-      const r = await fetch(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`);
+      const r = await fetch(apiUrl(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`));
       if (!r.ok) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
       const j = await r.json();
       if (!j.ok || !Array.isArray(j.passengers)) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
@@ -190,7 +191,7 @@ export function useDashboard(opts: {
     let cancelled = false;
     const poll = async () => {
       try {
-        const r = await fetch(`/api/orienta/admin-presence?tenant=${encodeURIComponent(tenantId)}`, {
+        const r = await fetch(apiUrl(`/api/orienta/admin-presence?tenant=${encodeURIComponent(tenantId)}`), {
           credentials: "same-origin",
         });
         if (!r.ok) return;

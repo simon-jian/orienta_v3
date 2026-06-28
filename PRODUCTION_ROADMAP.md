@@ -79,7 +79,7 @@
 
 #### Security boundary
 
-- [ ] **P0-1** Set production env (copy from `deploy.example.env`):
+- [x] **P0-1** Set production env (copy from `deploy.example.env`):
 
 ```dotenv
 JWT_SECRET=<strong-random>
@@ -88,50 +88,50 @@ ORIENTA_ALLOW_DEMO=0
 ADMIN_CREDENTIALS=<real-accounts>
 ```
 
-- [ ] **P0-2** Align dev templates: root `.env.example` and `apps/dashboard/.env.example` should warn or match production defaults.
-- [ ] **P0-3** Gate demo UX to dev only:
-  - `src/components/LoginScreen.tsx` — pre-filled creds + hint text
-  - `src/app/App.tsx` — demo SSO button
-- [ ] **P0-4** Chat entitlement via session `capabilities` only; deprecate `PEK_PREMIUM_IDS` when `PAX_LEGACY_AUTH=0` (`server/auth/paxAuthPolicy.ts`).
-- [ ] **P0-5** Protect expensive ops routes — e.g. `POST /api/orienta/pek-merged-video` (`server/routes/flight.ts`) with `requireAdmin`.
-- [ ] **P0-6** RBAC: `requireAdmin` should enforce `role` (`admin` / `ops` / `viewer`), not just authenticated (`server/routes/auth.ts`, `server/routes/passengers.ts`).
-- [ ] **P0-7** Review open CORS on tourist-position routes (`server/routes/push.ts`).
+- [x] **P0-2** Align dev templates: root `.env.example` and `apps/dashboard/.env.example` should warn or match production defaults.
+- [x] **P0-3** Gate demo UX to dev only:
+  - `src/components/LoginScreen.tsx` — pre-filled creds + hint text (now `import.meta.env.DEV`)
+  - `src/app/App.tsx` — demo SSO button (hidden in prod build)
+- [x] **P0-4** Chat entitlement via session `capabilities` only; `PEK_PREMIUM_IDS` deprecated and only reachable when `PAX_LEGACY_AUTH=1` (`server/auth/paxAuthPolicy.ts`).
+- [x] **P0-5** Protect expensive ops routes — `/api/orienta/pek-merged-video` now strict-rate-limited (10/min/IP). *Note: used rate-limit, not `requireAdmin`, because the route is called by the passenger video page; full admin-gating waits on the legacy-page decision (P1-8).*
+- [x] **P0-6** RBAC: added `requireRole(...)`; passenger create/update = `admin`/`ops`, delete = `admin` (`server/routes/auth.ts`, `server/routes/passengers.ts`).
+- [x] **P0-7** Tourist-position CORS now scoped to `TOURIST_ALLOWED_ORIGINS` allowlist (empty = same-origin) instead of blanket `*` (`server/routes/push.ts`).
 
 | Item | Files | Status |
 |------|-------|--------|
-| P0-1 env | `deploy.example.env` | todo |
-| P0-2 templates | `.env.example`, `apps/dashboard/.env.example` | todo |
-| P0-3 demo UX | `LoginScreen.tsx`, `App.tsx` | todo |
-| P0-4 capabilities | `paxAuthPolicy.ts`, `hub/chat.ts` | todo |
-| P0-5 merged-video auth | `server/routes/flight.ts` | todo |
-| P0-6 RBAC | `server/routes/auth.ts`, `passengers.ts` | todo |
-| P0-7 CORS | `server/routes/push.ts` | todo |
+| P0-1 env | `deploy.example.env` | done |
+| P0-2 templates | `.env.example`, `apps/dashboard/.env.example` | done |
+| P0-3 demo UX | `LoginScreen.tsx`, `App.tsx` | done |
+| P0-4 capabilities | `paxAuthPolicy.ts`, `hub/chat.ts` | done |
+| P0-5 merged-video auth | `server/server.ts`, `flight.ts` | done (rate-limit) |
+| P0-6 RBAC | `server/routes/auth.ts`, `passengers.ts` | done |
+| P0-7 CORS | `server/routes/push.ts`, `config.ts` | done |
 
 #### Deploy & health
 
-- [ ] **P0-8** Add `GET /health` — process alive + SQLite ping + optional PDR / indoor-map checks (`server/server.ts`).
-- [ ] **P0-9** Update Docker `HEALTHCHECK` to hit `/health` (`apps/dashboard/Dockerfile`).
-- [ ] **P0-10** Document indoor map topology: bundle tiles (`INDOOR_MAP_*` unset) vs external upstream (`7801` / `3001`).
-- [ ] **P0-11** Compose: consider `depends_on: condition: service_healthy` for PDR (`docker-compose.yml`).
+- [x] **P0-8** Added `GET /health` — process alive + SQLite ping, reports PDR / indoor-map mode; `200`/`503` (`server/server.ts`).
+- [x] **P0-9** Docker `HEALTHCHECK` now hits `/health` (`apps/dashboard/Dockerfile`).
+- [x] **P0-10** Documented indoor map topology (bundled vs external upstream) in `README.md`, `deploy.example.env`, `.env.example`.
+- [x] **P0-11** Compose `orienta` now `depends_on: condition: service_healthy` for PDR (PDR already has a `/health` HEALTHCHECK).
 
 | Item | Files | Status |
 |------|-------|--------|
-| P0-8 health endpoint | `server/server.ts` | todo |
-| P0-9 Docker health | `apps/dashboard/Dockerfile` | todo |
-| P0-10 map topology | `README.md`, `deploy.example.env` | todo |
-| P0-11 compose deps | `docker-compose.yml` | todo |
+| P0-8 health endpoint | `server/server.ts`, `ChatRepository.ts` | done |
+| P0-9 Docker health | `apps/dashboard/Dockerfile` | done |
+| P0-10 map topology | `README.md`, `deploy.example.env` | done |
+| P0-11 compose deps | `docker-compose.yml` | done |
 
 #### Data & accounts
 
-- [ ] **P0-12** SQLite backup runbook: scheduled `sqlite3 .backup` or volume snapshots; document restore (`README.md` or `docs/ops/`).
-- [ ] **P0-13** Passenger accounts: move beyond `PAX_ACCOUNT_CREDENTIALS` env seed — registration, reset, lockout, or IdP (`PaxAccountStore.ts`).
-- [ ] **P0-14** Admin accounts: hash passwords or integrate SSO (today: plaintext env compare in `getAdminCredentials()`).
+- [x] **P0-12** SQLite backup runbook (`sqlite3 .backup`, Docker volume, restore) documented in `README.md`.
+- [~] **P0-13** Passenger accounts: admin CRUD beyond env seed — `GET/POST/DELETE /api/pax/accounts` (`PaxAccountStore.listAccounts/upsertAccount/deleteAccount`). *Still TODO: self-registration, password reset, lockout, IdP.*
+- [x] **P0-14** Admin accounts: `ADMIN_CREDENTIALS` now supports scrypt hashes (`email:scrypt$…`); plaintext kept for dev. Helper: `scripts/hashAdminPassword.ts`. SSO still optional.
 
 | Item | Files | Status |
 |------|-------|--------|
-| P0-12 backup | ops docs, cron | todo |
-| P0-13 pax accounts | `PaxAccountStore.ts` | todo |
-| P0-14 admin auth | `server/config.ts`, `auth.ts` | todo |
+| P0-12 backup | `README.md` | done |
+| P0-13 pax accounts | `PaxAccountStore.ts`, `paxSessions.ts` | partial |
+| P0-14 admin auth | `auth.ts`, `passwordHash.ts`, `scripts/` | done |
 
 ---
 
@@ -139,16 +139,16 @@ ADMIN_CREDENTIALS=<real-accounts>
 
 | Item | Description | Key files | Status |
 |------|-------------|-----------|--------|
-| **P1-1** CI pipeline | GitHub Actions: `npm run build`, `build:server`, `test` | `.github/workflows/` | todo |
-| **P1-2** Test coverage | Session API, WS auth, rate limit, BCBP parser, `paxIdentity` | `server/**/*.test.ts` | todo |
-| **P1-3** Structured logging | Request ID, levels; replace ad-hoc `console.log` | `server/server.ts` | todo |
-| **P1-4** Expanded audit | Passenger CRUD, chat send, session create | `auditLog.ts`, routes | todo |
-| **P1-5** Metrics | Implement or remove `/api/metrics/events` | `orienta-metrics.js`, `server.ts` | todo |
-| **P1-6** Graceful shutdown | SIGTERM drains HTTP + WS | `server/server.ts` | todo |
-| **P1-7** Live FIDS | FlightAware or airport feed; static data = fallback only | `flight.ts`, `fidsService.ts` | todo |
-| **P1-8** Legacy page policy | Decide: prod uses `/pax` + `/pax/app` only? Update push URLs | `push.ts`, `public/pax.html` | todo |
-| **P1-9** Sub-path deploy | `apiUrl()` / `wsUrl()` for React (mirror `orienta-base.js`) | `src/config/api.ts` | todo |
-| **P1-10** Security headers | helmet, trust proxy behind reverse proxy | `server/server.ts` | todo |
+| **P1-1** CI pipeline | GitHub Actions: `build`, `build:server`, `test` on push/PR | `.github/workflows/ci.yml` | done |
+| **P1-2** Test coverage | Added rate limit, BCBP parser, MetricsRepository suites (+existing geo, passwordHash) → 12 tests | `server/**/*.test.ts` | done (partial) |
+| **P1-3** Structured logging | JSON logger + request-id middleware; `console.log` replaced | `lib/logger.ts`, `middleware/requestLog.ts`, `server.ts` | done |
+| **P1-4** Expanded audit | Passenger CRUD, chat send, pax session create, account upsert/delete | `auditLog.ts`, `passengers.ts`, `paxSessions.ts`, `push.ts` | done |
+| **P1-5** Metrics | Implemented `/api/metrics/events` ingestion → SQLite, rate-limited, pruned | `routes/metrics.ts`, `lib/MetricsRepository.ts`, `server.ts` | done |
+| **P1-6** Graceful shutdown | SIGTERM/SIGINT closes WS clients, drains HTTP, 10s force-exit | `server/server.ts`, `hub/wsHub.ts` | done |
+| **P1-7** Live FIDS | FlightAware drives session gate/schedule (5-min cache); static = fallback when no key / lookup fails | `services/flightAware.ts`, `services/fidsService.ts`, `paxSessions.ts` | done |
+| **P1-8** Legacy page policy | React `/pax` + `/pax/app` canonical; push URL → `/pax/app`; legacy links gated to dev (legacy pages still reachable for old QR codes) | `push.ts`, `PaxEntryPage.tsx`, `PaxAppPage.tsx` | done |
+| **P1-9** Sub-path deploy | `apiUrl()` / `wsUrl()` helpers; fixes WS + iframe under base path | `src/config/api.ts` (+ consumers) | done |
+| **P1-10** Security headers | helmet (CSP/CO* off for legacy iframes) + `trust proxy` | `server/server.ts` | done |
 
 ---
 
@@ -362,7 +362,7 @@ flowchart LR
 | Session JWT | No `airportId` claim | Phase 5 |
 | `route_site` canvas | Legacy pixel paths (`PPL_PATH`) still embedded in `index.html` | Phase 4 |
 | CSV naming | `PEK_gate_timestamp_full_with_E24_E36.csv` vs shorter local CSV | ops |
-| Metrics endpoint | Client posts; server has no handler | P1-5 |
+| Metrics endpoint | ✅ Fixed (P1-5): `/api/metrics/events` now ingests to SQLite | done |
 
 ---
 

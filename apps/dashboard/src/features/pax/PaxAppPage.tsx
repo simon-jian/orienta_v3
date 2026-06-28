@@ -18,6 +18,7 @@ import {
   legacyPaxHref,
   type PaxSession,
 } from "./session";
+import { apiUrl } from "../../config/api";
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -70,7 +71,7 @@ function isLatLng(value: unknown): value is { lat: number; lng: number } {
 }
 
 function postPaxFallback(session: PaxSession, path: string, body: Record<string, unknown>): void {
-  void fetch(path, {
+  void fetch(apiUrl(path), {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -419,9 +420,12 @@ export default function PaxAppPage() {
               </span>
             ) : null}
             {pdrStatus ? <span className="small">{pdrStatus}</span> : null}
-            <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
-              Open legacy navigation
-            </a>
+            {/* P1-8: legacy navigation link is dev-only; this React app is canonical in production. */}
+            {import.meta.env.DEV ? (
+              <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
+                Open legacy navigation (dev)
+              </a>
+            ) : null}
             {navDebug ? <span className="small" style={{ alignSelf: "center" }}>{navDebug}</span> : null}
           </div>
         </section>

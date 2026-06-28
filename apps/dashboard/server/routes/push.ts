@@ -14,11 +14,12 @@ import { storeAndBroadcastTrajectory, clearStoredTrajectory } from "../hub/traje
 import { resolvePaxIdentity } from "../passengers/paxIdentity";
 import {
   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT,
-  isPushConfigured, ROUTE_SITE_DEFAULT_TENANT,
+  isPushConfigured, ROUTE_SITE_DEFAULT_TENANT, TOURIST_ALLOWED_ORIGINS,
 } from "../config";
 import type { ChatKind } from "../../src/types/types";
 import { requireAdmin } from "./auth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
+import type { AuditLog } from "../lib/auditLog";
 
 type PushSub = {
   endpoint: string;
@@ -47,8 +48,9 @@ async function sendAwayPush(
 
   const payload = JSON.stringify({
     title: "Orienta 提醒",
-    body: "你已离开页面超过 30 秒，请返回继续查看视频页。",
-    url: `/pax.html?tenant=${encodeURIComponent(tenantId)}&pid=${encodeURIComponent(passengerId)}&view=video`,
+    body: "你已离开页面超过 30 秒，请返回继续查看路线。",
+    // P1-8: React /pax/app is the canonical passenger surface (legacy pax.html is unlinked).
+    url: `/pax/app?tenant=${encodeURIComponent(tenantId)}&pid=${encodeURIComponent(passengerId)}`,
   });
 
   const keep: PushSub[] = [];
@@ -66,10 +68,22 @@ async function sendAwayPush(
   pushSubs.set(key, keep);
 }
 
-function corsTouristApi(res: Response): void {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+/**
+ * P0-7: tourist-position routes are cross-origin (route_site iframe / kiosks) but
+ * carry NO cookies — identity comes from the body / bearer token. We therefore
+ * scope the ACAO header to an env allowlist instead of a blanket "*".
+ */
+function corsTouristApi(req: Request, res: Response): void {
+  const origin = String(req.headers.origin || "").trim();
+  res.setHeader("Vary", "Origin");
+  if (TOURIST_ALLOWED_ORIGINS.includes("*")) {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+  } else if (origin && TOURIST_ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  }
+  // else: no ACAO header → same-origin requests still succeed; others are blocked.
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 }
 
 async function paxIdentityFromRequest(req: Request, res: Response, body: Record<string, unknown>) {
@@ -89,7 +103,7 @@ async function paxIdentityFromRequest(req: Request, res: Response, body: Record<
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
-export function registerPushRoutes(router: Router, store: HubStore): void {
+export function registerPushRoutes(router: Router, store: HubStore, auditLog?: AuditLog): void {
   // In-memory push subscription store (keyed by tenant::pid)
   const pushSubs  = new Map<string, PushSub[]>();
   const awayTokens = new Map<string, string>();
@@ -157,6 +171,12 @@ export function registerPushRoutes(router: Router, store: HubStore): void {
     const gateRef = typeof body.gateRef === "string" ? body.gateRef : undefined;
     const msg = handlePaxOutboundChat(store, identity.tenantId, identity.passengerId, textBody, kind, gateRef);
     if (!msg) return res.status(503).json({ ok: false, error: "chat_hub_unavailable" });
+    auditLog?.record({
+      actorEmail: `pax:${identity.passengerId}`,
+      action: "pax_chat_send",
+      tenantId: identity.tenantId, passengerId: identity.passengerId,
+      detail: kind,
+    });
     return res.json({ ok: true, message: msg });
   });
 
@@ -178,11 +198,11 @@ export function registerPushRoutes(router: Router, store: HubStore): void {
   });
 
   // ── Tourist position (route_site → back office) ───────────────────────────────
-  router.options("/tourist-position",   (_req, res) => { corsTouristApi(res); res.sendStatus(204); });
-  router.options("/tourist-deactivate", (_req, res) => { corsTouristApi(res); res.sendStatus(204); });
+  router.options("/tourist-position",   (req, res) => { corsTouristApi(req, res); res.sendStatus(204); });
+  router.options("/tourist-deactivate", (req, res) => { corsTouristApi(req, res); res.sendStatus(204); });
 
   router.post("/tourist-position", async (req: Request, res: Response) => {
-    corsTouristApi(res);
+    corsTouristApi(req, res);
     const body      = req.body || {};
     const identity = await paxIdentityFromRequest(req, res, body);
     if (!identity) return;
@@ -196,7 +216,7 @@ export function registerPushRoutes(router: Router, store: HubStore): void {
   });
 
   router.post("/tourist-deactivate", async (req: Request, res: Response) => {
-    corsTouristApi(res);
+    corsTouristApi(req, res);
     let body: Record<string, unknown> = {};
     if (typeof req.body === "string") {
       const s = req.body.trim();

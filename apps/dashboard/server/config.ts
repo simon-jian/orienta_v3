@@ -93,6 +93,17 @@ export const VITE_INDOOR_MAP_SAME_ORIGIN = optional("VITE_INDOOR_MAP_SAME_ORIGIN
 export const PORT = optionalInt("PORT", 5174);
 export const ROUTE_SITE_DEFAULT_TENANT = optional("ROUTE_SITE_DEFAULT_TENANT") || "airchina";
 
+/**
+ * Origins allowed to call the tourist-position CORS routes.
+ * - empty  → same-origin only (no ACAO header emitted)
+ * - "*"    → open (kiosk/demo only)
+ * - csv    → reflect the request Origin when it matches the allowlist
+ */
+export const TOURIST_ALLOWED_ORIGINS: string[] = optional("TOURIST_ALLOWED_ORIGINS")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
 /** Allow legacy pax.html / route_site to identify by passengerId without session JWT. Set to 0 in production. */
 export const PAX_LEGACY_AUTH = optional("PAX_LEGACY_AUTH") !== "0";
 

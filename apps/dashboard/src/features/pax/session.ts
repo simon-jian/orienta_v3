@@ -1,3 +1,5 @@
+import { apiUrl } from "../../config/api";
+
 export type PaxSession = {
   token: string;
   passenger: {
@@ -40,7 +42,7 @@ export function clearPaxSession(): void {
 }
 
 export async function fetchPaxSession(token: string): Promise<PaxSession> {
-  const res = await fetch("/api/pax/session", {
+  const res = await fetch(apiUrl("/api/pax/session"), {
     headers: { Authorization: `Bearer ${token}` },
   });
   const data = (await res.json().catch(() => ({}))) as PaxSessionApiResult;

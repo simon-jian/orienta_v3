@@ -72,16 +72,78 @@ docker compose --env-file deploy.example.env up -d
 
 Admin: http://localhost:5174
 
+## Health check
+
+`GET /health` returns process + SQLite status (and reports PDR / indoor-map mode):
+
+```bash
+curl http://localhost:5174/health
+# {"status":"ok","uptime_s":42,"checks":{"process":"ok","sqlite":"ok","pdr_proxy":"configured","indoor_map":"bundled"},...}
+```
+
+Returns `200` when SQLite responds, `503` when degraded. The Docker `HEALTHCHECK`
+and Compose `depends_on: condition: service_healthy` both rely on this endpoint.
+
+## Indoor map topology
+
+Two supported deployment modes (set in env):
+
+| Mode | `INDOOR_MAP_UPSTREAM` / `INDOOR_MAP_API_UPSTREAM` | Behavior |
+|------|--------------------------------------------------|----------|
+| **A — Bundled** (default for offline / single container) | empty | Server serves tiles from `public/` and POI/zones from bundled JSON. No external map stack needed. |
+| **B — External** | `http://127.0.0.1:7801` / `http://127.0.0.1:3001` | Server proxies `/indoor-map` and `/indoor-map-api` to a running map server + POI API. |
+
+`VITE_LOCAL_AIRPORT_MAP=1` serves `airport-map.html` from the repo checkout (dev).
+
 ## Security (production)
 
-Set in `apps/dashboard/.env`:
+Set in `apps/dashboard/.env` (or via `deploy.example.env`):
 
 ```dotenv
 PAX_LEGACY_AUTH=0          # require passenger session JWT (disables legacy pax.html impersonation)
 ORIENTA_ALLOW_DEMO=0       # disable demo/demo admin login
+TOURIST_ALLOWED_ORIGINS=   # CORS allowlist for tourist-position (empty = same-origin only)
 ```
 
-Admin auth uses an **httpOnly cookie** only; the browser never stores the JWT in `sessionStorage`.
+- Admin auth uses an **httpOnly cookie** only; the browser never stores the JWT in `sessionStorage`.
+- **RBAC:** admin tokens carry a `role` (`admin` / `ops` / `viewer`). Passenger
+  create/update needs `admin`/`ops`; delete needs `admin`. Use `requireRole(...)` for new routes.
+- **Admin passwords** may be stored as scrypt hashes in `ADMIN_CREDENTIALS`
+  (`email:scrypt$<salt>$<hash>`). Generate one with:
+  ```bash
+  npm run build:server
+  node dist-server/server/scripts/hashAdminPassword.js 'your-password'
+  ```
+- **Premium pax accounts** seed from `PAX_ACCOUNT_CREDENTIALS` on first boot, then
+  manage at runtime via the admin API:
+  ```bash
+  # list / create-or-reset / delete (admin cookie required)
+  GET    /api/pax/accounts
+  POST   /api/pax/accounts        { "email": "...", "password": "...", "displayName": "..." }
+  DELETE /api/pax/accounts/:email
+  ```
+- The expensive `/api/orienta/pek-merged-video` route is rate-limited (10/min/IP).
+
+## Data backup (SQLite)
+
+All persistent state (passengers, accounts, chat, audit) lives in one SQLite file
+(`DB_PATH`, default `./data/passengers.db`; `/app/data/passengers.db` in Docker,
+on the `orienta-data` volume).
+
+```bash
+# Online, consistent snapshot (safe while the server runs — uses WAL):
+sqlite3 ./data/passengers.db ".backup './backups/passengers-$(date +%F).db'"
+
+# Docker volume:
+docker compose exec orienta \
+  sqlite3 /app/data/passengers.db ".backup '/app/data/passengers-$(date +%F).db'"
+
+# Restore (server stopped):
+cp ./backups/passengers-YYYY-MM-DD.db ./data/passengers.db
+```
+
+Schedule the `.backup` command via cron/systemd-timer and ship the file off-box.
+Snapshot the `orienta-data` volume as a coarser fallback.
 
 ## Production
 
