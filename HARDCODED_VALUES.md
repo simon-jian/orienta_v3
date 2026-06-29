@@ -17,7 +17,14 @@ Resolved since the original audit:
 - **API base path** — all React `fetch`/WS go through `apiUrl()` / `wsUrl()` (`src/config/api.ts`).
 - **route_site** — decomposed into `route-site.css` + 3 engine scripts + `config/pek.json` + `config-bootstrap.js`; hub honors `?hub=`/`?airport=`.
 
-Still hardcoded (intentionally or low-priority): curated **demo display content** (client `fidsService` mock board, static `pax*.html` pages, route_site demo asset names), legacy `PEK_PREMIUM_IDS` (gated by `PAX_LEGACY_AUTH`), and cosmetic branding/strings. See per-item status below.
+Also cleaned up (2026-06-29):
+
+- **FIDS board** (`src/services/fidsService.ts`) now derives departures/arrivals from the registry demo flights — no hardcoded PEK board.
+- **route_site demo data** (TX1/TX2/TX3 route gates, video segment basenames) moved into `config/pek.json` (+ `config-bootstrap.js` builtin); engine reads them with fallbacks.
+- **`pek.ts` → `pek.demo.ts`** (explicit demo seed) + all imports updated.
+- **`PEK_PREMIUM_IDS`** consulted only when `PAX_LEGACY_AUTH=1` (both `paxAuthPolicy.ts` and `chat.ts`).
+
+Still hardcoded (intentional demo fixtures / cosmetics): static `pax*.html` pages are **already query-parameterized** (`?tenant=`, `?hub=`/`?airport=`); their remaining literals are demo passenger fixtures (TX1/P8 → gates) and PEK defaults, not multi-airport blockers. Plus cosmetic branding (`/airchina-logo.png`), admin display names, and the `pid=TX1` startup log. See per-item status below.
 
 ---
 
@@ -215,7 +222,8 @@ Sub-path deploy (e.g. `/orienta`) works for both React and static pages.
 | Login form pre-filled creds | `src/components/LoginScreen.tsx` — now gated by `import.meta.env.DEV` | done (A5) |
 | Login hint text with demo creds | `src/components/LoginScreen.tsx` — dev-only | done |
 | Startup log URL `pid=TX1` | `server/server.ts` | todo (cosmetic) |
-| BCBP alias `DA8X3→TX1`, etc. | `config/pek.json` `paxAliases` + `route-site-pek-engine.js`; static pax pages | partial (demo) |
+| FIDS departures/arrivals board | `src/services/fidsService.ts` → registry demo flights | done |
+| BCBP alias `DA8X3→TX1` + TX route gates | `config/pek.json` (`paxAliases`, `paxRouteGates`); static pax pages keep demo fixtures | done (route_site) |
 | Client `POST /api/metrics/events` | implemented (P1-5): `server/routes/metrics.ts` → SQLite | done |
 | PDR error hints mentioning port 10000 | `public/orienta-pdr-client.js`, `PaxAppPage.tsx` | todo (cosmetic) |
 
@@ -278,8 +286,8 @@ Use this as a checklist. Mark done in the **Status** column above.
 
 ### Phase B — demo vs production boundary
 
-- [ ] **B1** Rename `src/data/airports/pek.ts` → `*.demo.ts` (cosmetic; header already documents it as demo)
-- [ ] **B2** Remove `PEK_PREMIUM_IDS` from chat policy when `PAX_LEGACY_AUTH=0` (currently gated by the flag)
+- [x] **B1** Renamed `src/data/airports/pek.ts` → `pek.demo.ts` + imports updated
+- [x] **B2** `PEK_PREMIUM_IDS` consulted only when `PAX_LEGACY_AUTH=1` (`paxAuthPolicy.ts` + `chat.ts`)
 - [x] **B3** `resolveOutbound()` — default gate from `airport.demo.defaultTransferGates` (registry)
 - [x] **B4** route_site hub honors `?hub=`/`?airport=` (config-driven)
 - [ ] **B5** Resolve CSV naming: one canonical file + symlink or copy in docs
@@ -287,7 +295,7 @@ Use this as a checklist. Mark done in the **Status** column above.
 ### Phase C — route_site decomposition
 
 - [x] **C1** route_site decomposed: `config/pek.json` + `config-bootstrap.js` + 3 engine scripts (Phase 4)
-- [ ] **C2** Deduplicate TX1/TX2/TX3 gates — still duplicated in `route-site-pek-engine.js` and static pax pages
+- [x] **C2** route_site TX1/TX2/TX3 gates now sourced from `config/pek.json` (`paxRouteGates`); static pax pages retain their own demo fixtures (intrinsic to the demo)
 - [x] **C3** `/api/metrics/events` implemented (P1-5)
 
 ### Phase D — production hardening
