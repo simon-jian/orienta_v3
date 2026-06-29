@@ -1,5 +1,6 @@
 import L from "leaflet";
 import type { Gate, PassengerComputed, LatLng } from "../../types/types";
+import { clientDefaultAirport } from "../../config/client";
 
 type CreateOptions = {
   initialCenter?: LatLng;
@@ -8,8 +9,10 @@ type CreateOptions = {
   onHoverPassenger?(id: string | null): void;
 };
 
-// Default center (PEK T3E spine center).
-const DEFAULT_CENTER: [number, number] = [40.0748162, 116.6061088]; // OSM centroid
+// Fallback center when no initialCenter is supplied (from the default airport's
+// registry config; PEK T3E spine center today).
+const __defCenter = clientDefaultAirport().poi.defaultCenter;
+const DEFAULT_CENTER: [number, number] = [__defCenter.lat, __defCenter.lng];
 
 function extStatus(p: PassengerComputed): string {
   return p.extStatus || "green";

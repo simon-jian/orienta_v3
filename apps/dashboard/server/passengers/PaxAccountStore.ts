@@ -3,7 +3,7 @@
  * backed by the async SqlDb (P2-1).
  */
 import { hashPassword, verifyPassword } from "../lib/passwordHash";
-import { PAX_ACCOUNT_CREDENTIALS } from "../config";
+import { PAX_ACCOUNT_CREDENTIALS, ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { SqlDb } from "../db/sqlDb";
 import { logger } from "../lib/logger";
 
@@ -91,7 +91,7 @@ export class PaxAccountStore {
          updated_at = excluded.updated_at`,
       [
         email,
-        input.tenantId?.trim() || "airchina",
+        input.tenantId?.trim() || ROUTE_SITE_DEFAULT_TENANT,
         input.displayName?.trim() || email.split("@")[0] || "Premium Passenger",
         hashPassword(input.password),
         "premium",

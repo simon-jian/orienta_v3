@@ -16,7 +16,8 @@ import { ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import type { HubStore } from "../hub/HubStore";
 import type { AuditLog } from "../lib/auditLog";
-import { buildPekFlights } from "../../src/services/flightService";
+import { buildFlights } from "../../src/services/flightService";
+import { airportForTenant } from "../../src/config/tenants/registry";
 import type { Passenger } from "../../src/types/types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -29,8 +30,8 @@ function tenantFromQuery(req: Request): string {
  * Enrich a passenger record's transfer.outboundDep from the live flight list
  * so that computePassenger() gets an accurate departure time.
  */
-function enrichWithFlightTime(passengers: Passenger[]): Passenger[] {
-  const flights = buildPekFlights();
+function enrichWithFlightTime(passengers: Passenger[], tenantId: string): Passenger[] {
+  const flights = buildFlights(airportForTenant(tenantId));
   const byId = new Map(flights.map((f) => [f.id, f]));
   return passengers.map((p) => {
     const flight = byId.get(p.flightId);
@@ -70,7 +71,7 @@ export function registerPassengerRoutes(
     res.json({
       ok: true,
       tenantId,
-      passengers: enrichWithFlightTime(passengers),
+      passengers: enrichWithFlightTime(passengers, tenantId),
       online: Array.from(onlineSet),
     });
   });

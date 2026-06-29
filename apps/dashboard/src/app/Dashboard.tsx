@@ -12,7 +12,7 @@ import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 
 import type { Gate, Flight, PaxExtStatus, AdminSession } from "../types/types";
 import { loadGates } from "../services/gateService";
-import { buildPekFlights } from "../services/flightService";
+import { buildFlights } from "../services/flightService";
 import { PEK_SIM_PAX } from "../data/airports/pek";
 import { logout as authLogout } from "../services/auth";
 import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT, clientDefaultAirport } from "../config/client";
@@ -43,7 +43,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     () => pekPoiReady ? pekGates : [],
     [pekPoiReady, pekGates],
   );
-  const flights: Flight[] = useMemo(() => buildPekFlights(), []);
+  const flights: Flight[] = useMemo(() => buildFlights(airport), [airport]);
   const gatesById   = useMemo(() => new Map(gates.map((g)   => [g.id, g])),   [gates]);
   const flightsById = useMemo(() => new Map(flights.map((f) => [f.id, f])), [flights]);
   // All realtime + passenger state managed by the hook
@@ -128,7 +128,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
         gateCount={gates.length} passengerCount={passengers.length}
         transferCount={passengers.length}
         transferUrgentCount={riskCounts.red + riskCounts.yellow}
-        dataSource="T3E/I→I"
+        dataSource={`${clientDefaultAirport().defaultTerminal}/I→I`}
         userLabel={`${session.user.displayName} · ${session.user.org}`}
         onLogout={() => { authLogout(); onLogout(); }}
         onPaxClick={() => { setMapViewMode("all"); setSelectedPaxId(null); setOpenConvPaxId(null); setTab("map"); }}
@@ -137,7 +137,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
         extraRight={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             <button className={"btn" + (tab === "dashboard" ? " primary" : "")} onClick={() => setTab("dashboard")} style={{ fontSize: 12 }}>📊 Dashboard</button>
-            <button className={"btn" + (tab === "map" ? " primary" : "")} onClick={() => setTab("map")} style={{ fontSize: 12 }}>🗺️ Map T3E</button>
+            <button className={"btn" + (tab === "map" ? " primary" : "")} onClick={() => setTab("map")} style={{ fontSize: 12 }}>🗺️ Map {clientDefaultAirport().defaultTerminal}</button>
             <span className={"pill " + (rtUp ? "ok" : "warn")} style={{ fontSize: 11 }}>{rtUp ? "WS ●" : "WS ○"}</span>
           </div>
         }

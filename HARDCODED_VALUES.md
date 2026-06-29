@@ -1,9 +1,23 @@
 # Orienta v3 — Hardcoded Values Audit
 
 > Created: 2026-06-07  
-> Updated: 2026-06-07 — SFO airport demo removed; **PEK-only**  
+> Updated: 2026-06-28 — **Multi-airport migration (Phase 0–5) landed**: most 🔴 items resolved via the airport/tenant registry, client/server config, and the route_site decomposition. Statuses below reflect the current code.  
 > Scope: `apps/dashboard` (server, `src/`, `public/`)  
 > Purpose: catalogue hardcoded config, demo data, and magic strings so follow-up refactors can be done incrementally.
+
+## 2026-06 status snapshot
+
+Resolved since the original audit:
+
+- **Airport/tenant registry** — `src/config/airports/{types,registry,pek.config}.ts`, `src/config/tenants/registry.ts`, `src/config/client.ts`. Adding a hub = one `AirportDefinition` + tenant mapping, no scattered `if (airport === …)`.
+- **Tenant/airport in admin UI** — `Dashboard.tsx` uses `CLIENT_DEFAULT_TENANT` / `CLIENT_DEFAULT_AIRPORT` (`VITE_ORIENTA_TENANT` / `VITE_DEFAULT_AIRPORT`).
+- **Terminal** — `DEFAULT_TERMINAL` env (server) + `airport.poi.terminalQuery` (client); UI labels read the registry.
+- **Demo data** — consumed through the registry (`fidsService`/`wsHub`/`PassengerRegistry`/`flightService` server + client).
+- **Default gate** — server `fidsService` uses `airport.demo.defaultTransferGates`; route_site reads `config/pek.json`.
+- **API base path** — all React `fetch`/WS go through `apiUrl()` / `wsUrl()` (`src/config/api.ts`).
+- **route_site** — decomposed into `route-site.css` + 3 engine scripts + `config/pek.json` + `config-bootstrap.js`; hub honors `?hub=`/`?airport=`.
+
+Still hardcoded (intentionally or low-priority): curated **demo display content** (client `fidsService` mock board, static `pax*.html` pages, route_site demo asset names), legacy `PEK_PREMIUM_IDS` (gated by `PAX_LEGACY_AUTH`), and cosmetic branding/strings. See per-item status below.
 
 ---
 
@@ -57,14 +71,12 @@ DB_PATH=./data/passengers.db
 
 | Location | Hardcoded value | Status |
 |----------|-----------------|--------|
-| `src/app/Dashboard.tsx` ~24–25 | `tenantId = "airchina"`, `airport = "PEK"` | todo |
-| `server/passengers/PaxAccountStore.ts` ~35, ~72 | SQL default + upsert fallback `"airchina"` | todo |
-| `public/route_site/index.html` ~2747 | `ROUTE_SITE_TENANT_ID = "airchina"` | todo |
-| `public/pax.html`, `pax-flight.html`, `pax-route-video.html` | `?tenant=` fallback `airchina` | todo |
+| `src/app/Dashboard.tsx` | now `CLIENT_DEFAULT_TENANT` / `CLIENT_DEFAULT_AIRPORT` | done |
+| `server/passengers/PaxAccountStore.ts` | upsert fallback → `ROUTE_SITE_DEFAULT_TENANT`; SQL column `DEFAULT 'airchina'` left as inert backstop (upsert always supplies a value) | done |
+| `public/route_site/route-site-main.js` | `ROUTE_SITE_TENANT_ID` reads `config/pek.json` `tenantId` (fallback `airchina`) | done |
+| `public/pax.html`, `pax-flight.html`, `pax-route-video.html` | `?tenant=` fallback `airchina` | wontfix (legacy static demo pages) |
 
-**Note:** `ROUTE_SITE_DEFAULT_TENANT` exists in `server/config.ts` but React admin UI does not read it.
-
-**Suggested fix:** add `VITE_ORIENTA_TENANT` / `VITE_DEFAULT_AIRPORT`; wire Dashboard + PaxAccountStore to the same source.
+**Note:** `VITE_ORIENTA_TENANT` / `VITE_DEFAULT_AIRPORT` (`src/config/client.ts`) and `ROUTE_SITE_DEFAULT_TENANT` (`server/config.ts`) are the single sources now.
 
 ---
 
@@ -72,14 +84,12 @@ DB_PATH=./data/passengers.db
 
 | Location | Hardcoded value | Status |
 |----------|-----------------|--------|
-| `src/app/Dashboard.tsx` ~24–25 | `tenantId = "airchina"`, `airport = "PEK"` | todo |
-| `server/passengers/PaxAccountStore.ts` ~35, ~72 | SQL default + upsert fallback `"airchina"` | todo |
-| `public/route_site/index.html` | `__ROUTESITE_HUB__ = 'PEK'` (ignores non-PEK `?hub=`) | done |
+| `src/app/Dashboard.tsx` | `CLIENT_DEFAULT_AIRPORT` via registry | done |
+| `server/passengers/PaxAccountStore.ts` | tenant from `ROUTE_SITE_DEFAULT_TENANT` | done |
+| `public/route_site/config-bootstrap.js` | `__ROUTESITE_HUB__` from `?hub=`/`?airport=` (PEK default + only bundled config) | done |
 | `public/pax.html` | default hub `PEK` | done |
 
-**Note:** SFO airport module and `airchina_sfo` tenant mapping were removed. Future hubs need `AirportRegistry`.
-
-**Suggested fix:** single `AirportId` + `tenantForAirport()` in `src/config/` (or shared package).
+**Note:** `AirportRegistry` (`src/config/airports/registry.ts`) + `tenants/registry.ts` are the canonical lookup; add a hub via one `AirportDefinition` + `registerTenant(...)`.
 
 ---
 
@@ -87,12 +97,12 @@ DB_PATH=./data/passengers.db
 
 | Location | Hardcoded value | Status |
 |----------|-----------------|--------|
-| `src/services/pekPoiCoords.ts` ~110 | `/api/poi?terminal=T3E` | todo |
-| `server/lib/poiCache.ts` ~73 | same POI query | todo |
-| `src/app/Dashboard.tsx` ~110, ~130 | UI labels `PEK T3E`, `T3E/I→I` | todo |
-| `src/features/passengers/DashboardTab.tsx` ~40 | dashboard title mentions T3E | todo |
+| `src/services/pekPoiCoords.ts` | `terminal` from `clientDefaultAirport().poi.terminalQuery` | done |
+| `server/lib/poiCache.ts` | `terminal` from `DEFAULT_TERMINAL` env | done |
+| `src/app/Dashboard.tsx` | labels from `clientDefaultAirport().defaultTerminal` | done |
+| `src/features/passengers/DashboardTab.tsx` | title from `clientDefaultAirport()` | done |
 
-**Suggested fix:** `DEFAULT_TERMINAL=T3E` in config; one helper `poiUrl(terminal)`.
+**Done via:** `DEFAULT_TERMINAL` (`server/config.ts`) + `airport.poi.terminalQuery` (registry). Remaining `T3E` literals are demo asset/CSV names + static pax pages.
 
 ---
 
@@ -104,17 +114,17 @@ Primary sources:
 |------|----------|
 | `src/data/airports/pek.ts` | PEK flights (CA836…), premium IDs (TX1…), transfer gates (E16→E19), `PEK_FLIGHT_GATE_MAP`, demo flight indices |
 
-**Consumers (non-exhaustive):**
+**Consumers (now registry-driven unless noted):**
 
-| Consumer | Usage |
-|----------|-------|
-| `server/routes/paxSessions.ts` | `buildPekFlights()` for session gate resolution |
-| `server/hub/wsHub.ts` | `PEK_FLIGHT_GATE_MAP` for WS nav_request |
-| `server/auth/paxAuthPolicy.ts` | `PEK_PREMIUM_IDS` for legacy chat entitlement |
-| `src/components/PaxEntryWrapper.tsx` | `PEK_PAX_DEMO_CONFIG`, `PEK_DEFAULT_TRANSFER_GATES` |
-| FIDS / flight services | static fallback when FlightAware unavailable |
+| Consumer | Usage | Status |
+|----------|-------|--------|
+| `server/services/fidsService.ts` | `airport.demo.outboundFlights` + `defaultTransferGates` | done (registry) |
+| `server/hub/wsHub.ts` | `airport.demo.flightGateMap` for WS nav_request | done (registry) |
+| `src/services/flightService.ts` | `buildFlights(airportId)` reads `airport.demo.outboundFlights` | done (registry) |
+| `server/passengers/PassengerRegistry.ts` | spawn radius from `airport.poi.spawnRadiusM` | done (registry) |
+| `server/auth/paxAuthPolicy.ts`, `server/hub/chat.ts` | `PEK_PREMIUM_IDS` legacy entitlement | gated by `PAX_LEGACY_AUTH` (B2) |
 
-**Suggested fix:** mark files as `*.demo.ts`; production paths use live FIDS + session `capabilities` only.
+**Source of truth:** `pek.config.ts` wraps `src/data/airports/pek.ts` (demo seed). `pek.ts` keeps its name but its header documents it as demo; the `*.demo.ts` rename (B1) is cosmetic and deferred.
 
 ---
 
@@ -122,21 +132,21 @@ Primary sources:
 
 | Location | Hardcoded value | Status |
 |----------|-----------------|--------|
-| `server/routes/paxSessions.ts` ~51 | `resolveOutbound()` fallback gate `"E19"` | todo |
-| `public/route_site/index.html` ~1676 | PEK path fallback `toG = 'E19'` | todo |
+| `server/services/fidsService.ts` | `airport.demo.defaultTransferGates.to` (registry), `DEFAULT_GATE="E19"` only as last-resort const | done |
+| `public/route_site/route-site-pek-engine.js` | reads `config.defaultRouteGates` (fallback `E16→E19`) | done |
 
-**Suggested fix:** `DEFAULT_GATE` per airport in config, or no fallback (return 400 if flight unknown).
+**Note:** per-airport default gate now lives in `airport.demo.defaultTransferGates` / `config/pek.json`.
 
 ---
 
 ### 6. API base path — React vs static pages
 
-| Pattern | Location | Issue |
-|---------|----------|-------|
-| Root-relative `fetch("/api/...")` | `src/app/App.tsx`, `src/services/auth.ts`, `src/features/pax/session.ts`, `src/services/pdrClient.ts` | Breaks sub-path deploy (e.g. `/orienta`) |
-| `orientaUrl()` base path helper | `public/orienta-base.js` | Static pages support `/orienta` prefix; React does not |
+| Pattern | Location | Status |
+|---------|----------|--------|
+| `apiUrl(path)` / `wsUrl()` helpers | `src/config/api.ts` | done (P1-9) |
+| React `fetch` / WS | `App.tsx`, `auth.ts`, `session.ts`, `pdrClient.ts`, `realtime.ts`, pax pages all route through `apiUrl()`/`wsUrl()` | done |
 
-**Suggested fix:** `src/config/api.ts` with `apiUrl(path)` mirroring `orienta-base.js`; use in all `fetch` / WS URLs.
+Sub-path deploy (e.g. `/orienta`) works for both React and static pages.
 
 ---
 
@@ -173,13 +183,10 @@ Primary sources:
 
 ### Coordinates & bounding boxes
 
-| Value | Location |
-|-------|----------|
-| PEK center `40.0748162, 116.6061088` | `src/services/pekPoiCoords.ts`, `server/lib/poiCache.ts`, `src/features/map/leafletAdapter.ts` |
-| PEK bbox `40.0694–40.0800, 116.6008–116.6108` | same files |
-| SFO center & bbox | _(removed with sfo.ts)_ |
-| ~80 SFO gate lat/lng pairs | _(removed with sfo.ts)_ |
-| New passenger spawn radius `400` m | `server/passengers/PassengerRegistry.ts` |
+| Value | Location | Status |
+|-------|----------|--------|
+| PEK center / bbox | canonical in `pek.config.ts` (`poi.defaultCenter` / `poi.bbox`); `leafletAdapter.ts` fallback reads `clientDefaultAirport().poi.defaultCenter` | mostly centralized; `pekPoiCoords.ts` / `poiCache.ts` keep PEK literals as static fallback |
+| New passenger spawn radius `400` m | `airport.poi.spawnRadiusM` (registry); `PassengerRegistry.ts` reads it | done |
 
 ### External third-party URLs
 
@@ -205,26 +212,26 @@ Primary sources:
 
 | Item | Location | Status |
 |------|----------|--------|
-| Login form pre-filled `admin@airchina.com` / `orienta123` | `src/components/LoginScreen.tsx` | todo |
-| Login hint text with demo creds | `src/components/LoginScreen.tsx` | todo |
-| Startup log URL `pid=TX1` | `server/server.ts` | todo |
-| BCBP alias `DA8X3→TX1`, etc. | `public/route_site/index.html`, demo flows | todo |
-| Client `POST /api/metrics/events` | `public/orienta-metrics.js` — **no server route** | todo |
-| PDR error hints mentioning port 10000 | `public/orienta-pdr-client.js`, `PaxAppPage.tsx` | todo |
+| Login form pre-filled creds | `src/components/LoginScreen.tsx` — now gated by `import.meta.env.DEV` | done (A5) |
+| Login hint text with demo creds | `src/components/LoginScreen.tsx` — dev-only | done |
+| Startup log URL `pid=TX1` | `server/server.ts` | todo (cosmetic) |
+| BCBP alias `DA8X3→TX1`, etc. | `config/pek.json` `paxAliases` + `route-site-pek-engine.js`; static pax pages | partial (demo) |
+| Client `POST /api/metrics/events` | implemented (P1-5): `server/routes/metrics.ts` → SQLite | done |
+| PDR error hints mentioning port 10000 | `public/orienta-pdr-client.js`, `PaxAppPage.tsx` | todo (cosmetic) |
 
 ---
 
-## Largest hardcoded block: `public/route_site/index.html`
+## `public/route_site/` — decomposed (Multi-airport Phase 4) ✅
 
-~6500 lines. PEK-only after SFO cleanup (2026-06). Still embedded:
+The former ~5.8k-line `index.html` is now:
 
-- Video basenames, CSV names, PEK path polylines, gate segment timing
-- Legacy canvas pixel paths (`PPL_PATH`, base64 floor images) — candidate for Phase 4 removal
-- Tenant, passenger aliases
+- `index.html` — 106-line shell
+- `route-site.css` — extracted styles
+- `config-bootstrap.js` — resolves hub from `?hub=`/`?airport=`, exposes `window.__ROUTESITE_CONFIG__`
+- `config/pek.json` — tenant, terminal, default gates, pax aliases, video names, polyline fallback
+- `route-site-pek-engine.js` / `route-site-map-geometry.js` / `route-site-main.js` — engines (read config with PEK fallbacks)
 
-**Duplicates** data in `src/data/airports/pek.ts` (e.g. TX1→E16/E19).
-
-**Long-term direction:** extract `route-site-config.json` (or per-hub JSON) + thin bootstrap script; keep HTML as shell only.
+**Still embedded (demo content):** video basenames, CSV pacing, gate-segment timing, and the TX1/TX2/TX3 BCBP alias gate map live in `route-site-pek-engine.js`. These are curated PEK demo assets; extract per-hub only when a second hub needs route_site.
 
 ---
 
@@ -261,27 +268,27 @@ apps/dashboard/
 
 Use this as a checklist. Mark done in the **Status** column above.
 
-### Phase A — quick wins (1–2 days)
+### Phase A — quick wins
 
-- [ ] **A1** Add `VITE_ORIENTA_TENANT` + `VITE_DEFAULT_AIRPORT`; use in `Dashboard.tsx`
-- [ ] **A2** `PaxAccountStore` default tenant → `ROUTE_SITE_DEFAULT_TENANT` from config
-- [ ] **A3** Extract `DEFAULT_TERMINAL` (`T3E`); single POI URL builder
-- [ ] **A4** `src/config/api.ts` — `apiUrl()` / `wsUrl()` for sub-path deploy
-- [ ] **A5** `LoginScreen` pre-filled creds only when `import.meta.env.DEV`
+- [x] **A1** `VITE_ORIENTA_TENANT` + `VITE_DEFAULT_AIRPORT`; used in `Dashboard.tsx`
+- [x] **A2** `PaxAccountStore` default tenant → `ROUTE_SITE_DEFAULT_TENANT`
+- [x] **A3** `DEFAULT_TERMINAL` + registry `terminalQuery`; single POI URL path
+- [x] **A4** `src/config/api.ts` — `apiUrl()` / `wsUrl()` for sub-path deploy
+- [x] **A5** `LoginScreen` pre-filled creds only when `import.meta.env.DEV`
 
-### Phase B — demo vs production boundary (2–4 days)
+### Phase B — demo vs production boundary
 
-- [ ] **B1** Rename / document `src/data/airports/*.ts` as demo seed data
-- [ ] **B2** Remove `PEK_PREMIUM_IDS` from chat policy when `PAX_LEGACY_AUTH=0`
-- [ ] **B3** `resolveOutbound()` — configurable default gate or strict error
-- [ ] **B4** Align route_site hub with admin (done: forced PEK)
+- [ ] **B1** Rename `src/data/airports/pek.ts` → `*.demo.ts` (cosmetic; header already documents it as demo)
+- [ ] **B2** Remove `PEK_PREMIUM_IDS` from chat policy when `PAX_LEGACY_AUTH=0` (currently gated by the flag)
+- [x] **B3** `resolveOutbound()` — default gate from `airport.demo.defaultTransferGates` (registry)
+- [x] **B4** route_site hub honors `?hub=`/`?airport=` (config-driven)
 - [ ] **B5** Resolve CSV naming: one canonical file + symlink or copy in docs
 
-### Phase C — route_site decomposition (larger)
+### Phase C — route_site decomposition
 
-- [ ] **C1** Extract PEK config JSON from `index.html`; remove legacy canvas pixel overlay
-- [ ] **C2** Deduplicate TX1/TX2/TX3 gates — single source shared with `pek.demo.ts`
-- [ ] **C3** Implement or remove `/api/metrics/events`
+- [x] **C1** route_site decomposed: `config/pek.json` + `config-bootstrap.js` + 3 engine scripts (Phase 4)
+- [ ] **C2** Deduplicate TX1/TX2/TX3 gates — still duplicated in `route-site-pek-engine.js` and static pax pages
+- [x] **C3** `/api/metrics/events` implemented (P1-5)
 
 ### Phase D — production hardening
 
