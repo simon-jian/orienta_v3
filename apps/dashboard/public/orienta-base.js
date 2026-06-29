@@ -15,10 +15,6 @@
     try {
       var p = location.pathname || "";
       var markers = [
-        "/pax.html",
-        "/pax-flight.html",
-        "/pax-login.html",
-        "/pax-route-video.html",
         "/route_site/",
         "/index.html",
         "/lounge-qr.html",

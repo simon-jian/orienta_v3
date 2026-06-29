@@ -15,7 +15,6 @@ import {
   clearPaxSession,
   fetchPaxSession,
   getStoredPaxSession,
-  legacyPaxHref,
   type PaxSession,
 } from "./session";
 import { apiUrl } from "../../config/api";
@@ -421,12 +420,6 @@ export default function PaxAppPage() {
               </span>
             ) : null}
             {pdrStatus ? <span className="small">{pdrStatus}</span> : null}
-            {/* P1-8: legacy navigation link is dev-only; this React app is canonical in production. */}
-            {import.meta.env.DEV ? (
-              <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
-                Open legacy navigation (dev)
-              </a>
-            ) : null}
             {navDebug ? <span className="small" style={{ alignSelf: "center" }}>{navDebug}</span> : null}
           </div>
         </section>

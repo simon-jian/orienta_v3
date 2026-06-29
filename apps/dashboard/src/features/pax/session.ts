@@ -52,14 +52,3 @@ export async function fetchPaxSession(token: string): Promise<PaxSession> {
   savePaxSession(data.session);
   return data.session;
 }
-
-export function legacyPaxHref(session: PaxSession): string {
-  const u = new URL("/pax.html", window.location.origin);
-  u.searchParams.set("tenant", session.passenger.tenantId);
-  u.searchParams.set("pax", session.passenger.id);
-  u.searchParams.set("plan", session.plan);
-  u.searchParams.set("name", session.passenger.name);
-  u.searchParams.set("dep", session.passenger.flightId);
-  u.searchParams.set("gateTo", session.passenger.gateId);
-  return u.pathname + "?" + u.searchParams.toString();
-}

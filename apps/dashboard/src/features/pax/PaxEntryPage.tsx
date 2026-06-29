@@ -1,17 +1,6 @@
-import { useMemo, useState } from "react";
-import PaxEntryWrapper from "../../components/PaxEntryWrapper";
-import { legacyPaxHref, savePaxSession, type PaxSession, type PaxSessionApiResult } from "./session";
+import { useState } from "react";
+import { savePaxSession, type PaxSession, type PaxSessionApiResult } from "./session";
 import { apiUrl } from "../../config/api";
-
-const legacyQueryKeys = [
-  "pid", "pax", "pix", "direct", "skip", "demo", "view",
-  "gateFrom", "gateTo", "routeSite",
-];
-
-function hasLegacyPaxQuery(): boolean {
-  const sp = new URLSearchParams(window.location.search);
-  return legacyQueryKeys.some((key) => sp.has(key));
-}
 
 async function postPaxSession(path: string, body: Record<string, unknown>): Promise<PaxSession> {
   const res = await fetch(apiUrl(path), {
@@ -49,7 +38,6 @@ function Field(props: {
 }
 
 export default function PaxEntryPage() {
-  const legacy = useMemo(() => hasLegacyPaxQuery(), []);
   const [scanPayload, setScanPayload] = useState("");
   const [basicArr, setBasicArr] = useState("");
   const [basicDep, setBasicDep] = useState("");
@@ -61,8 +49,6 @@ export default function PaxEntryPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [session, setSession] = useState<PaxSession | null>(null);
-
-  if (legacy) return <PaxEntryWrapper />;
 
   async function submit(kind: string, run: () => Promise<PaxSession>) {
     setBusy(kind);
@@ -160,12 +146,6 @@ export default function PaxEntryPage() {
             <a className="btn primary" style={{ textAlign: "center", textDecoration: "none" }} href="/pax/app">
               进入新版旅客端
             </a>
-            {/* P1-8: legacy page link is dev-only; React /pax/app is canonical in production. */}
-            {import.meta.env.DEV ? (
-              <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={legacyPaxHref(session)}>
-                使用 legacy 旅客页 (dev)
-              </a>
-            ) : null}
           </section>
         ) : null}
       </main>
