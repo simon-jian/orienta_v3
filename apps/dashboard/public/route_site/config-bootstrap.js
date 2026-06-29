@@ -2,11 +2,11 @@
  * route_site config bootstrap (Multi-airport Phase 4).
  *
  * Resolves the hub from ?airport=/?hub= (PEK-only today) and exposes
- * window.__ROUTESITE_CONFIG__ for route-site-app.js. A built-in PEK config makes
+ * window.__ROUTESITE_CONFIG__ for the route-site engines. A built-in PEK config makes
  * this synchronous + offline-safe; config/<hub>.json refines it asynchronously
  * (same values today, but the externalized source of truth going forward).
  *
- * Must load before route-site-app.js (it does — see index.html script order).
+ * Must load before route-site-pek-engine.js (it does — see index.html script order).
  */
 (function () {
   "use strict";
