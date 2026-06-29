@@ -343,14 +343,15 @@ function orientaPickFirstExistingPekVideoBasename_(pekBn, csvVideoBasenames) {
   if (csvVideoBasenames && csvVideoBasenames.length) {
     for (var c = 0; c < csvVideoBasenames.length; c++) out.push(csvVideoBasenames[c]);
   }
-  out.push(
+  var __segs = (orientaRouteSiteCfg_().video && orientaRouteSiteCfg_().video.segmentBasenames) || [
     'PEK_T3E_F3_E24_E36.mp4',
     'PEK_T3E_F3_E32_Security_Checkpoint2.mp4',
     'PEK_T3E_Security_Checkpoint_2_F3_Escalator_2_F2.mp4',
     'PEK_T3E_F3_E32_Escalator_2.mp4',
     'PEK_T3E_Escalator_2_F3_F2.mp4',
     'PEK_T3E_F2_Escalator_2_E24.mp4'
-  );
+  ];
+  for (var s = 0; s < __segs.length; s++) out.push(__segs[s]);
   for (var i = 0; i < out.length; i++) {
     if (orientaPekProbeStaticOkSync_(out[i])) return out[i];
   }
@@ -443,9 +444,9 @@ function orientaApplyPekGateClipFromQuery_(rows) {
     var fromG = orientaNormalizeGate_(sp.get('from') || sp.get('origin') || sp.get('gateFrom') || '');
     var toG = orientaNormalizeGate_(sp.get('to') || sp.get('dest') || sp.get('destination') || sp.get('gateTo') || '');
     var rawPax = String(sp.get('pax') || sp.get('pid') || sp.get('pix') || '').trim();
-    var paxAlias = { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" };
+    var paxAlias = orientaRouteSiteCfg_().paxAliases || { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" };
     var pax = paxAlias[(rawPax || '').toUpperCase()] || rawPax;
-    var demoGateByPax = {
+    var demoGateByPax = orientaRouteSiteCfg_().paxRouteGates || {
       TX1: { from: 'E16', to: 'E19' },
       TX2: { from: 'E18', to: 'E19' },
       TX3: { from: 'E17', to: 'E19' }

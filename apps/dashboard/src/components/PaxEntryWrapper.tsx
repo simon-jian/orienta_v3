@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PEK_PAX_DEMO_CONFIG, PEK_DEFAULT_TRANSFER_GATES, demoFlightsForPid } from "../data/airports/pek";
+import { PEK_PAX_DEMO_CONFIG, PEK_DEFAULT_TRANSFER_GATES, demoFlightsForPid } from "../data/airports/pek.demo";
 
 (function initPaxShellNavDebugGlobals() {
   const g = globalThis as unknown as Record<string, unknown>;

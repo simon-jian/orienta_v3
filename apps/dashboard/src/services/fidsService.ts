@@ -1,3 +1,12 @@
+/**
+ * Dashboard FIDS board (departures / arrivals).
+ *
+ * Sourced from the airport registry's demo/seed flights (no hardcoded PEK board);
+ * times are derived from each flight's offset so the board stays plausible. Live
+ * deployments would back this with a real FIDS feed instead.
+ */
+import { getAirportOrDefault } from "../config/airports/registry";
+
 export type FidsFlight = {
   flight: string;
   origin?: string;
@@ -9,36 +18,42 @@ export type FidsFlight = {
 
 export const REFRESH_MS = 60 * 60 * 1000; // 1 hour
 
-const MOCK_DEPARTURES: FidsFlight[] = [
-  { flight: "CA783", destination: "Frankfurt",    scheduledTime: "3:28pm", status: "On Time",   gate: "E15" },
-  { flight: "CA837", destination: "London",       scheduledTime: "3:45pm", status: "Boarding",  gate: "E19" },
-  { flight: "CA781", destination: "Paris",        scheduledTime: "4:10pm", status: "Final Call",gate: "E22" },
-  { flight: "CA831", destination: "Amsterdam",    scheduledTime: "4:50pm", status: "On Time",   gate: "E26" },
-  { flight: "CA903", destination: "Tokyo",        scheduledTime: "4:20pm", status: "Boarding",  gate: "E12" },
-  { flight: "CA935", destination: "Los Angeles",  scheduledTime: "5:30pm", status: "On Time",   gate: "E08" },
-  { flight: "CA911", destination: "Sydney",       scheduledTime: "4:15pm", status: "Boarding",  gate: "E05" },
-  { flight: "CA921", destination: "Seoul",        scheduledTime: "4:25pm", status: "Boarding",  gate: "E30" },
-  { flight: "CA741", destination: "Manila",       scheduledTime: "2:50pm", status: "Departed",  gate: "E33" },
-  { flight: "CA861", destination: "Singapore",    scheduledTime: "3:00pm", status: "Departed",  gate: "E36" },
-];
-
-const MOCK_ARRIVALS: FidsFlight[] = [
-  { flight: "CA836", origin: "London",        scheduledTime: "1:20pm", status: "Landed",  gate: "E02" },
-  { flight: "CA856", origin: "Frankfurt",     scheduledTime: "1:35pm", status: "Landed",  gate: "E04" },
-  { flight: "CA901", origin: "Tokyo",         scheduledTime: "1:45pm", status: "Landed",  gate: "E06" },
-  { flight: "CA902", origin: "Seoul",         scheduledTime: "1:50pm", status: "Landed",  gate: "E08" },
-  { flight: "CA921", origin: "Sydney",        scheduledTime: "1:15pm", status: "Landed",  gate: "E10" },
-  { flight: "CA931", origin: "Los Angeles",   scheduledTime: "1:10pm", status: "Landed",  gate: "E12" },
-  { flight: "CA841", origin: "Paris",         scheduledTime: "1:30pm", status: "Landed",  gate: "E14" },
-  { flight: "CA861", origin: "Amsterdam",     scheduledTime: "1:40pm", status: "Landed",  gate: "E16" },
-  { flight: "UA851", origin: "San Francisco", scheduledTime: "3:28pm", status: "On Time", gate: "E18" },
-  { flight: "LH720", origin: "Munich",        scheduledTime: "4:50pm", status: "On Time", gate: "E20" },
-];
-
-export async function fetchDepartures(_airport: string): Promise<FidsFlight[]> {
-  return MOCK_DEPARTURES;
+/** Offset (minutes from now) → "3:28pm" style clock label. */
+function clockFromOffset(offsetMin: number): string {
+  const d = new Date(Date.now() + offsetMin * 60_000);
+  let h = d.getHours();
+  const m = d.getMinutes();
+  const ap = h >= 12 ? "pm" : "am";
+  h = h % 12;
+  if (h === 0) h = 12;
+  return `${h}:${String(m).padStart(2, "0")}${ap}`;
 }
 
-export async function fetchArrivals(_airport: string): Promise<FidsFlight[]> {
-  return MOCK_ARRIVALS;
+function departureStatus(s: string): string {
+  return s === "Closed" ? "Departed" : s;
+}
+
+export async function fetchDepartures(airport?: string): Promise<FidsFlight[]> {
+  const def = getAirportOrDefault(airport);
+  const outbound = def.demo?.outboundFlights ?? [];
+  return outbound.map((f) => ({
+    flight: f.id,
+    destination: f.toCity,
+    scheduledTime: clockFromOffset(f.depOffset),
+    status: departureStatus(f.status),
+    gate: f.gate,
+  }));
+}
+
+export async function fetchArrivals(airport?: string): Promise<FidsFlight[]> {
+  const def = getAirportOrDefault(airport);
+  const inbound = def.demo?.inboundFlights ?? [];
+  const gateMap = def.demo?.flightGateMap ?? {};
+  return inbound.map((f) => ({
+    flight: f.id,
+    origin: f.fromCity,
+    scheduledTime: clockFromOffset(f.arr),
+    status: f.arr <= 0 ? "Landed" : "On Time",
+    gate: gateMap[f.id],
+  }));
 }

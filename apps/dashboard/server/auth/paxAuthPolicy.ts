@@ -12,7 +12,7 @@
 import { HubStore } from "../hub/HubStore";
 import type { PaxSessionClaims } from "../passengers/paxSessionToken";
 import { PAX_LEGACY_AUTH } from "../config";
-import { PEK_PREMIUM_IDS } from "../../src/data/airports/pek";
+import { PEK_PREMIUM_IDS } from "../../src/data/airports/pek.demo";
 
 /**
  * @deprecated Legacy-only. Operator-chat entitlement in production comes from

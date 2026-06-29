@@ -6,7 +6,7 @@ import {
   PEK_OUTBOUND_FLIGHTS,
   PEK_FLIGHT_GATE_MAP,
   PEK_PREMIUM_IDS,
-} from "../../data/airports/pek";
+} from "../../data/airports/pek.demo";
 
 describe("airport registry", () => {
   it("resolves PEK by id, IATA, and ICAO (case-insensitive)", () => {

@@ -13,7 +13,7 @@ import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 import type { Gate, Flight, PaxExtStatus, AdminSession } from "../types/types";
 import { loadGates } from "../services/gateService";
 import { buildFlights } from "../services/flightService";
-import { PEK_SIM_PAX } from "../data/airports/pek";
+import { PEK_SIM_PAX } from "../data/airports/pek.demo";
 import { logout as authLogout } from "../services/auth";
 import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT, clientDefaultAirport } from "../config/client";
 

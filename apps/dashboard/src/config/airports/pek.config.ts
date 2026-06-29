@@ -17,7 +17,7 @@ import {
   PEK_FLIGHT_GATE_MAP,
   PEK_PREMIUM_IDS,
   PEK_DEFAULT_TRANSFER_GATES,
-} from "../../data/airports/pek";
+} from "../../data/airports/pek.demo";
 
 export const PEK_AIRPORT: AirportDefinition = {
   id: "PEK",

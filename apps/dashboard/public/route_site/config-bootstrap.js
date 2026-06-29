@@ -20,10 +20,23 @@
       poiTerminalQuery: "T3E",
       defaultRouteGates: { from: "E16", to: "E19" },
       paxAliases: { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" },
+      paxRouteGates: {
+        TX1: { from: "E16", to: "E19" },
+        TX2: { from: "E18", to: "E19" },
+        TX3: { from: "E17", to: "E19" },
+      },
       video: {
         gateCsv: "PEK_gate_timestamp_full_with_E24_E36.csv",
         mergedFromCsvBasename: "PEK_gate_timestamp_merged.mp4",
         mergeEndpoint: "/api/orienta/pek-merged-video",
+        segmentBasenames: [
+          "PEK_T3E_F3_E24_E36.mp4",
+          "PEK_T3E_F3_E32_Security_Checkpoint2.mp4",
+          "PEK_T3E_Security_Checkpoint_2_F3_Escalator_2_F2.mp4",
+          "PEK_T3E_F3_E32_Escalator_2.mp4",
+          "PEK_T3E_Escalator_2_F3_F2.mp4",
+          "PEK_T3E_F2_Escalator_2_E24.mp4",
+        ],
       },
       pathLonLatFallback: [
         [116.610013, 40.079188],
