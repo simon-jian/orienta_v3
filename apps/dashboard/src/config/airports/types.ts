@@ -52,32 +52,6 @@ export type AirportPoiConfig = {
   spawnRadiusM?: number;
 };
 
-export type DemoOutboundFlight = {
-  id: string;
-  to: string;
-  toCity: string;
-  gate: string;
-  depOffset: number;
-  status: "Gate Open" | "Boarding" | "Final Call" | "Closed" | "Delayed";
-};
-
-export type DemoInboundFlight = {
-  id: string;
-  from: string;
-  fromCity: string;
-  arr: number;
-};
-
-/** Static demo/seed data used as a fallback when live FIDS is unavailable. */
-export type AirportDemoConfig = {
-  outboundFlights?: readonly DemoOutboundFlight[];
-  inboundFlights?: readonly DemoInboundFlight[];
-  premiumPassengerIds?: ReadonlySet<string>;
-  defaultTransferGates?: GatePair;
-  /** Flight id (and spaced variant) → departure gate. */
-  flightGateMap?: Record<string, string>;
-};
-
 export type AirportRouteSiteConfig = {
   /** route_site hub key (e.g. "PEK"). */
   hubKey: string;
@@ -101,7 +75,6 @@ export type AirportDefinition = {
   terminals: Terminal[];
   defaultTerminal: string;
   poi: AirportPoiConfig;
-  demo?: AirportDemoConfig;
   routeSite?: AirportRouteSiteConfig;
   map: {
     indoorMapEnabled: boolean;

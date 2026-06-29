@@ -107,14 +107,6 @@ export const TOURIST_ALLOWED_ORIGINS: string[] = optional("TOURIST_ALLOWED_ORIGI
   .map((s) => s.trim())
   .filter(Boolean);
 
-/** Allow legacy pax.html / route_site to identify by passengerId without session JWT. Set to 0 in production. */
-export const PAX_LEGACY_AUTH = optional("PAX_LEGACY_AUTH") !== "0";
-
-/** Allow built-in demo/demo admin login. Off by default in production unless ORIENTA_ALLOW_DEMO=1. */
-export const ALLOW_DEMO_LOGIN =
-  optional("ORIENTA_ALLOW_DEMO") === "1"
-  || (optional("ORIENTA_ALLOW_DEMO") !== "0" && process.env.NODE_ENV !== "production");
-
 // Passenger registry database path (SQLite — used when DATABASE_URL is unset)
 export const DB_PATH = optional("DB_PATH") || "./data/passengers.db";
 
@@ -173,11 +165,6 @@ export function getAdminCredentials(): Map<string, { password: string; role: "ad
     const displayName = role === "ops" ? "国航运行席位" : "国航管理员";
     const org = "Air China";
     map.set(e, { password, role, displayName, org });
-  }
-
-  // Optional demo login for local/staging (disabled in production unless ORIENTA_ALLOW_DEMO=1)
-  if (ALLOW_DEMO_LOGIN && !map.has("demo")) {
-    map.set("demo", { password: "demo", role: "viewer", displayName: "Demo User", org: "Orienta Demo" });
   }
 
   return map;

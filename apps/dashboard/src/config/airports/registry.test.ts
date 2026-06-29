@@ -2,11 +2,6 @@ import { describe, it, expect } from "vitest";
 
 import { getAirport, getAirportOrDefault, listAirports, DEFAULT_AIRPORT_ID } from "./registry";
 import { airportForTenant, getTenant, DEFAULT_TENANT_ID } from "../tenants/registry";
-import {
-  PEK_OUTBOUND_FLIGHTS,
-  PEK_FLIGHT_GATE_MAP,
-  PEK_PREMIUM_IDS,
-} from "../../data/airports/pek.demo";
 
 describe("airport registry", () => {
   it("resolves PEK by id, IATA, and ICAO (case-insensitive)", () => {
@@ -27,13 +22,13 @@ describe("airport registry", () => {
     expect(listAirports().map((a) => a.id)).toEqual(["PEK"]);
   });
 
-  it("keeps the PEK definition in sync with canonical demo data", () => {
+  it("exposes the PEK hub's production config (no demo/seed data)", () => {
     const pek = getAirport("PEK")!;
-    expect(pek.demo?.outboundFlights).toBe(PEK_OUTBOUND_FLIGHTS);
-    expect(pek.demo?.flightGateMap).toBe(PEK_FLIGHT_GATE_MAP);
-    expect(pek.demo?.premiumPassengerIds).toBe(PEK_PREMIUM_IDS);
     expect(pek.defaultTerminal).toBe("T3E");
     expect(pek.poi.terminalQuery).toBe("T3E");
+    expect(pek.poi.mode).toBe("indoor_api");
+    expect(pek.routeSite?.hubKey).toBe("PEK");
+    expect((pek as unknown as { demo?: unknown }).demo).toBeUndefined();
   });
 });
 

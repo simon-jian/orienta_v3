@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PEK_PAX_DEMO_CONFIG, PEK_DEFAULT_TRANSFER_GATES, demoFlightsForPid } from "../data/airports/pek.demo";
 
 (function initPaxShellNavDebugGlobals() {
   const g = globalThis as unknown as Record<string, unknown>;
@@ -58,27 +57,27 @@ function appendPdrParams(dest: URL) {
   if (pdrBackend) dest.searchParams.set("pdrBackend", pdrBackend);
 }
 
-function defaultPaxNameForPid(pid: string) {
-  return PEK_PAX_DEMO_CONFIG[pid]?.displayName ?? "SIYAO FU";
+function normalizePlan(raw: string | null): "free" | "premium" {
+  const p = (raw || "").trim().toLowerCase();
+  return p === "premium" || p === "paid" ? "premium" : "free";
 }
 
 function buildPaxHtmlSrc(origin: string, tenantId: string, pid: string) {
   const u = new URL("/pax.html", origin);
   u.searchParams.set("tenant", tenantId);
   u.searchParams.set("pax", pid);
-  u.searchParams.set("plan", "premium");
-  u.searchParams.set("name", defaultPaxNameForPid(pid));
-  if (tenantId === "airchina") {
-    u.searchParams.set("hub", "PEK");
-    const gf = (qs("gateFrom") || "").trim();
-    const gt = (qs("gateTo") || "").trim();
-    const def = demoGatePairForPid(pid);
-    u.searchParams.set("gateFrom", gf || def.gateFrom);
-    u.searchParams.set("gateTo", gt || def.gateTo);
-    const flights = demoFlightsForPid(pid);
-    if (flights.dep) u.searchParams.set("dep", flights.dep);
-    if (flights.arr) u.searchParams.set("arr", flights.arr);
-  }
+  u.searchParams.set("plan", normalizePlan(qs("plan")));
+  const name = (qs("name") || "").trim();
+  if (name) u.searchParams.set("name", name);
+  u.searchParams.set("hub", (qs("hub") || "PEK").trim());
+  const gf = (qs("gateFrom") || "").trim();
+  const gt = (qs("gateTo") || "").trim();
+  if (gf) u.searchParams.set("gateFrom", gf);
+  if (gt) u.searchParams.set("gateTo", gt);
+  const dep = (qs("dep") || "").trim();
+  const arr = (qs("arr") || "").trim();
+  if (dep) u.searchParams.set("dep", dep);
+  if (arr) u.searchParams.set("arr", arr);
   appendRouteSiteParams(u);
   appendRouteSiteIndoorParams(u);
   appendOrientaDebugParams(u);
@@ -106,13 +105,10 @@ function buildPaxFlightSrc(
   payload: { flight?: string; arr?: string; dep?: string },
 ) {
   const f = new URL("/pax-flight.html", origin);
-  const cfg = PEK_PAX_DEMO_CONFIG[pid] ?? {};
-  const effectivePlan: "free" | "premium" = cfg.plan ?? plan;
-  const effectiveName = cfg.displayName ?? name;
   f.searchParams.set("tenant", tenantId);
   f.searchParams.set("pid", pid);
-  f.searchParams.set("plan", effectivePlan);
-  f.searchParams.set("name", effectiveName);
+  f.searchParams.set("plan", plan);
+  f.searchParams.set("name", name);
   f.searchParams.set("intent", intent);
   if (payload.flight) f.searchParams.set("flight", payload.flight);
   if (payload.arr)    f.searchParams.set("arr", payload.arr);
@@ -121,24 +117,23 @@ function buildPaxFlightSrc(
   return f.pathname + "?" + f.searchParams.toString();
 }
 
-function demoGatePairForPid(pid: string): { gateFrom: string; gateTo: string } {
-  return PEK_PAX_DEMO_CONFIG[pid]?.transferGates ?? PEK_DEFAULT_TRANSFER_GATES;
-}
-
 function buildPaxDialogVideoSrc(origin: string, tenantId: string, pid: string) {
   const u = new URL("/pax.html", origin);
   u.searchParams.set("tenant", tenantId);
   u.searchParams.set("pax", pid);
-  u.searchParams.set("plan", "premium");
-  u.searchParams.set("name", defaultPaxNameForPid(pid));
-  if (tenantId === "airchina") u.searchParams.set("hub", "PEK");
+  u.searchParams.set("plan", normalizePlan(qs("plan")));
+  const name = (qs("name") || "").trim();
+  if (name) u.searchParams.set("name", name);
+  u.searchParams.set("hub", (qs("hub") || "PEK").trim());
   u.searchParams.set("view", "video");
-  const { gateFrom, gateTo } = demoGatePairForPid(pid);
-  u.searchParams.set("gateFrom", gateFrom);
-  u.searchParams.set("gateTo", gateTo);
-  const flights = demoFlightsForPid(pid);
-  if (flights.dep) u.searchParams.set("dep", flights.dep);
-  if (flights.arr) u.searchParams.set("arr", flights.arr);
+  const gateFrom = (qs("gateFrom") || "").trim();
+  const gateTo = (qs("gateTo") || "").trim();
+  if (gateFrom) u.searchParams.set("gateFrom", gateFrom);
+  if (gateTo) u.searchParams.set("gateTo", gateTo);
+  const dep = (qs("dep") || "").trim();
+  const arr = (qs("arr") || "").trim();
+  if (dep) u.searchParams.set("dep", dep);
+  if (arr) u.searchParams.set("arr", arr);
   const autoGate = (qs("autoGate") || "").trim();
   if (autoGate === "1") u.searchParams.set("autoGate", "1");
   appendRouteSiteParams(u);
@@ -156,26 +151,18 @@ export default function PaxEntryWrapper() {
   }, []);
   const tenantId = useMemo(() => qs("tenant") || "airchina", []);
 
-  const demoCfg = PEK_PAX_DEMO_CONFIG[pid] ?? {};
-
   const incomingName = useMemo(() => (qs("name") || "").trim(), []);
-  const incomingPlanRaw = useMemo(() => (qs("plan") || "").trim().toLowerCase(), []);
-  const _incomingPlan = useMemo<"free" | "premium">(
-    () => (incomingPlanRaw === "premium" || incomingPlanRaw === "paid" ? "premium" : "free"),
-    [incomingPlanRaw]
-  );
-  void _incomingPlan;
+  const incomingPlan = useMemo<"free" | "premium">(() => normalizePlan(qs("plan")), []);
 
   const skipToPaxHtml = useMemo(
-    () => qs("direct") === "1" || qs("skip") === "1" || qs("demo") === "1",
+    () => qs("direct") === "1" || qs("skip") === "1",
     []
   );
 
   const skipToPaxDialogAndVideo = useMemo(() => {
-    if (demoCfg.alwaysVideoDialog) return true;
     const view = (qs("view") || "").trim().toLowerCase();
-    return view === "video" && (demoCfg.canVideoDialog ?? false);
-  }, [demoCfg]);
+    return view === "video";
+  }, []);
 
   const [iframeSrc, setIframeSrc] = useState<string>(() => {
     if (skipToPaxHtml) return buildPaxHtmlSrc(location.origin, tenantId, pid);
@@ -246,8 +233,8 @@ export default function PaxEntryWrapper() {
       if (!data || data.type !== "orienta_entry") return;
       const payload: EntryPayload = data.payload || {};
       const requestedPlan = payload.mode === "paid" ? "premium" : "free";
-      const plan: "free" | "premium" = demoCfg.plan ?? requestedPlan;
-      const name = demoCfg.displayName ?? (plan === "premium" ? incomingName || "SIYAO FU" : "Guest");
+      const plan: "free" | "premium" = incomingPlan === "premium" ? "premium" : requestedPlan;
+      const name = incomingName || "Guest";
       const intent = (payload.type || "").toLowerCase();
 
       if (intent === "depart" || intent === "arrive" || intent === "transfer") {
@@ -264,13 +251,12 @@ export default function PaxEntryWrapper() {
       u.searchParams.set("pax", pid);
       u.searchParams.set("plan", plan);
       u.searchParams.set("name", name);
-      if (tenantId === "airchina") {
-        u.searchParams.set("hub", "PEK");
+      u.searchParams.set("hub", (qs("hub") || "PEK").trim());
+      {
         const gf = (qs("gateFrom") || "").trim();
         const gt = (qs("gateTo") || "").trim();
-        const def = demoGatePairForPid(pid);
-        u.searchParams.set("gateFrom", gf || def.gateFrom);
-        u.searchParams.set("gateTo", gt || def.gateTo);
+        if (gf) u.searchParams.set("gateFrom", gf);
+        if (gt) u.searchParams.set("gateTo", gt);
       }
       if (payload.arrivalFlight)   u.searchParams.set("arr", payload.arrivalFlight);
       if (payload.departureFlight) u.searchParams.set("dep", payload.departureFlight);
@@ -286,7 +272,7 @@ export default function PaxEntryWrapper() {
     }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [pid, tenantId, incomingName, demoCfg]);
+  }, [pid, tenantId, incomingName, incomingPlan]);
 
   return (
     <div style={{

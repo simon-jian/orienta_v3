@@ -58,7 +58,6 @@ export function registerConfigRoutes(router: Router): void {
         airport: DEFAULT_AIRPORT_ID,
         tenant: DEFAULT_TENANT_ID,
         terminal: airport.defaultTerminal,
-        transferGates: airport.demo?.defaultTransferGates,
       },
     });
   });

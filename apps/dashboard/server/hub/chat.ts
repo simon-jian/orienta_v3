@@ -6,8 +6,6 @@
 import crypto from "node:crypto";
 import type { ChatMessage, ChatKind } from "../../src/types/types";
 import { HubStore } from "./HubStore";
-import { PAX_LEGACY_AUTH } from "../config";
-import { PEK_PREMIUM_IDS } from "../../src/data/airports/pek.demo";
 
 const AI_REPLY_DELAY_MS = 800;
 
@@ -33,11 +31,10 @@ function aiAgentReply(_passengerId: string, body: string, _history: ChatMessage[
 }
 
 function isPremium(store: HubStore, tenantId: string, passengerId: string): boolean {
+  // Plan comes from the signed session (stored in paxMeta at connect time);
+  // unknown passengers default to free (AI replies).
   const meta = store.paxMeta.get(HubStore.key(tenantId, passengerId));
-  if (meta?.plan) return meta.plan === "premium";
-  // Legacy-only fallback: static demo premium IDs are consulted only when
-  // PAX_LEGACY_AUTH=1; in production unknown pax default to free (AI replies).
-  return PAX_LEGACY_AUTH ? PEK_PREMIUM_IDS.has(passengerId) : false;
+  return meta?.plan === "premium";
 }
 
 /**

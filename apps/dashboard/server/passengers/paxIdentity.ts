@@ -1,7 +1,7 @@
 /**
  * Resolves passenger identity from HTTP headers and request fields.
  */
-import { PAX_LEGACY_AUTH, ROUTE_SITE_DEFAULT_TENANT } from "../config";
+import { ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import {
   bearerTokenFromHeader,
   verifyPaxSessionToken,
@@ -37,7 +37,7 @@ function readPassengerId(input: PaxIdentityInput): string {
 
 /**
  * Validates passenger identity for HTTP routes and WS hello frames.
- * Returns claims when a session JWT is present; legacy mode allows passengerId only.
+ * A valid session JWT is required; requests without one are rejected.
  */
 export async function resolvePaxIdentity(
   input: PaxIdentityInput,
@@ -47,16 +47,7 @@ export async function resolvePaxIdentity(
   const passengerFromBody = readPassengerId(input);
 
   if (!token) {
-    if (!PAX_LEGACY_AUTH) {
-      return { ok: false, failure: { status: 401, error: "session_token_required" } };
-    }
-    if (!passengerFromBody) {
-      return { ok: false, failure: { status: 400, error: "missing_passenger_id" } };
-    }
-    return {
-      ok: true,
-      identity: { tenantId: tenantFromBody, passengerId: passengerFromBody, claims: null },
-    };
+    return { ok: false, failure: { status: 401, error: "session_token_required" } };
   }
 
   const claims = await verifyPaxSessionToken(token);

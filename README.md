@@ -101,11 +101,11 @@ Two supported deployment modes (set in env):
 Set in `apps/dashboard/.env` (or via `deploy.example.env`):
 
 ```dotenv
-PAX_LEGACY_AUTH=0          # require passenger session JWT (disables legacy pax.html impersonation)
-ORIENTA_ALLOW_DEMO=0       # disable demo/demo admin login
 TOURIST_ALLOWED_ORIGINS=   # CORS allowlist for tourist-position (empty = same-origin only)
 ```
 
+- Passenger APIs/WS **require a valid session JWT** — there is no legacy passenger-id
+  impersonation fallback, and no built-in demo admin login.
 - Admin auth uses an **httpOnly cookie** only; the browser never stores the JWT in `sessionStorage`.
 - **RBAC:** admin tokens carry a `role` (`admin` / `ops` / `viewer`). Passenger
   create/update needs `admin`/`ops`; delete needs `admin`. Use `requireRole(...)` for new routes.

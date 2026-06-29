@@ -157,7 +157,7 @@ export function registerPushRoutes(
     if (identity.claims && !identity.claims.capabilities?.includes("operator_chat") && kind !== "location") {
       return res.status(403).json({ ok: false, error: "chat_not_allowed_for_plan" });
     }
-    if (!identity.claims && !paxCanSendChat(null, store, identity.tenantId, identity.passengerId, kind)) {
+    if (!identity.claims && !paxCanSendChat(null, kind)) {
       return res.status(403).json({ ok: false, error: "chat_not_allowed_for_plan" });
     }
     if (!textBody)    return res.status(400).json({ ok: false, error: "missing_body" });

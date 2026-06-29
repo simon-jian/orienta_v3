@@ -51,11 +51,6 @@ export default function App() {
                   if (s) setSession(s);
                   return s;
                 }}
-                onSSO={async () => {
-                  const s = await loginWithCredentials("demo", "demo");
-                  if (s) setSession(s);
-                  return s;
-                }}
               />
             )
           }

@@ -1,28 +1,17 @@
 /**
- * LoginScreen — v3 update: onLogin/onSSO are async, no passwords in this component.
+ * LoginScreen — onLogin is async; no passwords in this component.
  * Credentials are validated server-side via POST /api/auth/login.
  */
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 
 export default function LoginScreen(props: {
   onLogin(emailOrUser: string, password: string): Promise<unknown>;
-  onSSO(): Promise<unknown>;
 }) {
-  const { onLogin, onSSO } = props;
-  // Demo conveniences (pre-filled creds, hint text, SSO button) are dev-only.
-  const isDev = import.meta.env.DEV;
-  const [user, setUser] = useState(isDev ? "admin@airchina.com" : "");
-  const [pass, setPass] = useState(isDev ? "orienta123" : "");
+  const { onLogin } = props;
+  const [user, setUser] = useState("");
+  const [pass, setPass] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  const hint = useMemo(
-    () =>
-      isDev
-        ? "Demo 账号：admin@airchina.com / orienta123（或 ops@airchina.com / orienta123）\n也可一键使用国航 SSO（模拟）登录。"
-        : "",
-    [isDev]
-  );
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,7 +37,7 @@ export default function LoginScreen(props: {
             <div className="loginLogo" />
             <div>
               <div className="loginTitle">Orienta</div>
-              <div className="loginSub">航司后台 · 国航 Demo · 北京首都机场 T3</div>
+              <div className="loginSub">航司后台 · 北京首都机场 T3</div>
             </div>
           </div>
           <div className="loginTag">Admin Console</div>
@@ -92,28 +81,7 @@ export default function LoginScreen(props: {
               <button className="btn primary" type="submit" disabled={loading}>
                 {loading ? "登录中…" : "登录"}
               </button>
-              {isDev ? (
-                <button
-                  className="btn"
-                  type="button"
-                  disabled={loading}
-                  onClick={async () => {
-                    setErr(null);
-                    setLoading(true);
-                    try { await onSSO(); } catch (ex: any) { setErr(ex?.message || "SSO 失败"); } finally { setLoading(false); }
-                  }}
-                  title="模拟企业 SSO"
-                >
-                  国航 SSO（模拟）
-                </button>
-              ) : null}
             </div>
-
-            {hint ? (
-              <div className="loginHint">
-                <pre>{hint}</pre>
-              </div>
-            ) : null}
           </form>
         </div>
 

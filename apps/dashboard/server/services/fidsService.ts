@@ -1,9 +1,10 @@
 /**
  * Flight gate/schedule resolution for passenger sessions (P1-7).
  *
- * Strategy: try live FlightAware first; fall back to the static PEK demo
- * schedule when no API key is configured, the lookup fails, or fields are
- * missing. Results are cached briefly to avoid hammering AeroAPI on every scan.
+ * Strategy: resolve from live FlightAware. When no API key is configured, the
+ * lookup fails, or fields are missing, fall back to caller-provided hints (and a
+ * generic default gate). No demo/seed schedule is bundled. Results are cached
+ * briefly to avoid hammering AeroAPI on every scan.
  */
 import { FLIGHTAWARE_API_KEY } from "../config";
 import { fetchFlightAware, normalizeFlight } from "./flightAware";
@@ -15,41 +16,35 @@ export type ResolvedOutbound = {
   gateId: string;
   outboundTo: string;
   scheduledDepMs: number;
-  source: "flightaware" | "static";
+  source: "flightaware" | "fallback";
 };
 
 const CACHE_TTL_MS = 5 * 60_000;
+/** Last-resort gate when no live data and no caller hint is available. */
 const DEFAULT_GATE = "E19";
 const cache = new Map<string, { at: number; value: ResolvedOutbound }>();
 
 /**
- * Static demo fallback, sourced from the airport registry's demo schedule
- * (Multi-airport Phase 2). The default gate is the hub's default transfer
- * destination gate, falling back to E19 for PEK parity.
+ * Fallback used when live FlightAware data is unavailable: caller-provided hints
+ * win, otherwise a generic default gate and a +90min departure estimate.
  */
-function staticResolve(
+function fallbackResolve(
   flightId: string,
   fallbackGateId: string | undefined,
   fallbackTo: string | undefined,
-  airportId: string | undefined,
 ): ResolvedOutbound {
-  const airport = getAirportOrDefault(airportId);
-  const defaultGate = airport.demo?.defaultTransferGates?.to ?? DEFAULT_GATE;
-  const flight = airport.demo?.outboundFlights?.find((f) => normalizeFlight(f.id) === flightId);
   return {
     flightId,
-    gateId: fallbackGateId || flight?.gate || defaultGate,
-    outboundTo: flight?.toCity || fallbackTo || "",
-    scheduledDepMs: flight ? Date.now() + flight.depOffset * 60_000 : Date.now() + 90 * 60_000,
-    source: "static",
+    gateId: fallbackGateId || DEFAULT_GATE,
+    outboundTo: fallbackTo || "",
+    scheduledDepMs: Date.now() + 90 * 60_000,
+    source: "fallback",
   };
 }
 
 /**
- * Resolve a passenger's outbound flight. Live data overrides the static demo
- * schedule field-by-field; anything FlightAware omits keeps the static value.
- *
- * `airportId` selects the demo schedule/default gate (defaults to PEK).
+ * Resolve a passenger's outbound flight from live FlightAware data. Anything
+ * FlightAware omits keeps the caller-provided fallback value.
  */
 export async function resolveOutbound(
   rawFlightId: string,
@@ -58,7 +53,7 @@ export async function resolveOutbound(
   airportId?: string,
 ): Promise<ResolvedOutbound> {
   const flightId = normalizeFlight(rawFlightId);
-  const fallback = staticResolve(flightId, fallbackGateId, fallbackTo, airportId);
+  const fallback = fallbackResolve(flightId, fallbackGateId, fallbackTo);
 
   if (!FLIGHTAWARE_API_KEY) return fallback;
 

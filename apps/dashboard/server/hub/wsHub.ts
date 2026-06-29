@@ -19,14 +19,12 @@ import {
 } from "./presence";
 import { handlePaxOutboundChat } from "./chat";
 import { storeAndBroadcastTrajectory } from "./trajectory";
-import { airportForTenant } from "../../src/config/tenants/registry";
-import { getAirportOrDefault } from "../../src/config/airports/registry";
 import type { ChatKind, MsgRecord, MsgStatus } from "../../src/types/types";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { resolvePaxWsHello } from "../passengers/paxWsIdentity";
 import type { PaxSessionClaims } from "../passengers/paxSessionToken";
 import { adminPayloadFromCookieHeader } from "../auth/adminAuth";
-import { paxCanSendChat, legacyPlanForPassenger } from "../auth/paxAuthPolicy";
+import { paxCanSendChat } from "../auth/paxAuthPolicy";
 
 type Role = "admin" | "pax";
 
@@ -151,7 +149,7 @@ export function attachWsHub(
             passengerId = identity.passengerId;
             paxClaims = identity.claims;
 
-            const plan = identity.claims?.plan ?? legacyPlanForPassenger(passengerId);
+            const plan = identity.claims?.plan ?? "free";
 
             const key = HubStore.key(tenantId, passengerId);
             const wasOnline = store.online.has(key);
@@ -317,7 +315,7 @@ export function attachWsHub(
         const kind = typeof msg.kind === "string" ? msg.kind : "text";
         const gateRef = typeof msg.gateRef === "string" ? msg.gateRef : undefined;
         if (!body) return;
-        if (!paxCanSendChat(paxClaims, store, tenantId, passengerId, kind)) {
+        if (!paxCanSendChat(paxClaims, kind)) {
           wsSend(ws, { type: "error", code: "chat_not_allowed_for_plan" });
           return;
         }
@@ -332,11 +330,8 @@ export function attachWsHub(
         let fromGate = "—";
         let toGate = "—";
         if (kind === "transfer") {
-          const gateMap = getAirportOrDefault(airportForTenant(tenantId)).demo?.flightGateMap ?? {};
-          const a = String(msg.arrivalFlight || "").toUpperCase().trim();
-          const d = String(msg.departureFlight || "").toUpperCase().trim();
-          fromGate = gateMap[a] || gateMap[a.replace(/\s+/g, "")] || "—";
-          toGate   = gateMap[d] || gateMap[d.replace(/\s+/g, "")] || "—";
+          // Flight→gate mapping requires a live FIDS feed (not yet wired);
+          // gates stay unknown ("—") for flight-id based transfer requests.
         } else {
           const q = String(msg.query || "");
           const m = q.toUpperCase().match(/\b([A-Z]\d{1,2})\b/g) || [];

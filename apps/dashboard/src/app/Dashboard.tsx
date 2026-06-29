@@ -13,7 +13,6 @@ import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 import type { Gate, Flight, PaxExtStatus, AdminSession } from "../types/types";
 import { loadGates } from "../services/gateService";
 import { buildFlights } from "../services/flightService";
-import { PEK_SIM_PAX } from "../data/airports/pek.demo";
 import { logout as authLogout } from "../services/auth";
 import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT, clientDefaultAirport } from "../config/client";
 
@@ -108,8 +107,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     [selectedPaxId, passengers],
   );
 
-  const airportLabel = `国航 Demo · ${clientDefaultAirport().iata} ${clientDefaultAirport().defaultTerminal} · 国际→国际`;
-  const simPax = PEK_SIM_PAX;
+  const airportLabel = `${clientDefaultAirport().iata} ${clientDefaultAirport().defaultTerminal} · 国际→国际`;
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -223,7 +221,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             )}
 
             {/* Priority List */}
-            <div className="card card-priority" style={{ marginTop: 10 }}>
+            <div className="card card-priority" style={{ marginTop: 10, flexGrow: 1 }}>
               <h3 style={{ fontSize: 13 }}>🔴 Priority List</h3>
               {priorityList.length === 0 && <div className="small" style={{ opacity: 0.5 }}>No urgent passengers.</div>}
               {priorityList.map((p) => (
@@ -237,34 +235,6 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
                   </span>
                   <span className="small">{extStatusLabel(p.extStatus as PaxExtStatus)}</span>
                 </button>
-              ))}
-            </div>
-
-            {/* Pax Simulator */}
-            <div className="card card-sim" style={{ fontSize: 12, marginTop: 10, flexGrow: 1 }}>
-              <div style={{ fontWeight: 700, marginBottom: 6, fontSize: 13 }}>🧪 Pax Simulator</div>
-              <div style={{ opacity: 0.7, marginBottom: 8, fontSize: 11 }}>
-                Open passenger frontend. TX1 = <b>Siyao Fu</b>（初始离线，需在前端登录上线）。
-              </div>
-              {simPax.map(({ id, name, plan, note }) => (
-                <div key={id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 0", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: presence[id] ? "#34c759" : "#636366", display: "inline-block" }} />
-                      <span style={{ fontWeight: 600 }}>{name}</span>
-                    </span>
-                    <span className="small" style={{ marginLeft: 4, opacity: 0.6 }}>({id})</span>
-                    <div className="small" style={{ color: plan === "Premium" ? "#0a84ff" : "#636366" }}>
-                      {plan === "Premium" ? "💎" : "🤖"} {presence[id] ? "Online" : "Offline"} · {note}
-                    </div>
-                  </div>
-                  <button
-                    className="btn"
-                    style={{ fontSize: 10, padding: "4px 10px", flexShrink: 0, marginLeft: 6 }}
-                    onClick={() => { setSelectedPaxId(id); setTab("map"); openConversation(id); }}>
-                    Open ↗
-                  </button>
-                </div>
               ))}
             </div>
           </div>
