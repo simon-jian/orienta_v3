@@ -9,10 +9,12 @@ type CreateOptions = {
   onHoverPassenger?(id: string | null): void;
 };
 
-// Fallback center when no initialCenter is supplied (from the default airport's
-// registry config; PEK T3E spine center today).
-const __defCenter = clientDefaultAirport().poi.defaultCenter;
-const DEFAULT_CENTER: [number, number] = [__defCenter.lat, __defCenter.lng];
+// Fallback center when no initialCenter is supplied (from the runtime-loaded
+// default airport config). Resolved lazily so it reflects the hydrated registry.
+function defaultCenter(): [number, number] {
+  const c = clientDefaultAirport().poi.defaultCenter;
+  return [c.lat, c.lng];
+}
 
 function extStatus(p: PassengerComputed): string {
   return p.extStatus || "green";
@@ -101,7 +103,7 @@ export default class LeafletAdapter {
 
     // Initialize map — even if container is display:none right now,
     // we set a valid center; invalidateSize() is called when tab becomes visible.
-    const c0 = opts.initialCenter ? [opts.initialCenter.lat, opts.initialCenter.lng] as [number, number] : DEFAULT_CENTER;
+    const c0 = opts.initialCenter ? [opts.initialCenter.lat, opts.initialCenter.lng] as [number, number] : defaultCenter();
     const z0 = opts.initialCenter ? 15 : 16;
 
     inst.map = L.map(container, {

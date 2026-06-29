@@ -14,15 +14,15 @@ import type { Gate, Flight, PaxExtStatus, AdminSession } from "../types/types";
 import { loadGates } from "../services/gateService";
 import { buildFlights } from "../services/flightService";
 import { logout as authLogout } from "../services/auth";
-import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT, clientDefaultAirport } from "../config/client";
+import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";
 
 type DashTab = "dashboard" | "map";
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 
 export default function Dashboard({ session, onLogout }: { session: AdminSession; onLogout(): void }) {
-  const airport = CLIENT_DEFAULT_AIRPORT;
-  const tenantId = CLIENT_DEFAULT_TENANT;
+  const airport = clientDefaultAirportId();
+  const tenantId = clientDefaultTenantId();
 
   const [tab, setTab] = useState<DashTab>("dashboard");
 

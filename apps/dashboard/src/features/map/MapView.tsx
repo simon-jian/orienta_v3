@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { Gate, PassengerComputed, LatLng } from "../../types/types";
 import { getCenter as getPoiCenter } from "../../services/poi/PoiService";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../config/indoorMap";
-import { CLIENT_DEFAULT_AIRPORT, CLIENT_DEFAULT_TENANT } from "../../config/client";
+import { clientDefaultAirportId, clientDefaultTenantId } from "../../config/client";
 import LeafletAdapter from "./leafletAdapter";
 
 function statusColor(p: PassengerComputed) {
@@ -221,8 +221,8 @@ function StandardMapView(props: DashboardMapViewProps) {
 
 export default function MapView(props: DashboardMapViewProps) {
   const indoor = INDOOR_MAP_URL;
-  const airport = props.airport ?? CLIENT_DEFAULT_AIRPORT;
-  const tenantId = props.tenantId ?? CLIENT_DEFAULT_TENANT;
+  const airport = props.airport ?? clientDefaultAirportId();
+  const tenantId = props.tenantId ?? clientDefaultTenantId();
 
   if (indoor) {
     return (

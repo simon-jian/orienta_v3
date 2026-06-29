@@ -1,0 +1,32 @@
+# Beijing Capital International Airport (ICAO ZBAA) — T3E hub.
+# Drop a new file like this in config/airports/ to add a hub; the server loads it
+# at startup and the browser picks it up via /api/config/bootstrap (no rebuild).
+id: PEK
+iata: PEK
+icao: ZBAA
+name: Beijing Capital International Airport
+defaultTerminal: T3E
+terminals:
+  - id: T3E
+    label: "T3E · International"
+
+poi:
+  mode: indoor_api
+  terminalQuery: T3E
+  parser: pek_t3e
+  defaultCenter: { lat: 40.0748162, lng: 116.6061088 }
+  bbox: { minLat: 40.0694, maxLat: 40.0800, minLng: 116.6008, maxLng: 116.6108 }
+  gatePattern: "^E\\d{1,2}$"
+  spawnRadiusM: 400
+
+routeSite:
+  hubKey: PEK
+  configUrl: /route_site/config/pek.json
+
+map:
+  indoorMapEnabled: true
+  gatePattern: "^E\\d{1,2}$"
+
+video:
+  csv: PEK_gate_timestamp_full_with_E24_E36.csv
+  mergeEndpoint: /api/orienta/pek-merged-video

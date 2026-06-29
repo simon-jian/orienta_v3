@@ -2,12 +2,10 @@
  * Multi-airport registry — core types (Multi-airport Phase 0).
  *
  * A single `AirportDefinition` is the canonical, config-driven description of a
- * hub. Today the only entry is PEK (see `pek.config.ts`); adding a hub means
- * adding one definition + tenant mapping, never new `if (airport === …)`
- * branches across the codebase.
- *
- * Phase 0 only introduces the scaffold — nothing imports it yet, so behaviour is
- * unchanged. Later phases point the scattered PEK constants at this registry.
+ * hub. Definitions are loaded at runtime from data config (`config/airports/*.yaml`
+ * on the server; `/api/config/bootstrap` in the browser) and validated by
+ * `schema.ts`. Adding a hub means dropping one config file + tenant mapping,
+ * never new `if (airport === …)` branches across the codebase.
  */
 import type { LatLng } from "../../types/types";
 

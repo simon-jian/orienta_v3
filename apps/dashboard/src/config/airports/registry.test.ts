@@ -1,10 +1,38 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 
-import { getAirport, getAirportOrDefault, listAirports, DEFAULT_AIRPORT_ID } from "./registry";
-import { airportForTenant, getTenant, DEFAULT_TENANT_ID } from "../tenants/registry";
+import {
+  setAirports,
+  getAirport,
+  getAirportOrDefault,
+  listAirports,
+  defaultAirportId,
+} from "./registry";
+import {
+  setTenants,
+  airportForTenant,
+  getTenant,
+  defaultTenantId,
+} from "../tenants/registry";
+import type { AirportDefinition } from "./types";
 
-describe("airport registry", () => {
-  it("resolves PEK by id, IATA, and ICAO (case-insensitive)", () => {
+const PEK: AirportDefinition = {
+  id: "PEK",
+  iata: "PEK",
+  icao: "ZBAA",
+  name: "Beijing Capital International Airport",
+  terminals: [{ id: "T3E", label: "T3E" }],
+  defaultTerminal: "T3E",
+  poi: { mode: "indoor_api", terminalQuery: "T3E", parser: "pek_t3e", defaultCenter: { lat: 40.07, lng: 116.6 } },
+  map: { indoorMapEnabled: true },
+};
+
+describe("airport registry (hydrated)", () => {
+  beforeEach(() => {
+    setAirports([PEK], { defaultId: "PEK" });
+    setTenants([{ id: "airchina", airportId: "PEK", displayName: "Air China" }], { defaultId: "airchina" });
+  });
+
+  it("resolves a hub by id, IATA, and ICAO (case-insensitive)", () => {
     const byId = getAirport("PEK");
     expect(byId?.id).toBe("PEK");
     expect(getAirport("pek")).toBe(byId);
@@ -14,7 +42,7 @@ describe("airport registry", () => {
 
   it("returns undefined for unknown airports but a default via getAirportOrDefault", () => {
     expect(getAirport("LHR")).toBeUndefined();
-    expect(getAirportOrDefault("LHR").id).toBe(DEFAULT_AIRPORT_ID);
+    expect(getAirportOrDefault("LHR").id).toBe(defaultAirportId());
     expect(getAirportOrDefault().id).toBe("PEK");
   });
 
@@ -22,17 +50,17 @@ describe("airport registry", () => {
     expect(listAirports().map((a) => a.id)).toEqual(["PEK"]);
   });
 
-  it("exposes the PEK hub's production config (no demo/seed data)", () => {
-    const pek = getAirport("PEK")!;
-    expect(pek.defaultTerminal).toBe("T3E");
-    expect(pek.poi.terminalQuery).toBe("T3E");
-    expect(pek.poi.mode).toBe("indoor_api");
-    expect(pek.routeSite?.hubKey).toBe("PEK");
-    expect((pek as unknown as { demo?: unknown }).demo).toBeUndefined();
+  it("compiles the configured default hub id", () => {
+    expect(defaultAirportId()).toBe("PEK");
   });
 });
 
-describe("tenant registry", () => {
+describe("tenant registry (hydrated)", () => {
+  beforeEach(() => {
+    setAirports([PEK], { defaultId: "PEK" });
+    setTenants([{ id: "airchina", airportId: "PEK", displayName: "Air China" }], { defaultId: "airchina" });
+  });
+
   it("maps airchina → PEK", () => {
     expect(getTenant("airchina")?.airportId).toBe("PEK");
     expect(airportForTenant("airchina")).toBe("PEK");
@@ -40,8 +68,8 @@ describe("tenant registry", () => {
   });
 
   it("falls back to the default airport for unknown/empty tenants", () => {
-    expect(airportForTenant(undefined)).toBe(DEFAULT_AIRPORT_ID);
-    expect(airportForTenant("nope")).toBe(DEFAULT_AIRPORT_ID);
-    expect(DEFAULT_TENANT_ID).toBe("airchina");
+    expect(airportForTenant(undefined)).toBe(defaultAirportId());
+    expect(airportForTenant("nope")).toBe(defaultAirportId());
+    expect(defaultTenantId()).toBe("airchina");
   });
 });

@@ -1,0 +1,5 @@
+# Air China — operates out of PEK. Drop a file like this in config/tenants/ to
+# add an airline; `airportId` links it to a hub in config/airports/.
+id: airchina
+airportId: PEK
+displayName: Air China

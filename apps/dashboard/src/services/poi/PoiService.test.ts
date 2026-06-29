@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from "vitest";
 
-import { register } from "../../config/airports/registry";
+import { registerAirport } from "../../config/airports/registry";
 import type { AirportDefinition } from "../../config/airports/types";
 import { getGateCoords, getGateCoord, getCenter, loadGates } from "./PoiService";
 
@@ -19,7 +19,26 @@ const STATIC_AIRPORT: AirportDefinition = {
   map: { indoorMapEnabled: false },
 };
 
-beforeAll(() => register(STATIC_AIRPORT));
+const PEK_AIRPORT: AirportDefinition = {
+  id: "PEK",
+  iata: "PEK",
+  icao: "ZBAA",
+  name: "Beijing Capital International Airport",
+  terminals: [{ id: "T3E", label: "T3E" }],
+  defaultTerminal: "T3E",
+  poi: {
+    mode: "indoor_api",
+    terminalQuery: "T3E",
+    parser: "pek_t3e",
+    defaultCenter: { lat: 40.0748162, lng: 116.6061088 },
+  },
+  map: { indoorMapEnabled: true },
+};
+
+beforeAll(() => {
+  registerAirport(STATIC_AIRPORT);
+  registerAirport(PEK_AIRPORT);
+});
 
 describe("PoiService — static airport dispatch", () => {
   it("serves gates / coord / center from the static config", () => {

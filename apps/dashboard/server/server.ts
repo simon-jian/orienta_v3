@@ -39,6 +39,8 @@ import { logger } from "./lib/logger";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
 import { registerConfigRoutes } from "./routes/config";
+import { hydrateRegistriesFromDisk } from "./config/loadConfig";
+import { ROUTE_SITE_DEFAULT_TENANT } from "./config";
 import { getSqlDb } from "./db/sqlDb";
 import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
 import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
@@ -361,6 +363,13 @@ if (pdrProxy) {
 const wss = attachWsHub(server, store, registry);
 
 async function bootstrap(): Promise<void> {
+  // Load airport/tenant config from disk and hydrate the shared registries
+  // before anything serves a request (Multi-airport Model B).
+  hydrateRegistriesFromDisk({
+    defaultAirport: process.env.DEFAULT_AIRPORT,
+    defaultTenant: ROUTE_SITE_DEFAULT_TENANT,
+  });
+
   // Run SqlDb migrations (creates tables in SQLite or Postgres) before serving.
   await Promise.all([
     registry.init(),
@@ -380,7 +389,7 @@ async function bootstrap(): Promise<void> {
     logger.info("server_listening", {
       url: `http://0.0.0.0:${PORT}`,
       admin: `http://localhost:${PORT}`,
-      pax: `http://localhost:${PORT}/pax?pid=TX1&direct=1`,
+      pax: `http://localhost:${PORT}/pax`,
     });
   });
 }

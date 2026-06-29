@@ -1,20 +1,12 @@
 import ReactDOM from "react-dom/client";
-import App from "./app/App";
 import "./styles.css";
 import "leaflet/dist/leaflet.css";
 import { initErrorTracking, Sentry } from "./lib/errorTracking";
+import { loadRuntimeConfig } from "./config/bootstrap";
 
 // Boot browser error tracking before render so init-time errors are captured.
 // No-op unless VITE_SENTRY_DSN is set (P2-5).
 initErrorTracking();
-
-// StrictMode intentionally removed: it causes double-mount in dev
-// which breaks Leaflet's "container already initialized" check
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <Sentry.ErrorBoundary fallback={<AppCrashFallback />}>
-    <App />
-  </Sentry.ErrorBoundary>
-);
 
 function AppCrashFallback() {
   return (
@@ -24,3 +16,21 @@ function AppCrashFallback() {
     </div>
   );
 }
+
+// Hydrate the airport/tenant registry from the server before loading the app, so
+// every (synchronous) config read resolves the runtime-loaded hub. App is
+// imported dynamically so its module graph evaluates after hydration.
+async function start() {
+  await loadRuntimeConfig();
+  const { default: App } = await import("./app/App");
+
+  // StrictMode intentionally removed: it causes double-mount in dev which
+  // breaks Leaflet's "container already initialized" check.
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <Sentry.ErrorBoundary fallback={<AppCrashFallback />}>
+      <App />
+    </Sentry.ErrorBoundary>
+  );
+}
+
+void start();

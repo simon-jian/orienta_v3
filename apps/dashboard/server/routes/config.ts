@@ -9,13 +9,16 @@
 import type { Router, Request, Response } from "express";
 import {
   getAirportOrDefault,
-  DEFAULT_AIRPORT_ID,
+  defaultAirportId,
+  listAirports,
 } from "../../src/config/airports/registry";
 import {
   getTenant,
   airportForTenant,
-  DEFAULT_TENANT_ID,
+  defaultTenantId,
+  listTenants,
 } from "../../src/config/tenants/registry";
+import { serializeAirport } from "../../src/config/airports/schema";
 import type { AirportDefinition } from "../../src/config/airports/types";
 
 /** Sanitized, client-safe view of an airport definition (no demo/seed data). */
@@ -55,9 +58,24 @@ export function registerConfigRoutes(router: Router): void {
       airport: publicAirport(airport),
       terminals: airport.terminals,
       defaults: {
-        airport: DEFAULT_AIRPORT_ID,
-        tenant: DEFAULT_TENANT_ID,
+        airport: defaultAirportId(),
+        tenant: defaultTenantId(),
         terminal: airport.defaultTerminal,
+      },
+    });
+  });
+
+  // Full runtime config for client hydration (Multi-airport Model B). Returns
+  // every registered airport + tenant in serializable form so the browser can
+  // rebuild the registry without bundling any hub config.
+  router.get("/bootstrap", (_req: Request, res: Response) => {
+    res.json({
+      ok: true,
+      airports: listAirports().map(serializeAirport),
+      tenants: listTenants(),
+      defaults: {
+        airport: defaultAirportId(),
+        tenant: defaultTenantId(),
       },
     });
   });
