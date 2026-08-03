@@ -65,6 +65,14 @@ export async function requestMerge(spec: MergeSpec): Promise<MergeResult> {
   const outName = mergeOutName(spec);
   const outDir = mergeOutDir();
   const outPath = path.join(outDir, outName);
+  // Defense in depth: routes/flight.ts whitelists gate tokens to [A-Z0-9]{1,8}
+  // before they reach here, but never trust a path built from request input
+  // without also verifying the result didn't escape the intended directory.
+  const resolvedOutDir = path.resolve(outDir);
+  const resolvedOutPath = path.resolve(outPath);
+  if (resolvedOutPath !== resolvedOutDir && !resolvedOutPath.startsWith(resolvedOutDir + path.sep)) {
+    throw new Error("merge_output_path_escaped_output_dir");
+  }
   mkdirSync(outDir, { recursive: true });
 
   const cached = readyResult(outPath, outName);
@@ -103,6 +111,10 @@ async function enqueueAndWait(
     }
     await sleep(POLL_MS);
   }
+  // Clear the status key on our own timeout too — otherwise it sits at
+  // "queued" for the rest of its STATUS_TTL_S (10 min), blocking retries for
+  // this exact clip even if the worker eventually finishes or a client retries.
+  await redis.del(statusKey).catch(() => { /* best effort */ });
   throw new Error("merge_timeout");
 }
 

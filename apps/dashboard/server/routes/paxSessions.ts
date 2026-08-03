@@ -1,7 +1,8 @@
 import crypto from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { Router, Request, Response } from "express";
 import { SignJWT } from "jose";
-import { JWT_SECRET, ROUTE_SITE_DEFAULT_TENANT } from "../config";
+import { JWT_SECRET, KIOSK_SCAN_SECRET, ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { PassengerRegistry, PassengerRecord } from "../passengers/PassengerRegistry";
 import type { PaxAccountStore } from "../passengers/PaxAccountStore";
 import { parseBcbp } from "../passengers/bcbpParser";
@@ -32,6 +33,23 @@ type PaxSessionResponse = {
 const TEMP_SESSION_MIN_TTL_MS = 30 * 60_000;
 const TEMP_SESSION_GRACE_MS = 2 * 60 * 60_000;
 const REGISTERED_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
+/** BCBP boarding passes are ~60-120 chars; cap generously to block payload abuse. */
+const MAX_BCBP_PAYLOAD_LEN = 512;
+
+/**
+ * Constant-time comparison of the request's kiosk secret against the
+ * configured value. When KIOSK_SCAN_SECRET is unset, scanning stays open
+ * (dev convenience) — validateProductionSecurity() refuses to boot with it
+ * unset in production, so this only "fails open" in non-production.
+ */
+function isKioskAuthorized(req: Request): boolean {
+  if (!KIOSK_SCAN_SECRET) return true;
+  const provided = String(req.headers["x-kiosk-secret"] || "");
+  const expected = KIOSK_SCAN_SECRET;
+  const a = Buffer.from(provided);
+  const b = Buffer.from(expected);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 function tenantFromBody(body: Record<string, unknown>): string {
   return String(body.tenantId || body.tenant_id || ROUTE_SITE_DEFAULT_TENANT).trim();
@@ -126,11 +144,17 @@ export function registerPaxSessionRoutes(
   };
 
   router.post("/scan", async (req: Request, res: Response) => {
+    if (!isKioskAuthorized(req)) {
+      return res.status(401).json({ ok: false, error: "kiosk_not_authenticated" });
+    }
     try {
       const body = (req.body || {}) as Record<string, unknown>;
       const tenantId = tenantFromBody(body);
       const payload = String(body.payload || body.bcbp || "").trim();
       if (!payload) return res.status(400).json({ ok: false, error: "missing_bcbp_payload" });
+      if (payload.length > MAX_BCBP_PAYLOAD_LEN) {
+        return res.status(400).json({ ok: false, error: "bcbp_payload_too_large" });
+      }
 
       const parsed = parseBcbp(payload);
       const firstLeg = parsed.legs[0]!;

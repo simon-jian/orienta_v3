@@ -31,6 +31,24 @@ export function isErrorTrackingEnabled(): boolean {
 }
 
 /**
+ * Strips fields that could carry secrets/PII before an event leaves the
+ * process, regardless of what attached them (our own `extra` context in
+ * captureException() is deliberately minimal already — method/path/ip — but
+ * this also guards against Sentry's own request integrations attaching more
+ * in the future, or a future call site passing something it shouldn't).
+ */
+function scrubEvent(event: Sentry.ErrorEvent): Sentry.ErrorEvent {
+  if (event.request) {
+    delete event.request.cookies;
+    if (event.request.headers) {
+      delete event.request.headers["authorization"];
+      delete event.request.headers["cookie"];
+    }
+  }
+  return event;
+}
+
+/**
  * Initialise Sentry (if configured) and install process-level handlers.
  * Safe to call exactly once at startup; guards against double-init.
  */
@@ -42,6 +60,12 @@ export function initErrorTracking(): void {
         environment: SENTRY_ENVIRONMENT,
         release: SENTRY_RELEASE || undefined,
         tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
+        // Don't let the SDK auto-attach IP/headers/cookies from requests —
+        // scrubExtra() below still passes through the few fields this app
+        // explicitly wants (method/path/ip) via `extra`, deliberately, not
+        // through Sentry's default PII capture.
+        sendDefaultPii: false,
+        beforeSend: scrubEvent,
         // Tag every event with the instance so multi-instance deploys are
         // distinguishable in the Sentry UI (P2-3).
         initialScope: { tags: { instance: INSTANCE_ID } },
@@ -68,17 +92,19 @@ function installProcessHandlers(): void {
   if (processHandlersInstalled) return;
   processHandlersInstalled = true;
 
-  process.on("unhandledRejection", (reason) => {
-    const err = reason instanceof Error ? reason : new Error(String(reason));
-    captureException(err, { kind: "unhandledRejection" });
-  });
-
-  process.on("uncaughtException", (err) => {
-    captureException(err, { kind: "uncaughtException" });
-    // The process is in an undefined state after an uncaught exception; flush
-    // the queue then exit so the orchestrator can restart a clean instance.
+  // Both handlers exit: Node makes no guarantee the process is still in a
+  // consistent state after either kind of unhandled error, so treat them the
+  // same — capture, flush, then let the orchestrator (Docker `restart:
+  // unless-stopped`, k8s, ...) start a clean instance rather than keep
+  // serving requests from a process that might be half-broken.
+  const fatal = (err: unknown, kind: "unhandledRejection" | "uncaughtException"): void => {
+    const error = err instanceof Error ? err : new Error(String(err));
+    captureException(error, { kind });
     void flushErrorTracking(2000).finally(() => process.exit(1));
-  });
+  };
+
+  process.on("unhandledRejection", (reason) => fatal(reason, "unhandledRejection"));
+  process.on("uncaughtException", (err) => fatal(err, "uncaughtException"));
 }
 
 /** Log an error and forward it to Sentry (when enabled) with optional context. */

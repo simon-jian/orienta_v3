@@ -1,17 +1,47 @@
 /**
  * App — route guard only.
  */
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
-import Dashboard from "./Dashboard";
 import LoginScreen from "../components/LoginScreen";
-import PaxAppPage from "../features/pax/PaxAppPage";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
 import { fetchSession, logout as authLogout, cacheSession } from "../services/auth";
 import { apiUrl } from "../config/api";
 import type { AdminSession } from "../types/types";
 
-export default function App() {
+// Route-level code splitting: Dashboard (map/FIDS/chat) and PaxAppPage (indoor
+// map + PDR) are the two heaviest subtrees and are mutually exclusive routes —
+// a passenger's browser never needs the admin console's code and vice versa.
+const Dashboard = lazy(() => import("./Dashboard"));
+const PaxAppPage = lazy(() => import("../features/pax/PaxAppPage"));
+
+function RouteLoading() {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", color: "#aaa" }}>
+      Loading…
+    </div>
+  );
+}
+
+/** Slim, non-blocking banner shown when the server's runtime airport/tenant
+ * config couldn't be loaded at boot (src/config/bootstrap.ts) — the app is
+ * still usable on its built-in fallback config, but an operator should know
+ * before assuming what they're looking at is live configuration. */
+function ConfigDegradedBanner() {
+  return (
+    <div
+      role="status"
+      style={{
+        background: "#7c2d12", color: "#fed7aa", fontSize: 13, padding: "6px 12px",
+        textAlign: "center", fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      配置服务不可达，当前使用内置默认配置（功能可能受限）。Configuration service unreachable — running on built-in defaults.
+    </div>
+  );
+}
+
+export default function App({ configDegraded = false }: { configDegraded?: boolean }) {
   const [session, setSession] = useState<AdminSession | null>(null);
   const [checking, setChecking] = useState(true);
 
@@ -31,31 +61,34 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      <Routes>
-        <Route path="/pax"  element={<PaxEntryPage />} />
-        <Route path="/pax/" element={<PaxEntryPage />} />
-        <Route path="/pax/app" element={<PaxAppPage />} />
+      {configDegraded && <ConfigDegradedBanner />}
+      <Suspense fallback={<RouteLoading />}>
+        <Routes>
+          <Route path="/pax"  element={<PaxEntryPage />} />
+          <Route path="/pax/" element={<PaxEntryPage />} />
+          <Route path="/pax/app" element={<PaxAppPage />} />
 
-        <Route
-          path="*"
-          element={
-            session ? (
-              <Dashboard
-                session={session}
-                onLogout={() => { authLogout(); setSession(null); }}
-              />
-            ) : (
-              <LoginScreen
-                onLogin={async (email, password) => {
-                  const s = await loginWithCredentials(email, password);
-                  if (s) setSession(s);
-                  return s;
-                }}
-              />
-            )
-          }
-        />
-      </Routes>
+          <Route
+            path="*"
+            element={
+              session ? (
+                <Dashboard
+                  session={session}
+                  onLogout={() => { authLogout(); setSession(null); }}
+                />
+              ) : (
+                <LoginScreen
+                  onLogin={async (email, password) => {
+                    const s = await loginWithCredentials(email, password);
+                    if (s) setSession(s);
+                    return s;
+                  }}
+                />
+              )
+            }
+          />
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

@@ -269,6 +269,10 @@ export default function PaxAppPage() {
       u.searchParams.set("pdrOriginLng", String(anchor.lng));
     }
     return u.toString();
+    // poiReady doesn't appear in the body directly, but getPoiGateCoord reads
+    // a module-level cache that PoiService populates asynchronously — poiReady
+    // is the React-visible signal to recompute once that cache is filled.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session, poiReady]);
 
   useEffect(() => {

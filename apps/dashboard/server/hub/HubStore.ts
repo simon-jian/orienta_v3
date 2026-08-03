@@ -148,6 +148,27 @@ export class HubStore {
     });
   }
 
+  /**
+   * Removes every trace of one passenger from both the DB-backed chat history
+   * and this process's in-memory caches. Called when an admin deletes the
+   * passenger record itself (server/routes/passengers.ts DELETE) — without
+   * this, the deleted passenger's chat history/one-way messages keep showing
+   * up if a new passenger is ever assigned the same id, and the in-memory
+   * caches leak until the pruning job's next pass (or forever, for messages,
+   * which the pruning job doesn't touch at all).
+   */
+  async purgePassenger(tenantId: string, passengerId: string): Promise<{ chatRowsDeleted: number }> {
+    const key = HubStore.key(tenantId, passengerId);
+    this.chatHistories.delete(key);
+    this.paxMeta.delete(key);
+    this.paxTrajectories.delete(key);
+    for (const [messageId, rec] of this.messages) {
+      if (rec.tenantId === tenantId && rec.passengerId === passengerId) this.messages.delete(messageId);
+    }
+    const chatRowsDeleted = (await this.chatRepo?.deleteForPassenger(tenantId, passengerId)) ?? 0;
+    return { chatRowsDeleted };
+  }
+
   // ── Trajectories ─────────────────────────────────────────────────────────────
 
   setTrajectory(tenantId: string, passengerId: string, data: TrajectoryData): void {

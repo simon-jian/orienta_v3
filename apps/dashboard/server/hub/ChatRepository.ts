@@ -87,6 +87,15 @@ export class ChatRepository {
     return r.changes;
   }
 
+  /** Removes all chat history for one passenger — used when the passenger itself is deleted. */
+  async deleteForPassenger(tenantId: string, passengerId: string): Promise<number> {
+    const r = await this.db.run(
+      "DELETE FROM chat_messages WHERE tenant_id = ? AND passenger_id = ?",
+      [tenantId, passengerId],
+    );
+    return r.changes;
+  }
+
   /** Lightweight liveness probe for GET /health. */
   async ping(): Promise<boolean> {
     return this.db.ping();

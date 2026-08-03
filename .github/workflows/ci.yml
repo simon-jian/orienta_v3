@@ -7,7 +7,7 @@ on:
 
 jobs:
   dashboard:
-    name: Dashboard build & test
+    name: Dashboard build, lint & test
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -24,6 +24,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Lint
+        run: npm run lint
+
       - name: Type-check & build frontend
         run: npm run build
 
@@ -32,3 +35,43 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      # Non-blocking for now: react-router's fix needs a major-version bump
+      # (7.x) and vite/vitest's needs 8.x/4.x — both deferred pending a
+      # dedicated compatibility pass, not fixed by `npm audit fix`. Visible in
+      # CI output so it isn't forgotten; tighten to a hard failure once those
+      # two are cleared.
+      - name: Audit dependencies (fails on high/critical)
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+  docker:
+    name: Docker build smoke test
+    runs-on: ubuntu-latest
+    needs: dashboard
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build dashboard image
+        run: docker build -f apps/dashboard/Dockerfile -t orienta-v3-dashboard:ci .
+
+      - name: Build video-worker image
+        run: docker build -f apps/dashboard/worker/Dockerfile -t orienta-video-worker:ci .
+
+      - name: Boot the dashboard image and check /health
+        run: |
+          docker run -d --name orienta-ci -p 5174:5174 \
+            -e JWT_SECRET="$(openssl rand -hex 32)" \
+            -e ADMIN_CREDENTIALS="admin@ci.test:$(openssl rand -hex 16)" \
+            orienta-v3-dashboard:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:5174/health; then exit 0; fi
+            sleep 1
+          done
+          echo "server did not become healthy in time"
+          docker logs orienta-ci
+          exit 1
+
+      - name: Dump logs on failure
+        if: failure()
+        run: docker logs orienta-ci || true

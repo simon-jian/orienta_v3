@@ -18,7 +18,7 @@ export function extractPekGateKey(props: Record<string, unknown>): string {
   for (const candidate of candidates) {
     const text = String(candidate).toUpperCase();
     const match = /\b(?:GATE\s*)?(E\s*0?\d{1,2})\b/.exec(text);
-    if (match) return normalizePekGate(match[1]);
+    if (match?.[1]) return normalizePekGate(match[1]);
   }
   return "";
 }

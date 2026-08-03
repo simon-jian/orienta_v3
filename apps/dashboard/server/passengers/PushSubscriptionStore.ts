@@ -73,4 +73,10 @@ export class PushSubscriptionStore {
       [key, endpoint],
     );
   }
+
+  /** Remove every subscription for one passenger key — used when the passenger itself is deleted. */
+  async removeAllForKey(key: string): Promise<number> {
+    const r = await this.db.run("DELETE FROM push_subscriptions WHERE sub_key = ?", [key]);
+    return r.changes;
+  }
 }

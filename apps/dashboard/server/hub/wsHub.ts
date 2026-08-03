@@ -23,12 +23,36 @@ import type { ChatKind, MsgRecord, MsgStatus } from "../../src/types/types";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { resolvePaxWsHello } from "../passengers/paxWsIdentity";
 import type { PaxSessionClaims } from "../passengers/paxSessionToken";
-import { adminPayloadFromCookieHeader } from "../auth/adminAuth";
+import { ADMIN_ROLES, adminPayloadFromCookieHeader } from "../auth/adminAuth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 
 type Role = "admin" | "pax";
 
 const HELLO_TIMEOUT_MS = 8000;
+/** Frames larger than this are rejected by the `ws` library before "message" fires. */
+const MAX_WS_PAYLOAD_BYTES = 64 * 1024;
+/** Per-connection message budget, refilled every MESSAGE_RATE_WINDOW_MS. */
+const MESSAGE_RATE_LIMIT = 60;
+const MESSAGE_RATE_WINDOW_MS = 10_000;
+/** Matches the cap on the HTTP chat fallback (server/routes/push.ts POST /chat-send). */
+const MAX_CHAT_BODY_LEN = 12_000;
+
+/**
+ * Same-origin check for the WS upgrade. Browsers always send `Origin`; non-
+ * browser clients (native apps, server-to-server) typically don't, so a
+ * missing header is allowed rather than rejected.
+ */
+function isAllowedWsOrigin(req: IncomingMessage): boolean {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    const originHost = new URL(origin).host;
+    const requestHost = String(req.headers["x-forwarded-host"] || req.headers.host || "");
+    return originHost === requestHost;
+  } catch {
+    return false;
+  }
+}
 
 /** Loose shape of an incoming WS protocol message. All fields beyond `type` are unknown. */
 interface WsMsg {
@@ -69,14 +93,20 @@ export function attachWsHub(
   const httpServer = "httpServer" in server ? server.httpServer : server;
   if (!httpServer) return null;
 
-  // Disable permessage-deflate: compressed frames break many tunnel clients
-  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false });
+  // Disable permessage-deflate: compressed frames break many tunnel clients.
+  // maxPayload caps a single frame/message so one connection can't exhaust memory.
+  const wss = new WebSocketServer({ noServer: true, perMessageDeflate: false, maxPayload: MAX_WS_PAYLOAD_BYTES });
 
   httpServer.on("upgrade", (req, socket, head) => {
     try {
       const url = new URL(req.url || "", "http://localhost");
       if (url.pathname !== "/ws") return;
-      wss.handleUpgrade(req, socket as any, head, (ws) => {
+      if (!isAllowedWsOrigin(req)) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit("connection", ws, req);
       });
     } catch { /* ignore invalid upgrade URLs */ }
@@ -92,7 +122,23 @@ export function attachWsHub(
       try { ws.close(1008, "missing hello"); } catch { /* ignore close errors */ }
     }, HELLO_TIMEOUT_MS);
 
+    // Per-connection message budget — independent of the HTTP rate limiters,
+    // which don't see WS traffic at all.
+    let messageCount = 0;
+    let rateWindowStart = Date.now();
+
     ws.on("message", (raw) => {
+      const now = Date.now();
+      if (now - rateWindowStart > MESSAGE_RATE_WINDOW_MS) {
+        rateWindowStart = now;
+        messageCount = 0;
+      }
+      messageCount += 1;
+      if (messageCount > MESSAGE_RATE_LIMIT) {
+        try { ws.close(1008, "rate_limited"); } catch { /* ignore close errors */ }
+        return;
+      }
+
       const msg = safeJsonParse(String(raw));
       if (!msg) return;
 
@@ -104,8 +150,12 @@ export function attachWsHub(
 
         if (role === "admin") {
           void (async () => {
+            // verifyAdminToken (via adminPayloadFromCookieHeader) already rejects
+            // tokens without a recognized admin role/audience, but the check is
+            // repeated here explicitly since this is the only gate protecting the
+            // admin WS channel (broadcast, presence, passenger messaging).
             const adminPayload = await adminPayloadFromCookieHeader(req.headers.cookie);
-            if (!adminPayload) {
+            if (!adminPayload || !ADMIN_ROLES.has(String(adminPayload.role))) {
               ws.close(1008, "admin_not_authenticated");
               return;
             }
@@ -296,7 +346,7 @@ export function attachWsHub(
         const body = typeof msg.body === "string" ? msg.body : "";
         const kind = typeof msg.kind === "string" ? msg.kind : "text";
         const gateRef = typeof msg.gateRef === "string" ? msg.gateRef : undefined;
-        if (!pid || !body) return;
+        if (!pid || !body || body.length > MAX_CHAT_BODY_LEN) return;
         const chatMsg = {
           id: crypto.randomUUID(), passengerId: pid, tenantId,
           from: "admin" as const, kind: kind as ChatKind, body, gateRef,
@@ -314,7 +364,7 @@ export function attachWsHub(
         const body = typeof msg.body === "string" ? msg.body : "";
         const kind = typeof msg.kind === "string" ? msg.kind : "text";
         const gateRef = typeof msg.gateRef === "string" ? msg.gateRef : undefined;
-        if (!body) return;
+        if (!body || body.length > MAX_CHAT_BODY_LEN) return;
         if (!paxCanSendChat(paxClaims, kind)) {
           wsSend(ws, { type: "error", code: "chat_not_allowed_for_plan" });
           return;

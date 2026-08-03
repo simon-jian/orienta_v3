@@ -41,34 +41,36 @@ export class MetricsRepository {
     );
   }
 
-  /** Insert a validated batch. Returns rows written. */
+  /** Insert a validated batch atomically — either all rows land, or none do. */
   async insertBatch(events: MetricEvent[]): Promise<number> {
     const now = Date.now();
-    let written = 0;
-    for (const ev of events) {
-      const name = String(ev?.name || "").slice(0, MAX_NAME_LEN);
-      if (!name) continue;
-      let props: string | null = null;
-      if (ev.props && typeof ev.props === "object") {
-        const s = JSON.stringify(ev.props);
-        props = s.length > MAX_PROPS_BYTES ? s.slice(0, MAX_PROPS_BYTES) : s;
+    return this.db.transaction(async (tx) => {
+      let written = 0;
+      for (const ev of events) {
+        const name = String(ev?.name || "").slice(0, MAX_NAME_LEN);
+        if (!name) continue;
+        let props: string | null = null;
+        if (ev.props && typeof ev.props === "object") {
+          const s = JSON.stringify(ev.props);
+          props = s.length > MAX_PROPS_BYTES ? s.slice(0, MAX_PROPS_BYTES) : s;
+        }
+        await tx.run(
+          `INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            name,
+            ev.role ? String(ev.role).slice(0, 40) : null,
+            ev.category ? String(ev.category).slice(0, 40) : null,
+            typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) ? ev.durationMs : null,
+            typeof ev.ok === "boolean" ? (ev.ok ? 1 : 0) : null,
+            props,
+            typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : now,
+          ],
+        );
+        written += 1;
       }
-      await this.db.run(
-        `INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          name,
-          ev.role ? String(ev.role).slice(0, 40) : null,
-          ev.category ? String(ev.category).slice(0, 40) : null,
-          typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) ? ev.durationMs : null,
-          typeof ev.ok === "boolean" ? (ev.ok ? 1 : 0) : null,
-          props,
-          typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : now,
-        ],
-      );
-      written += 1;
-    }
-    return written;
+      return written;
+    });
   }
 
   async pruneOlderThan(maxAgeMs: number): Promise<number> {

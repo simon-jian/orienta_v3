@@ -4,11 +4,12 @@
  *
  * Key change: gate coordinates are loaded from the PEK POI cache (T3E indoor map API).
  */
-import type { Router, Request, Response } from "express";
+import type { Router, Request, Response, RequestHandler, NextFunction } from "express";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
 import { type FlightResult, normalizeFlight, fetchFlightAware } from "../services/flightAware";
 import { requestMerge, type MergeSpec } from "../services/videoMerge";
 import { getAirport } from "../../src/config/airports/registry";
+import { logger } from "../lib/logger";
 
 // ─── Airport data (registry-driven; PEK is the only indoor_api hub today) ──────
 
@@ -67,9 +68,23 @@ function walkDistance(fromCenter: [number, number], toCenter: [number, number]):
   return { m: estimate.meters, min: estimate.minutes };
 }
 
+/** Logs the real error server-side; never forwards provider error bodies to clients. */
+function respondProviderError(res: Response, context: string, err: unknown): void {
+  const message = err instanceof Error ? err.message : String(err);
+  logger.warn("flightaware_lookup_failed", { context, error: message });
+  res.status(502).json({ ok: false, error: "provider_error" });
+}
+
 // ─── Route registration ───────────────────────────────────────────────────────
 
-export function registerFlightRoutes(router: Router): void {
+/**
+ * @param aeroApiRateLimit Optional limiter applied to the two routes that call
+ *   FlightAware directly (bypassing the FIDS cache) — protects both the AeroAPI
+ *   quota and this process from being used as an amplification proxy.
+ */
+export function registerFlightRoutes(router: Router, aeroApiRateLimit?: RequestHandler): void {
+  const limitAeroApi: RequestHandler = aeroApiRateLimit ?? ((_req, _res, next: NextFunction) => next());
+
   router.get("/airport", (req: Request, res: Response) => {
     const airport = (req.query.airport as string || "").toUpperCase();
     if (!airport) return res.status(400).json({ ok: false, error: "missing_airport" });
@@ -93,7 +108,7 @@ export function registerFlightRoutes(router: Router): void {
     res.json({ ok: true, data: { center } });
   });
 
-  router.get("/flight/closest", async (req: Request, res: Response) => {
+  router.get("/flight/closest", limitAeroApi, async (req: Request, res: Response) => {
     const raw = (req.query.q as string || req.query.flight as string || "").trim();
     const flightIdent = normalizeFlight(raw);
     if (!flightIdent) return res.status(400).json({ ok: false, error: "missing_flight" });
@@ -111,12 +126,11 @@ export function registerFlightRoutes(router: Router): void {
         },
       });
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      res.status(502).json({ ok: false, error: "provider_error", message });
+      respondProviderError(res, "flight/closest", e);
     }
   });
 
-  router.post("/transfer", async (req: Request, res: Response) => {
+  router.post("/transfer", limitAeroApi, async (req: Request, res: Response) => {
     const body = req.body || {};
     const arrIdent = normalizeFlight(String(body.arrFlight || body.arrivalFlight || body.arr || ""));
     const depIdent = normalizeFlight(String(body.depFlight || body.departureFlight || body.dep || ""));
@@ -139,19 +153,41 @@ export function registerFlightRoutes(router: Router): void {
         },
       });
     } catch (e: unknown) {
-      const message = e instanceof Error ? e.message : String(e);
-      res.status(502).json({ ok: false, error: "provider_error", message });
+      respondProviderError(res, "transfer", e);
     }
   });
 
-  // Legacy Python fallback (dev FIDS tries /flight/* first)
+}
+
+/**
+ * Legacy Python/FIDS dev fallback: any unmatched `GET /<mode>` under this
+ * router returns an empty result instead of a 404 (old dev tooling probed a
+ * few `/flight/*` paths speculatively).
+ *
+ * IMPORTANT: mount this only on a router reserved for the `/flight` prefix.
+ * It matches a single path segment, so mounting it under the broad `/api`
+ * prefix would shadow any other single-segment route registered afterwards
+ * (this previously broke `GET /api/passengers`, which is a single segment
+ * under `/api` — Express resolves overlapping `app.use()` mounts in
+ * registration order, not by prefix specificity).
+ */
+export function registerLegacyFlightFallback(router: Router): void {
   router.get("/:mode", (_req, res) => res.json({ ok: true, data: [] }));
 }
 
 // ─── PEK route-site merged video ─────────────────────────────────────────────
 
+/** Gate tokens end up in a filesystem path (mergeOutName); only allow bare gate codes. */
+const GATE_TOKEN_RE = /^[A-Z0-9]{1,8}$/;
+
+/**
+ * Normalize a user-supplied gate token, then whitelist it. Returns "" for
+ * anything that isn't a plain gate code (e.g. path-traversal attempts like
+ * "../../etc") so callers treat it as missing rather than passing it through.
+ */
 function normalizeGateToken(raw: string): string {
-  return String(raw || "").trim().toUpperCase().replace(/\s+/g, "").replace(/^GATE_/, "");
+  const token = String(raw || "").trim().toUpperCase().replace(/\s+/g, "").replace(/^GATE_/, "");
+  return GATE_TOKEN_RE.test(token) ? token : "";
 }
 
 /**
@@ -187,7 +223,10 @@ async function handleMergedVideo(req: Request, res: Response, airportId?: string
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     const error = message === "merge_timeout" ? "merge_timeout" : "merge_failed";
-    return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error, message: message.slice(-1200) });
+    // Log the ffmpeg/python stderr server-side; never forward it to the client
+    // (it can contain internal filesystem paths).
+    logger.warn("merged_video_failed", { error, detail: message.slice(-1200) });
+    return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error });
   }
 }
 
@@ -198,9 +237,9 @@ export function registerOrientaRoutes(router: Router): void {
   router.get("/pek-merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, "PEK"));
 
   router.get("/route-site-map-embed", (req: Request, res: Response) => {
-    const host    = String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0].trim();
-    const xfProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
-    const proto   = xfProto === "https" || xfProto === "http" ? xfProto : ((req as any).secure ? "https" : "http");
+    const host    = (String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] ?? "").trim();
+    const xfProto = (String(req.headers["x-forwarded-proto"] || "").split(",")[0] ?? "").trim().toLowerCase();
+    const proto   = xfProto === "https" || xfProto === "http" ? xfProto : (req.secure ? "https" : "http");
     const publicOrigin = host ? `${proto}://${host}` : "";
 
     const e = (k: string) => String(process.env[k] || "").trim();

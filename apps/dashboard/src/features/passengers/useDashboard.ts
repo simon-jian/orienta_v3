@@ -25,11 +25,18 @@ import { fetchPassengers } from "../../services/passengers/passengerSource";
 
 export type ToastItem = { id: string; title: string; body: string };
 
+/** Fixed set of keys — matches the literal object riskCounts is always initialized with below. */
+export type RiskCounts = { green: number; yellow: number; red: number; missed: number; offline: number; lost: number };
+
 export type DashboardState = {
   // Passengers
   passengers: PassengerComputed[];
   priorityList: PassengerComputed[];
-  riskCounts: Record<string, number>;
+  riskCounts: RiskCounts;
+  /** True when the most recent passenger-list poll failed; the list shown may be stale. */
+  passengersLoadError: boolean;
+  /** Epoch ms of the last successful passenger-list sync, or null before the first one. */
+  passengersLastSyncAt: number | null;
 
   // Selection / search
   selectedPaxId: string | null;
@@ -81,10 +88,21 @@ export function useDashboard(opts: {
 
   // ── Passengers ─────────────────────────────────────────────────────────────
   const [passengersRaw, setPassengersRaw] = useState<{ passengers: Passenger[] } | null>(null);
+  // Surfaced as a small "data may be stale" indicator rather than clearing the
+  // list — a transient poll failure shouldn't look identical to "zero
+  // passengers", nor should it blank out data that's still the best we have.
+  const [passengersLoadError, setPassengersLoadError] = useState(false);
+  const [passengersLastSyncAt, setPassengersLastSyncAt] = useState<number | null>(null);
 
   const loadPassengers = useCallback(async () => {
     const incoming = await fetchPassengers(tenantId);
-    if (incoming === null) { setPassengersRaw((w) => w ?? { passengers: [] }); return; }
+    if (incoming === null) {
+      setPassengersLoadError(true);
+      setPassengersRaw((w) => w ?? { passengers: [] });
+      return;
+    }
+    setPassengersLoadError(false);
+    setPassengersLastSyncAt(Date.now());
     setPassengersRaw((prev) => {
       if (!prev) return { passengers: incoming };
       const existing = new Map(prev.passengers.map((p) => [p.id, p]));
@@ -103,7 +121,7 @@ export function useDashboard(opts: {
     setPresence({});
     setPaxTrajectories({});
     void loadPassengers();
-  }, [pekPoiReady, loadPassengers]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [pekPoiReady, loadPassengers]);
 
   // Poll for newly connected passengers every 10 s
   useEffect(() => {
@@ -284,10 +302,10 @@ export function useDashboard(opts: {
     });
   }, [passengers, search, gatesById]);
 
-  const riskCounts = useMemo(() => {
-    const counts = { green: 0, yellow: 0, red: 0, missed: 0, offline: 0, lost: 0 };
+  const riskCounts: RiskCounts = useMemo(() => {
+    const counts: RiskCounts = { green: 0, yellow: 0, red: 0, missed: 0, offline: 0, lost: 0 };
     for (const p of passengers) {
-      const es = p.extStatus as keyof typeof counts;
+      const es = p.extStatus as keyof RiskCounts;
       if (es in counts) counts[es]++;
     }
     return counts;
@@ -380,6 +398,7 @@ export function useDashboard(opts: {
 
   return {
     passengers, priorityList, riskCounts,
+    passengersLoadError, passengersLastSyncAt,
     selectedPaxId, setSelectedPaxId,
     hoverPaxId, setHoverPaxId,
     search, setSearch,

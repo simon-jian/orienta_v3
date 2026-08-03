@@ -25,6 +25,9 @@ export function normalizeFlight(s: string): string {
   return (s || "").trim().toUpperCase().replace(/\s+/g, "");
 }
 
+/** Outbound HTTP timeout. FlightAware is a third party; never let it hang a request. */
+const FLIGHTAWARE_TIMEOUT_MS = 8000;
+
 export async function fetchFlightAware(flightIdent: string): Promise<FlightResult> {
   if (!FLIGHTAWARE_API_KEY) throw new Error("FLIGHTAWARE_API_KEY not configured");
 
@@ -39,7 +42,10 @@ export async function fetchFlightAware(flightIdent: string): Promise<FlightResul
   });
 
   const url = `https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(flightIdent)}?${params}`;
-  const res = await fetch(url, { headers: { "x-apikey": FLIGHTAWARE_API_KEY, Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { "x-apikey": FLIGHTAWARE_API_KEY, Accept: "application/json" },
+    signal: AbortSignal.timeout(FLIGHTAWARE_TIMEOUT_MS),
+  });
   if (!res.ok) {
     const err = await res.text();
     throw new Error(`FlightAware ${res.status}: ${err.slice(0, 200)}`);

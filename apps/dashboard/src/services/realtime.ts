@@ -27,7 +27,47 @@ function safeParse(s: string): WsServerMsg | null {
   }
 }
 
-const WS_RECONNECT_DELAY_MS = 1200;
+const WS_RECONNECT_BASE_MS = 1000;
+const WS_RECONNECT_MAX_MS = 20_000;
+
+/**
+ * Shared reconnect scheduling for both realtime clients below.
+ *
+ * Fixes two issues with the previous fixed-delay retry:
+ *  - Calling `close()` cleared any *already-scheduled* reconnect timer, but
+ *    `ws.close()` itself fires `onclose` asynchronously, which unconditionally
+ *    scheduled a *new* one — so a component that closed its connection on
+ *    unmount would see it reconnect ~1.2s later anyway. `markClosed()` flips
+ *    a flag `onclose` must check before scheduling.
+ *  - A fixed 1.2s retry with no backoff hammers the server during an outage
+ *    and can synchronize many clients' reconnect attempts together.
+ */
+function createReconnectController(connect: () => void) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let attempt = 0;
+  let closed = false;
+
+  return {
+    isClosed: () => closed,
+    /** Call from `onopen` once a connection succeeds. */
+    reset: () => { attempt = 0; },
+    /** Call from `onclose`. No-ops if `markClosed()` already ran. */
+    scheduleReconnect: () => {
+      if (closed) return;
+      if (timer) clearTimeout(timer);
+      const backoff = Math.min(WS_RECONNECT_MAX_MS, WS_RECONNECT_BASE_MS * 2 ** attempt);
+      const jitter = backoff * (0.5 + Math.random() * 0.5); // 50%-100% of the backoff
+      attempt += 1;
+      timer = setTimeout(connect, jitter);
+    },
+    /** Call from `close()`: cancels any pending retry and stops future ones. */
+    markClosed: () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+  };
+}
 
 export type AdminRealtime = {
   isConnected(): boolean;
@@ -53,20 +93,20 @@ export function connectAdminRealtime(opts: {
   const { tenantId } = opts;
   let connected = false;
   let ws: WebSocket | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const reconnect = createReconnectController(() => connect());
 
   const connect = () => {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     ws = new WebSocket(wsUrl());
     ws.onopen = () => {
       connected = true;
+      reconnect.reset();
       opts.onConnectionChange?.(true);
       ws?.send(JSON.stringify({ type: "hello", role: "admin", tenantId }));
     };
     ws.onclose = () => {
       connected = false;
       opts.onConnectionChange?.(false);
-      reconnectTimer = setTimeout(connect, WS_RECONNECT_DELAY_MS);
+      reconnect.scheduleReconnect();
     };
     ws.onerror = () => {};
     ws.onmessage = (ev) => {
@@ -134,8 +174,7 @@ export function connectAdminRealtime(opts: {
       }
     },
     close: () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+      reconnect.markClosed();
       try { ws?.close(); } catch { /* ignore */ }
       ws = null;
     },
@@ -170,13 +209,13 @@ export function connectPaxRealtime(opts: {
   const { tenantId, passengerId } = opts;
   let connected = false;
   let ws: WebSocket | null = null;
-  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  const reconnect = createReconnectController(() => connect());
 
   const connect = () => {
-    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
     ws = new WebSocket(wsUrl());
     ws.onopen = () => {
       connected = true;
+      reconnect.reset();
       opts.onConnectionChange?.(true);
       ws?.send(JSON.stringify({
         type: "hello",
@@ -194,7 +233,7 @@ export function connectPaxRealtime(opts: {
     ws.onclose = () => {
       connected = false;
       opts.onConnectionChange?.(false);
-      reconnectTimer = setTimeout(connect, WS_RECONNECT_DELAY_MS);
+      reconnect.scheduleReconnect();
     };
     ws.onerror = () => {};
     ws.onmessage = (ev) => {
@@ -236,8 +275,7 @@ export function connectPaxRealtime(opts: {
       }
     },
     close: () => {
-      if (reconnectTimer) clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+      reconnect.markClosed();
       try { ws?.close(); } catch { /* ignore */ }
       ws = null;
     },

@@ -3,6 +3,7 @@ import TopBar from "../components/TopBar";
 import MapView from "../features/map/MapView";
 import PassengerCard from "../components/PassengerCard";
 import ToastHost from "../components/Toast";
+import SectionErrorBoundary from "../components/SectionErrorBoundary";
 import ConversationPanel from "../features/chat/ConversationPanel";
 import { DeparturesFids, ArrivalsFids } from "../features/fids/FidsPanel";
 import DashboardTab from "../features/passengers/DashboardTab";
@@ -48,6 +49,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
   // All realtime + passenger state managed by the hook
   const {
     passengers, priorityList, riskCounts,
+    passengersLoadError,
     selectedPaxId, setSelectedPaxId,
     setHoverPaxId,
     search, setSearch,
@@ -137,6 +139,11 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             <button className={"btn" + (tab === "dashboard" ? " primary" : "")} onClick={() => setTab("dashboard")} style={{ fontSize: 12 }}>📊 Dashboard</button>
             <button className={"btn" + (tab === "map" ? " primary" : "")} onClick={() => setTab("map")} style={{ fontSize: 12 }}>🗺️ Map {clientDefaultAirport().defaultTerminal}</button>
             <span className={"pill " + (rtUp ? "ok" : "warn")} style={{ fontSize: 11 }}>{rtUp ? "WS ●" : "WS ○"}</span>
+            {passengersLoadError && (
+              <span className="pill warn" style={{ fontSize: 11 }} title="乘客列表拉取失败，当前显示的可能是过期数据">
+                乘客数据可能过期
+              </span>
+            )}
           </div>
         }
       />
@@ -148,7 +155,9 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
           flex: 1, minHeight: 0, overflow: "hidden", gap: 16, padding: 16, alignItems: "stretch",
         }}>
           <div style={{ flex: 1, minWidth: 220, maxWidth: 380, height: "100%", minHeight: 400 }}>
-            <DeparturesFids airport={airport} />
+            <SectionErrorBoundary label="出发航班板">
+              <DeparturesFids airport={airport} />
+            </SectionErrorBoundary>
           </div>
           <div style={{ flex: 1.5, minWidth: 400, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
             <DashboardTab
@@ -165,7 +174,9 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             />
           </div>
           <div style={{ flex: 1, minWidth: 220, maxWidth: 380, height: "100%", minHeight: 400 }}>
-            <ArrivalsFids airport={airport} />
+            <SectionErrorBoundary label="到达航班板">
+              <ArrivalsFids airport={airport} />
+            </SectionErrorBoundary>
           </div>
         </div>
 
@@ -175,20 +186,22 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
           flex: 1, minHeight: 0, overflow: "hidden",
         }}>
           <div style={{ flex: 1, minWidth: 0, height: "100%", display: "flex", flexDirection: "column" }}>
-            <MapView
-              airport={airport}
-              tenantId={tenantId}
-              gates={gates}
-              passengers={mapPassengers}
-              selectedPassengerId={selectedPaxId}
-              onSelectPassenger={(id) => {
-                const next = id === selectedPaxId ? null : id;
-                setSelectedPaxId(next);
-                setMapViewMode(next ? "single" : "all");
-              }}
-              onHoverPassenger={setHoverPaxId}
-              visible={tab === "map"}
-            />
+            <SectionErrorBoundary label="地图">
+              <MapView
+                airport={airport}
+                tenantId={tenantId}
+                gates={gates}
+                passengers={mapPassengers}
+                selectedPassengerId={selectedPaxId}
+                onSelectPassenger={(id) => {
+                  const next = id === selectedPaxId ? null : id;
+                  setSelectedPaxId(next);
+                  setMapViewMode(next ? "single" : "all");
+                }}
+                onHoverPassenger={setHoverPaxId}
+                visible={tab === "map"}
+              />
+            </SectionErrorBoundary>
           </div>
 
           {/* Resize handle */}
@@ -242,17 +255,19 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
           {/* Docked chat panel (desktop, map view) */}
           {dockChat && openConvPaxId && (
             <div style={{ width: 320, flexShrink: 0, overflow: "hidden", height: "100%", minHeight: 0, padding: 10 }}>
-              <ConversationPanel
-                mode="docked"
-                passengerId={openConvPaxId}
-                passenger={passengers.find((p) => p.id === openConvPaxId) || null}
-                history={chatHistory[openConvPaxId] || []}
-                onSend={(body) => sendChat(openConvPaxId, body)}
-                onRequestLocation={() => requestLocation(openConvPaxId)}
-                onClose={() => setOpenConvPaxId(null)}
-                isOnline={!!presence[openConvPaxId]}
-                isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
-              />
+              <SectionErrorBoundary label="对话面板">
+                <ConversationPanel
+                  mode="docked"
+                  passengerId={openConvPaxId}
+                  passenger={passengers.find((p) => p.id === openConvPaxId) || null}
+                  history={chatHistory[openConvPaxId] || []}
+                  onSend={(body) => sendChat(openConvPaxId, body)}
+                  onRequestLocation={() => requestLocation(openConvPaxId)}
+                  onClose={() => setOpenConvPaxId(null)}
+                  isOnline={!!presence[openConvPaxId]}
+                  isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
+                />
+              </SectionErrorBoundary>
             </div>
           )}
         </div>
@@ -260,17 +275,19 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
 
       {/* Mobile / narrow: floating chat overlay */}
       {openConvPaxId && !dockChat && (
-        <ConversationPanel
-          mode="floating"
-          passengerId={openConvPaxId}
-          passenger={passengers.find((p) => p.id === openConvPaxId) || null}
-          history={chatHistory[openConvPaxId] || []}
-          onSend={(body) => sendChat(openConvPaxId, body)}
-          onRequestLocation={() => requestLocation(openConvPaxId)}
-          onClose={() => setOpenConvPaxId(null)}
-          isOnline={!!presence[openConvPaxId]}
-          isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
-        />
+        <SectionErrorBoundary label="对话面板">
+          <ConversationPanel
+            mode="floating"
+            passengerId={openConvPaxId}
+            passenger={passengers.find((p) => p.id === openConvPaxId) || null}
+            history={chatHistory[openConvPaxId] || []}
+            onSend={(body) => sendChat(openConvPaxId, body)}
+            onRequestLocation={() => requestLocation(openConvPaxId)}
+            onClose={() => setOpenConvPaxId(null)}
+            isOnline={!!presence[openConvPaxId]}
+            isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
+          />
+        </SectionErrorBoundary>
       )}
 
       <ToastHost items={toasts} onDismiss={dismissToast} />

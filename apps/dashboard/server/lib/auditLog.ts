@@ -37,6 +37,13 @@ export class AuditLog {
     );
   }
 
+  /** Removes audit rows older than maxAgeMs. Returns the number of rows deleted. */
+  async pruneOlderThan(maxAgeMs: number): Promise<number> {
+    const cutoff = Date.now() - maxAgeMs;
+    const r = await this.db.run("DELETE FROM admin_audit_log WHERE created_at < ?", [cutoff]);
+    return r.changes;
+  }
+
   async record(event: AuditEvent): Promise<void> {
     try {
       await this.db.run(

@@ -1,0 +1,32 @@
+# Keeps local secrets and dev-only artifacts out of the build context so they
+# can never be copied into an image layer (even one that's later discarded by
+# a multi-stage build — layers are still cached/inspectable).
+.env
+.env.local
+.env.*.local
+apps/dashboard/.env
+apps/dashboard/.env.local
+
+.git
+.github
+
+**/node_modules
+apps/dashboard/dist
+apps/dashboard/dist-server
+apps/dashboard/.vite
+apps/dashboard/.tsbuild-node
+**/*.tsbuildinfo
+
+# Runtime data — never baked into an image
+apps/dashboard/data
+
+# Large local-only assets fetched/generated outside the image
+apps/dashboard/public/route_site/*.mp4
+apps/dashboard/public/route_site/dynamic
+
+*.md
+.vscode
+.idea
+**/__pycache__
+**/*.pyc
+.DS_Store

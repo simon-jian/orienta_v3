@@ -62,6 +62,8 @@ export const JWT_SECRET = required("JWT_SECRET");
 /** "email:password,email2:password2" */
 export const ADMIN_CREDENTIALS = required("ADMIN_CREDENTIALS");
 
+export const IS_PRODUCTION = process.env.NODE_ENV === "production";
+
 // FlightAware — optional; API routes fall back to static data when missing
 export const FLIGHTAWARE_API_KEY = optional("FLIGHTAWARE_API_KEY", "VITE_FLIGHTAWARE_API_KEY");
 
@@ -78,9 +80,15 @@ export const PAX_ACCOUNT_CREDENTIALS = optional("PAX_ACCOUNT_CREDENTIALS");
 const rawPdrOrigin = optional("PDR_API_ORIGIN");
 export const PDR_API_ORIGIN = rawPdrOrigin ? normalizePdrOrigin(rawPdrOrigin) : "";
 
-// Indoor map — browser uses relative /indoor-map paths; backend proxies to the local map stack by default.
-export const INDOOR_MAP_UPSTREAM = optional("INDOOR_MAP_UPSTREAM") || "http://127.0.0.1:7801";
-export const INDOOR_MAP_API_UPSTREAM = optional("INDOOR_MAP_API_UPSTREAM") || "http://127.0.0.1:3001";
+// Indoor map — browser uses relative /indoor-map paths. Per README "Indoor
+// map topology": empty means Mode A (bundled tiles/POI from public/, no
+// external map stack needed); setting these means Mode B (proxy to a running
+// map server). Deliberately no localhost fallback here — defaulting to
+// "http://127.0.0.1:7801" would silently force Mode B (and fail every
+// indoor-map request with a connection error) for anyone who leaves these
+// unset expecting the documented bundled default, in dev or production.
+export const INDOOR_MAP_UPSTREAM = optional("INDOOR_MAP_UPSTREAM");
+export const INDOOR_MAP_API_UPSTREAM = optional("INDOOR_MAP_API_UPSTREAM");
 export const VITE_LOCAL_AIRPORT_MAP = optional("VITE_LOCAL_AIRPORT_MAP") === "1";
 
 // Frontend public vars (passed through to Vite, already prefixed VITE_)
@@ -173,4 +181,62 @@ export function getAdminCredentials(): Map<string, { password: string; role: "ad
 /** Check if VAPID push is configured. */
 export function isPushConfigured(): boolean {
   return !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+}
+
+// ─── Kiosk scan gating ────────────────────────────────────────────────────────
+// Optional shared secret required from boarding-pass scan kiosks before
+// POST /api/pax/scan will mint a session. Unset → endpoint stays open (dev
+// convenience), but validateProductionSecurity() refuses to boot with it unset
+// in production.
+export const KIOSK_SCAN_SECRET = optional("KIOSK_SCAN_SECRET");
+
+// ─── Production security gate ─────────────────────────────────────────────────
+// Fixes issue: required() only checks presence, not strength — a one-character
+// JWT_SECRET or a plaintext admin password would boot happily. Called once from
+// server.ts before the server starts listening; no-ops outside production so
+// local dev and tests (NODE_ENV=test) are unaffected.
+const MIN_JWT_SECRET_LENGTH = 32;
+const PLACEHOLDER_SECRETS = new Set([
+  "your_jwt_secret_here",
+  "replace-with-openssl-rand-hex-32",
+  "changeme",
+  "secret",
+  "test-secret",
+]);
+
+export function validateProductionSecurity(): void {
+  if (!IS_PRODUCTION) return;
+  const problems: string[] = [];
+
+  if (JWT_SECRET.length < MIN_JWT_SECRET_LENGTH) {
+    problems.push(`JWT_SECRET must be at least ${MIN_JWT_SECRET_LENGTH} characters (got ${JWT_SECRET.length}). Generate one with: openssl rand -hex 32`);
+  }
+  if (PLACEHOLDER_SECRETS.has(JWT_SECRET.trim().toLowerCase())) {
+    problems.push("JWT_SECRET is a known placeholder value — replace it with a real secret.");
+  }
+
+  for (const [email, cred] of getAdminCredentials()) {
+    if (!cred.password.startsWith("scrypt$")) {
+      problems.push(`ADMIN_CREDENTIALS for "${email}" is not scrypt-hashed. Generate one with: node dist-server/server/scripts/hashAdminPassword.js '<password>'`);
+    }
+  }
+
+  if (!KIOSK_SCAN_SECRET) {
+    problems.push("KIOSK_SCAN_SECRET is unset — POST /api/pax/scan will accept boarding-pass scans from anyone, not just trusted kiosks. Set it (and configure kiosks to send it) before go-live.");
+  }
+
+  // docker-compose.yml's bundled Postgres defaults to this password when
+  // POSTGRES_PASSWORD is unset (Compose interpolates every service's env vars
+  // up front, so that default can't be made `required` without also breaking
+  // deploys that don't use --profile scale at all). Catch it here instead.
+  if (DATABASE_URL && /:\/\/[^:]+:orienta@/.test(DATABASE_URL)) {
+    problems.push('DATABASE_URL uses the docker-compose.yml example password ("orienta") — set POSTGRES_PASSWORD to a strong value and update DATABASE_URL to match.');
+  }
+
+  if (problems.length > 0) {
+    throw new Error(
+      "[orienta] Refusing to start in production with insecure config:\n" +
+      problems.map((p) => `  - ${p}`).join("\n"),
+    );
+  }
 }

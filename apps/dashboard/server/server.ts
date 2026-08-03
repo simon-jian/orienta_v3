@@ -12,11 +12,20 @@
 import { existsSync, readFileSync } from "node:fs";
 import http from "node:http";
 import express from "express";
+// Must import right after express, before any router/route is defined: patches
+// express.Router methods so a rejected promise in an async handler reaches the
+// error middleware (expressErrorHandler below) instead of hanging the request.
+// Express 5 does this natively; this app is still on Express 4.
+import "express-async-errors";
 import cookieParser from "cookie-parser";
 import helmet from "helmet";
 import { createProxyMiddleware } from "http-proxy-middleware";
 
-import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP } from "./config";
+import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP, validateProductionSecurity } from "./config";
+
+// Fail fast, before anything else initializes, if production config is insecure
+// (weak/placeholder JWT_SECRET, plaintext admin passwords, kiosk scan wide open).
+validateProductionSecurity();
 import {
   DIST_DIR, REPO_AIRPORT_MAP_PATH,
   LOCAL_INDOOR_MAP_API_DIR, LOCAL_INDOOR_MAP_TILES_DIR,
@@ -24,7 +33,7 @@ import {
 import { HubStore, attachWsHub } from "./hub/wsHub";
 import { ChatRepository } from "./hub/ChatRepository";
 import { registerAuthRoutes } from "./routes/auth";
-import { registerFlightRoutes, registerOrientaRoutes } from "./routes/flight";
+import { registerFlightRoutes, registerLegacyFlightFallback, registerOrientaRoutes } from "./routes/flight";
 import { registerPushRoutes } from "./routes/push";
 import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
@@ -90,6 +99,9 @@ const registry = new PassengerRegistry(sqlDb);
 
 const authRateLimit = createRateLimiter({ name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
 const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
+// GET /api/flight/closest and POST /api/transfer call FlightAware directly on
+// every request (no FIDS cache) — cap per IP to protect the AeroAPI quota.
+const aeroApiRateLimit = createRateLimiter({ name: "aeroapi", windowMs: 60_000, maxRequests: 30, redis: redisCmd });
 // P0-5: the merged-video route spawns ffmpeg/python on cache-miss — strict cap per IP.
 const mergedVideoRateLimit = createRateLimiter({ name: "video", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
 const metricsRateLimit = createRateLimiter({ name: "metrics", windowMs: 60_000, maxRequests: 120, redis: redisCmd });
@@ -98,14 +110,30 @@ const metricsRateLimit = createRateLimiter({ name: "metrics", windowMs: 60_000, 
 const app = express();
 // Behind a reverse proxy (TLS terminator): trust the first hop for req.ip / proto (P1-10).
 app.set("trust proxy", 1);
-// Security headers. CSP / cross-origin isolation are disabled because legacy
-// pages use inline scripts and same-origin iframes (route_site, indoor map).
+// Security headers.
+//
+// frameguard/COOP/CORP are enabled with same-origin settings: every iframe use
+// in this app (route_site inside the dashboard, the indoor-map proxy) is
+// same-origin, so this only blocks cross-origin framing/embedding, not the
+// app's own documented usage.
+//
+// contentSecurityPolicy stays off deliberately, not by oversight: route_site
+// loads OpenLayers from cdn.jsdelivr.net and has inline `style="..."`
+// attributes, the dashboard's Leaflet map pulls tiles from
+// {s}.tile.openstreetmap.org, FIDS renders airline logos from images.kiwi.com,
+// and Sentry (when SENTRY_DSN/VITE_SENTRY_DSN is set) needs a connect-src to
+// its ingest endpoint. A correct policy needs all of those enumerated and
+// verified against a running browser (map, route_site video, FIDS, chat, PDR)
+// before shipping — an unverified policy here would silently break features
+// rather than add safety. crossOriginEmbedderPolicy stays off for the same
+// reason: it would require every cross-origin resource above to opt in via
+// CORP/CORS, which those third parties don't control.
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
-  crossOriginResourcePolicy: false,
-  crossOriginOpenerPolicy: false,
-  frameguard: false,
+  crossOriginResourcePolicy: { policy: "same-origin" },
+  crossOriginOpenerPolicy: { policy: "same-origin" },
+  frameguard: { action: "sameorigin" },
 }));
 app.use(requestLog);
 app.use(express.json());
@@ -128,10 +156,18 @@ registerAuthRoutes(authRouter, auditLog);
 app.use("/api/auth", authRateLimit, authRouter);
 
 // ─── Flight / airport routes ──────────────────────────────────────────────────
+// Two separate router instances: the "/api" mount must NOT carry the legacy
+// catch-all (see registerLegacyFlightFallback doc comment) because it would
+// shadow other single-segment /api/* routes registered afterwards, such as
+// GET /api/passengers.
 const flightRouter = express.Router();
-registerFlightRoutes(flightRouter);
+registerFlightRoutes(flightRouter, aeroApiRateLimit);
 app.use("/api", flightRouter);
-app.use("/flight", flightRouter);
+
+const legacyFlightRouter = express.Router();
+registerFlightRoutes(legacyFlightRouter, aeroApiRateLimit);
+registerLegacyFlightFallback(legacyFlightRouter);
+app.use("/flight", legacyFlightRouter);
 
 // ─── Orienta-specific routes ──────────────────────────────────────────────────
 // Strict limiter on the expensive video-merge endpoint (must precede the router mount).
@@ -142,12 +178,18 @@ registerOrientaRoutes(orientaRouter);
 app.use("/api/orienta", orientaRouter);
 
 // ─── Push / presence / tourist routes ─────────────────────────────────────────
+// paxRateLimit is attached to the routers themselves (not via app.use(prefix, ...))
+// because pushRouter is mounted at five different prefixes below. A limiter
+// attached only to one app-level prefix would not apply when the same router's
+// routes are reached through another prefix (e.g. /api/push/chat-send bypassing
+// a limiter that was only wired on /api/pax).
 const paxSessionRouter = express.Router();
+paxSessionRouter.use(paxRateLimit);
 registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
-app.use("/api/pax", paxRateLimit);
 app.use("/api/pax", paxSessionRouter);
 
 const pushRouter = express.Router();
+pushRouter.use(paxRateLimit);
 registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
 app.use("/api/push",               pushRouter);
 app.use("/api/pax",                pushRouter);
@@ -157,7 +199,7 @@ app.use("/api/tourist-deactivate", pushRouter);
 
 // ─── Passenger management routes ──────────────────────────────────────────────
 const passengerRouter = express.Router();
-registerPassengerRoutes(passengerRouter, store, registry, auditLog);
+registerPassengerRoutes(passengerRouter, store, registry, auditLog, pushSubStore);
 app.use("/api/passengers", passengerRouter);
 
 // ─── Indoor map proxy / bundled tiles ────────────────────────────────────────
@@ -295,24 +337,62 @@ if (PDR_API_ORIGIN) {
 }
 
 // ─── Health probe (P0-8) ──────────────────────────────────────────────────────
-// Process alive + DB ping. PDR is reported best-effort and never fails the probe.
+// Process alive + DB ping are the only checks that flip the HTTP status: without
+// a working database the app can't do anything useful. PDR/indoor-map are
+// proxied, best-effort features — reported for visibility but never fail the
+// probe (a dead upstream there degrades one feature, not the whole app).
+// Redis, when configured, DOES flip the status: it backs cross-instance
+// presence/rate-limit/WS fan-out, so "configured but unreachable" is a real
+// problem for a multi-instance deploy, not a soft feature.
 const SERVER_START_MS = Date.now();
+const HEALTH_UPSTREAM_TIMEOUT_MS = 2000;
+
+async function pingRedisHealth(): Promise<"disabled" | "ok" | "fail"> {
+  if (!redisCmd) return "disabled";
+  try {
+    return (await redisCmd.ping()) === "PONG" ? "ok" : "fail";
+  } catch {
+    return "fail";
+  }
+}
+
+async function pingHttpUpstream(baseUrl: string, path: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, {
+      signal: AbortSignal.timeout(HEALTH_UPSTREAM_TIMEOUT_MS),
+    });
+    // Any response (including a 404 for a probe path the upstream doesn't
+    // define) proves the upstream is reachable; only network failures count.
+    return res.status > 0;
+  } catch {
+    return false;
+  }
+}
+
 app.get("/health", async (_req, res) => {
-  let dbOk = false;
-  try { dbOk = await sqlDb.ping(); } catch { dbOk = false; }
+  const [dbOk, redisStatus, pdrReachable, indoorMapReachable] = await Promise.all([
+    sqlDb.ping().catch(() => false),
+    pingRedisHealth(),
+    PDR_API_ORIGIN ? pingHttpUpstream(PDR_API_ORIGIN, "/health") : Promise.resolve(null),
+    INDOOR_MAP_UPSTREAM ? pingHttpUpstream(INDOOR_MAP_UPSTREAM, "/") : Promise.resolve(null),
+  ]);
+
+  const redisOk = redisStatus !== "fail";
+  const overallOk = dbOk && redisOk;
   const body = {
-    status: dbOk ? "ok" : "degraded",
+    status: overallOk ? "ok" : "degraded",
     uptime_s: Math.round((Date.now() - SERVER_START_MS) / 1000),
     checks: {
       process: "ok",
       db: dbOk ? "ok" : "fail",
       db_dialect: sqlDb.dialect,
-      pdr_proxy: PDR_API_ORIGIN ? "configured" : "disabled",
-      indoor_map: INDOOR_MAP_UPSTREAM ? "upstream" : "bundled",
+      redis: redisStatus,
+      pdr_proxy: !PDR_API_ORIGIN ? "disabled" : pdrReachable ? "ok" : "unreachable",
+      indoor_map: !INDOOR_MAP_UPSTREAM ? "bundled" : indoorMapReachable ? "ok" : "unreachable",
     },
     ts: new Date().toISOString(),
   };
-  res.status(dbOk ? 200 : 503).json(body);
+  res.status(overallOk ? 200 : 503).json(body);
 });
 
 // ─── Static assets + SPA fallback ─────────────────────────────────────────────
@@ -362,6 +442,9 @@ if (pdrProxy) {
 
 const wss = attachWsHub(server, store, registry);
 
+/** Set once bootstrap() starts the pruning interval; cleared on shutdown(). */
+let stopMaintenanceJobs: (() => void) | null = null;
+
 async function bootstrap(): Promise<void> {
   // Load airport/tenant config from disk and hydrate the shared registries
   // before anything serves a request (Multi-airport Model B).
@@ -381,8 +464,9 @@ async function bootstrap(): Promise<void> {
   ]);
   logger.info("db_ready", { dialect: sqlDb.dialect, redis: REDIS_ENABLED, instance: INSTANCE_ID });
 
-  // Start background pruning only after tables exist.
-  startMaintenanceJobs({ registry, chatRepo, metricsRepo });
+  // Start background pruning only after tables exist. The disposer is
+  // captured (not discarded) so `shutdown()` below can clear the interval.
+  stopMaintenanceJobs = startMaintenanceJobs({ registry, chatRepo, metricsRepo, auditLog });
 
   await loadPoiCache();
   server.listen(PORT, "0.0.0.0", () => {
@@ -406,6 +490,8 @@ function shutdown(signal: string): void {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info("shutdown_start", { signal });
+
+  try { stopMaintenanceJobs?.(); } catch { /* ignore */ }
 
   // Stop accepting new HTTP connections; close existing WS clients.
   if (wss) {

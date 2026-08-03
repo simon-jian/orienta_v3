@@ -14,8 +14,9 @@ import type { Router, Request, Response } from "express";
 import { requireAdmin, requireRole, adminEmailFromRequest } from "./auth";
 import { ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
-import type { HubStore } from "../hub/HubStore";
+import { HubStore } from "../hub/HubStore";
 import type { AuditLog } from "../lib/auditLog";
+import type { PushSubscriptionStore } from "../passengers/PushSubscriptionStore";
 import { buildFlights } from "../../src/services/flightService";
 import { airportForTenant } from "../../src/config/tenants/registry";
 import type { Passenger } from "../../src/types/types";
@@ -54,6 +55,7 @@ export function registerPassengerRoutes(
   store: HubStore,
   registry: PassengerRegistry,
   auditLog?: AuditLog,
+  pushSubs?: PushSubscriptionStore,
 ): void {
 
   /** GET /api/passengers — list all passengers for a tenant */
@@ -114,7 +116,7 @@ export function registerPassengerRoutes(
   /** PATCH /api/passengers/:id — update extStatus, activity, plan, etc. (admin/ops) */
   router.patch("/:id", requireRole("admin", "ops"), async (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
-    const passengerId = req.params.id;
+    const passengerId = req.params.id ?? "";
     const body        = req.body || {};
 
     const allowed = ["name", "nationality", "locale", "needsWheelchair", "plan",
@@ -136,16 +138,21 @@ export function registerPassengerRoutes(
     return res.json({ ok: true, passenger: updated });
   });
 
-  /** DELETE /api/passengers/:id — admin only */
+  /** DELETE /api/passengers/:id — admin only. Cascades to chat history and push subscriptions. */
   router.delete("/:id", requireRole("admin"), async (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
-    const passengerId = req.params.id;
+    const passengerId = req.params.id ?? "";
     const deleted = await registry.delete(tenantId, passengerId);
     if (!deleted) return res.status(404).json({ ok: false, error: "passenger_not_found" });
+
+    const { chatRowsDeleted } = await store.purgePassenger(tenantId, passengerId);
+    await pushSubs?.removeAllForKey(HubStore.key(tenantId, passengerId));
+
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_delete",
       tenantId, passengerId,
+      detail: `chat_rows=${chatRowsDeleted}`,
     });
     return res.json({ ok: true });
   });

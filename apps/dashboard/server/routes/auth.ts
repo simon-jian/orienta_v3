@@ -13,6 +13,7 @@ import type { AuditLog } from "../lib/auditLog";
 import {
   ADMIN_COOKIE_NAME,
   ADMIN_JWT_TTL_S,
+  ADMIN_TOKEN_AUDIENCE,
   verifyAdminToken,
 } from "../auth/adminAuth";
 
@@ -45,6 +46,8 @@ async function signToken(payload: object): Promise<string> {
   const secret = new TextEncoder().encode(JWT_SECRET);
   return new SignJWT(payload as Record<string, unknown>)
     .setProtectedHeader({ alg: "HS256" })
+    .setIssuer(ADMIN_TOKEN_AUDIENCE)
+    .setAudience(ADMIN_TOKEN_AUDIENCE)
     .setIssuedAt()
     .setExpirationTime(`${ADMIN_JWT_TTL_S}s`)
     .sign(secret);

@@ -41,6 +41,20 @@ services:
         # Wait for the PDR /health probe (baked into pdr_airchina/Dockerfile) to pass.
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
+    # NOTE: this service intentionally does NOT `depends_on: postgres`/`redis`.
+    # Compose resolves `depends_on` at parse time regardless of which profile
+    # is active, so referencing a `profiles: [scale]` service here would break
+    # plain `docker compose up` (no --profile scale) with "invalid compose
+    # project: depends on undefined service" — verified against this compose
+    # file. When DATABASE_URL/REDIS_URL point at the scale-profile services,
+    # the app's own `restart: unless-stopped` + Docker's backoff covers the
+    # brief window before Postgres/Redis are ready: bootstrap() exits(1) on a
+    # connection failure and the container restarts until it succeeds.
 
   # ── Scale-out backends (opt-in: `docker compose --profile scale up -d`) ────────
   postgres:
@@ -48,6 +62,11 @@ services:
     profiles: ["scale"]
     environment:
       POSTGRES_USER: "${POSTGRES_USER:-orienta}"
+      # Compose interpolates every service's env vars up front, even ones
+      # gated by an inactive profile — a `:?required` here would break plain
+      # `docker compose up` (no --profile scale) too (verified). The app
+      # itself refuses to boot in production with this literal default
+      # password (see server/config.ts validateProductionSecurity).
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-orienta}"
       POSTGRES_DB: "${POSTGRES_DB:-orienta}"
     ports:
@@ -60,6 +79,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
 
   redis:
     image: redis:7-alpine
@@ -75,6 +99,11 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
 
   # Video-merge worker (P2-4): runs the CPU-heavy ffmpeg concat off the web process.
   orienta-video-worker:
@@ -95,6 +124,11 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1g
 
   orienta-pdr:
     image: orienta-pdr:latest
@@ -106,6 +140,11 @@ services:
     environment:
       PORT: "10000"
     restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
 
 volumes:
   orienta-data:

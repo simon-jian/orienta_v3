@@ -93,7 +93,12 @@ function pickAmenityPoints(gates: Record<string, LatLng>, waypoints: LatLng[]): 
   if (waypoints.length >= 3) {
     const step = Math.max(1, Math.floor(waypoints.length / 6));
     const picked: LatLng[] = [];
-    for (let i = 0; i < waypoints.length && picked.length < 6; i += step) picked.push(waypoints[i]);
+    // i is always < waypoints.length by the loop condition; filter below is
+    // just defense in depth against a future refactor of that invariant.
+    for (let i = 0; i < waypoints.length && picked.length < 6; i += step) {
+      const p = waypoints[i];
+      if (p) picked.push(p);
+    }
     return picked;
   }
   const keys = Object.keys(gates).sort((a, b) => parseInt(a.slice(1), 10) - parseInt(b.slice(1), 10));
@@ -102,8 +107,10 @@ function pickAmenityPoints(gates: Record<string, LatLng>, waypoints: LatLng[]): 
     Math.min(keys.length - 1, Math.floor(t * (keys.length - 1))),
   );
   const seen = new Set<number>();
-  return idx.filter((i) => { if (seen.has(i)) return false; seen.add(i); return true; })
-    .map((i) => gates[keys[i]]);
+  return idx
+    .filter((i) => { if (seen.has(i)) return false; seen.add(i); return true; })
+    .map((i) => { const key = keys[i]; return key ? gates[key] : undefined; })
+    .filter((v): v is LatLng => v != null);
 }
 
 export async function preloadPekPoiFromMapApi(): Promise<void> {

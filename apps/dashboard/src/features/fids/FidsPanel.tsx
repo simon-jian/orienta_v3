@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import type { FidsFlight } from "../../services/fidsService";
+import type { FidsFlight, FidsStatus } from "../../services/fidsService";
 import { fetchDepartures, fetchArrivals, REFRESH_MS } from "../../services/fidsService";
 
 /** Green FIDS (departures / arrivals board) */
@@ -64,7 +64,7 @@ function formatTime() {
 function parseFlight(flight: string): { code: string; num: string } {
   const s = flight.trim().toUpperCase();
   const m = s.match(/^([A-Z]{2}|[A-Z]\d)(\d[\dA-Z]*)$/);
-  if (m) return { code: m[1], num: m[2] };
+  if (m?.[1] && m[2]) return { code: m[1], num: m[2] };
   return { code: "•", num: flight };
 }
 
@@ -148,6 +148,7 @@ function FidsBoard({
   airport,
   mode,
   flights,
+  status,
   loading,
   time,
 }: {
@@ -155,6 +156,7 @@ function FidsBoard({
   airport: string;
   mode: "dep" | "arr";
   flights: FidsFlight[];
+  status: FidsStatus;
   loading: boolean;
   time: string;
 }) {
@@ -196,6 +198,14 @@ function FidsBoard({
       <div style={{ flex: 1, overflowY: "auto", fontSize: 13, fontWeight: 700 }}>
         {loading ? (
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600 }}>Loading…</div>
+        ) : status === "unconfigured" ? (
+          <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12, lineHeight: 1.5 }}>
+            未接入实时航班数据源。
+            <br />
+            No live flight data source configured.
+          </div>
+        ) : flights.length === 0 ? (
+          <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12 }}>暂无航班 · No flights right now</div>
         ) : (
           flights.slice(0, 12).map((f, i) => {
             const place = mode === "dep" ? (f.destination || "—") : (f.origin || "—");
@@ -247,6 +257,7 @@ function FidsBoard({
 
 export function DeparturesFids({ airport }: { airport: string }) {
   const [flights, setFlights] = useState<FidsFlight[]>([]);
+  const [status, setStatus] = useState<FidsStatus>("unconfigured");
   const [time, setTime] = useState(formatTime());
   const [loading, setLoading] = useState(true);
 
@@ -254,8 +265,8 @@ export function DeparturesFids({ airport }: { airport: string }) {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      const data = await fetchDepartures(airport);
-      if (!cancelled) setFlights(data);
+      const result = await fetchDepartures(airport);
+      if (!cancelled) { setFlights(result.flights); setStatus(result.status); }
       setLoading(false);
     };
     load();
@@ -269,12 +280,13 @@ export function DeparturesFids({ airport }: { airport: string }) {
   }, [airport]);
 
   return (
-    <FidsBoard title="Departures" airport={airport} mode="dep" flights={flights} loading={loading} time={time} />
+    <FidsBoard title="Departures" airport={airport} mode="dep" flights={flights} status={status} loading={loading} time={time} />
   );
 }
 
 export function ArrivalsFids({ airport }: { airport: string }) {
   const [flights, setFlights] = useState<FidsFlight[]>([]);
+  const [status, setStatus] = useState<FidsStatus>("unconfigured");
   const [time, setTime] = useState(formatTime());
   const [loading, setLoading] = useState(true);
 
@@ -282,8 +294,8 @@ export function ArrivalsFids({ airport }: { airport: string }) {
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      const data = await fetchArrivals(airport);
-      if (!cancelled) setFlights(data);
+      const result = await fetchArrivals(airport);
+      if (!cancelled) { setFlights(result.flights); setStatus(result.status); }
       setLoading(false);
     };
     load();
@@ -297,6 +309,6 @@ export function ArrivalsFids({ airport }: { airport: string }) {
   }, [airport]);
 
   return (
-    <FidsBoard title="Arrivals" airport={airport} mode="arr" flights={flights} loading={loading} time={time} />
+    <FidsBoard title="Arrivals" airport={airport} mode="arr" flights={flights} status={status} loading={loading} time={time} />
   );
 }

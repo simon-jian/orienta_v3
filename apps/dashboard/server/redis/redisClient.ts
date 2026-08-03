@@ -11,7 +11,14 @@ import { logger } from "../lib/logger";
 export type { Redis };
 
 function make(role: string): Redis {
-  const c = new Redis(REDIS_URL, { maxRetriesPerRequest: 3 });
+  const c = new Redis(REDIS_URL, {
+    maxRetriesPerRequest: 3,
+    // Without these, a stalled Redis (network partition, overloaded server)
+    // hangs every caller indefinitely instead of surfacing an error to fall
+    // back on (rate limiter fails open, hub bus logs and drops the message).
+    connectTimeout: 5000,
+    commandTimeout: 3000,
+  });
   c.on("error", (e: Error) => logger.error("redis_error", { role, error: e.message }));
   c.on("connect", () => logger.info("redis_connected", { role }));
   return c;
