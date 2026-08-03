@@ -31,6 +31,16 @@ function statusColor(p: PassengerComputed): string {
   return "#9ca3af";
 }
 
+/** Escapes a string for safe interpolation into a Leaflet divIcon's `html`. */
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 function gateIcon(label: string) {
   return L.divIcon({
     className: "orienta-gate-marker",
@@ -40,7 +50,7 @@ function gateIcon(label: string) {
       font-weight:800;font-size:11px;padding:0 5px;
       box-shadow:0 0 12px rgba(10,132,255,0.6),0 2px 8px rgba(0,0,0,0.4);
       border:2px solid rgba(255,255,255,0.9);
-      white-space:nowrap;">${label}</div>`,
+      white-space:nowrap;">${escapeHtml(label)}</div>`,
     iconSize: [32, 24],
     iconAnchor: [16, 12],
   });

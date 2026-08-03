@@ -48,7 +48,13 @@ export class RedisHubBus implements HubBus {
   }
 
   publish(env: HubEnvelope): void {
-    void this.pub.publish(CHANNEL, JSON.stringify({ origin: INSTANCE_ID, env }));
+    // Fire-and-forget by design (callers don't await fan-out), but a rejection
+    // must never escape as an unhandled rejection — errorTracking.ts treats
+    // those as fatal (process.exit) so the whole server would go down on a
+    // single transient Redis blip instead of just dropping this one broadcast.
+    this.pub.publish(CHANNEL, JSON.stringify({ origin: INSTANCE_ID, env })).catch((e: unknown) => {
+      logger.error("hub_bus_publish_failed", { error: e instanceof Error ? e.message : String(e) });
+    });
   }
 
   close(): void {

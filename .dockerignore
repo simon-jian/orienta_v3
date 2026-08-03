@@ -1,11 +1,20 @@
 # Keeps local secrets and dev-only artifacts out of the build context so they
 # can never be copied into an image layer (even one that's later discarded by
-# a multi-stage build — layers are still cached/inspectable).
+# a multi-stage build — layers are still cached/inspectable). Mirrors the root
+# .gitignore's secret-file patterns; .env.example is fine to exclude too since
+# nothing in the image ever reads it.
 .env
 .env.local
 .env.*.local
+.env.*
 apps/dashboard/.env
 apps/dashboard/.env.local
+apps/dashboard/.env.*
+deploy.env
+*.pem
+*.key
+*credentials*.json
+*license*.json
 
 .git
 .github

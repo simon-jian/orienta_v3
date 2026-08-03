@@ -26,10 +26,6 @@ import { logger } from "./logger";
 
 let enabled = false;
 
-export function isErrorTrackingEnabled(): boolean {
-  return enabled;
-}
-
 /**
  * Strips fields that could carry secrets/PII before an event leaves the
  * process, regardless of what attached them (our own `extra` context in

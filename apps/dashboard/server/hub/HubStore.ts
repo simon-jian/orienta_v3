@@ -15,6 +15,16 @@ import type { Redis } from "../redis/redisClient";
 import { logger } from "../lib/logger";
 
 const MAX_CHAT_HISTORY = 100;
+/**
+ * A passenger's presence entry is considered stale (and excluded from
+ * listOnlineGlobal) after this long without a heartbeat. Paired with
+ * PRESENCE_HEARTBEAT_INTERVAL_MS in server.ts, which re-stamps every
+ * locally-connected passenger well inside this window — a passenger who
+ * disconnects ungracefully (crash, network drop with no close frame) simply
+ * stops being re-stamped and ages out, rather than staying "online" in Redis
+ * forever the way a plain SADD/SREM set would after a crash.
+ */
+const PRESENCE_STALE_MS = 6 * 60_000;
 
 export type PaxMeta = { displayName?: string; plan?: string };
 export type TrajectoryData = {
@@ -90,26 +100,56 @@ export class HubStore {
     const local = this.listOnline(tenantId);
     if (!this.redis) return local;
     try {
-      const members = await this.redis.smembers(this.presenceKey(tenantId));
+      // A sorted set scored by last-heartbeat time — see PRESENCE_STALE_MS.
+      // Members with no recent heartbeat (e.g. a crashed instance's
+      // passengers) fall out of this range instead of lingering forever.
+      const members = await this.redis.zrangebyscore(
+        this.presenceKey(tenantId),
+        Date.now() - PRESENCE_STALE_MS,
+        "+inf",
+      );
       return Array.from(new Set([...local, ...members]));
     } catch {
       return local;
     }
   }
 
-  /** Record presence in the shared store (Redis set). No-op without Redis. */
+  /**
+   * Record presence in the shared store (Redis sorted set, scored by time so
+   * stale entries age out — see PRESENCE_STALE_MS). No-op without Redis.
+   * Also called periodically as a heartbeat for still-connected passengers —
+   * see heartbeatLocalPresence() / server.ts's presence heartbeat interval.
+   */
   recordPresence(tenantId: string, passengerId: string, online: boolean): void {
     if (!this.redis) return;
     const key = this.presenceKey(tenantId);
     const op = online
-      ? this.redis.sadd(key, passengerId)
-      : this.redis.srem(key, passengerId);
+      ? this.redis.zadd(key, Date.now(), passengerId)
+      : this.redis.zrem(key, passengerId);
     void op.catch((err: unknown) =>
       logger.error("presence_redis_failed", {
         passengerId,
         error: err instanceof Error ? err.message : String(err),
       }),
     );
+  }
+
+  /**
+   * Re-stamps every passenger with an open WebSocket on THIS instance so
+   * their Redis presence entry doesn't age out past PRESENCE_STALE_MS while
+   * still genuinely connected. Call on a timer well inside that window (see
+   * server.ts) — passengers who actually disconnect (gracefully or not)
+   * simply stop appearing in `paxSockets` and stop being re-stamped.
+   */
+  heartbeatLocalPresence(): void {
+    if (!this.redis) return;
+    for (const key of this.paxSockets.keys()) {
+      const sep = key.indexOf("::");
+      if (sep < 0) continue;
+      const tenantId = key.slice(0, sep);
+      const passengerId = key.slice(sep + 2);
+      this.recordPresence(tenantId, passengerId, true);
+    }
   }
 
   // ── Chat ────────────────────────────────────────────────────────────────────

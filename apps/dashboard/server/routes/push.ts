@@ -17,10 +17,11 @@ import {
   isPushConfigured, ROUTE_SITE_DEFAULT_TENANT, TOURIST_ALLOWED_ORIGINS,
 } from "../config";
 import type { ChatKind } from "../../src/types/types";
-import { requireAdmin } from "./auth";
+import { requireAdmin, requireTenantAccess } from "./auth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import type { AuditLog } from "../lib/auditLog";
 import { PushSubscriptionStore, type PushSub } from "../passengers/PushSubscriptionStore";
+import { logger } from "../lib/logger";
 
 // ─── VAPID helpers ────────────────────────────────────────────────────────────
 
@@ -133,7 +134,15 @@ export function registerPushRoutes(
     awayTokens.set(key, token);
     setTimeout(() => {
       if (awayTokens.get(key) !== token) return;
-      void sendAwayPush(pushSubs, identity.tenantId, identity.passengerId);
+      // Fires once per /away call; always clear so a repeat away/back cycle for
+      // the same passenger doesn't leak a Map entry once this timer is done.
+      awayTokens.delete(key);
+      sendAwayPush(pushSubs, identity.tenantId, identity.passengerId).catch((err: unknown) => {
+        // Must not become an unhandled rejection: errorTracking.ts now treats
+        // those as fatal, and this fires from a bare setTimeout with no caller
+        // to catch it.
+        logger.error("away_push_failed", { error: err instanceof Error ? err.message : String(err) });
+      });
     }, awayMs);
     return res.json({ ok: true });
   });
@@ -186,9 +195,13 @@ export function registerPushRoutes(
   });
 
   // ── Admin presence poll ───────────────────────────────────────────────────────
-  router.get("/admin-presence", requireAdmin, (req: Request, res: Response) => {
+  router.get("/admin-presence", requireAdmin, async (req: Request, res: Response) => {
     const tenantId = String(req.query.tenant || ROUTE_SITE_DEFAULT_TENANT).trim();
-    res.json({ ok: true, tenantId, online: store.listOnline(tenantId) });
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    // listOnlineGlobal (not listOnline) so this matches WS hello / GET
+    // /api/passengers — otherwise this endpoint under-reports whoever is
+    // connected to a *different* instance in a multi-instance (Redis) deploy.
+    res.json({ ok: true, tenantId, online: await store.listOnlineGlobal(tenantId) });
   });
 
   // ── Tourist position (route_site → back office) ───────────────────────────────

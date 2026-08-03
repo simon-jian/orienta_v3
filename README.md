@@ -40,7 +40,8 @@ npm run pdr:dev
 
 - Admin: http://localhost:5173
 - Passenger entry: http://localhost:5173/pax
-- Video + PDR (legacy): http://localhost:5173/pax?pid=TX1&tenant=airchina&view=video
+- Passenger app (post-session): http://localhost:5173/pax/app
+- Route video / PDR demo (`route_site`, still a supported standalone feature): http://localhost:5173/route_site/?hub=PEK&tenant=airchina
 
 ### PDR (pedestrian dead reckoning)
 
@@ -87,12 +88,12 @@ rely on this endpoint.
 
 ## Indoor map topology
 
-Two supported deployment modes (set in env):
+Two deployment modes (set in env):
 
 | Mode | `INDOOR_MAP_UPSTREAM` / `INDOOR_MAP_API_UPSTREAM` | Behavior |
 |------|--------------------------------------------------|----------|
-| **A — Bundled** (default for offline / single container) | empty | Server serves tiles from `public/` and POI/zones from bundled JSON. No external map stack needed. |
-| **B — External** | `http://127.0.0.1:7801` / `http://127.0.0.1:3001` | Server proxies `/indoor-map` and `/indoor-map-api` to a running map server + POI API. |
+| **A — Bundled** | empty | Server looks for tiles/POI JSON at `../../indoor-map-tiles` / `../../indoor-map-api` (two levels above `apps/dashboard/` — see `server/paths.ts`). **Not currently populated in this repo or its Docker image** — those directories only exist in the old `orienta_v2_step2` checkout. Leaving both vars empty today means the indoor map has no tile/POI source until you vendor those assets into that path yourself. |
+| **B — External** (the mode actually used today) | `http://127.0.0.1:7801` / `http://127.0.0.1:3001` | Server proxies `/indoor-map` and `/indoor-map-api` to a running map server + POI API. This is what local dev and the current deploy examples assume. |
 
 `VITE_LOCAL_AIRPORT_MAP=1` serves `airport-map.html` from the repo checkout (dev).
 

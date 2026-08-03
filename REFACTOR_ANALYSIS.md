@@ -2,6 +2,14 @@
 
 > Generated: 2026-05-24  
 > Branch analysed: `another-way-of-communicating-between-devices-PDR-recording`
+>
+> **⚠️ Historical / archived.** This analyzes the pre-v3 (`v2`) tree under
+> paths like `vite/src/App.tsx` that no longer exist — the codebase has since
+> been restructured into `apps/dashboard/`. Most of the structural issues
+> catalogued here were addressed by the v2→v3 refactor and the later
+> multi-airport migration. Kept for historical context, not as a current
+> structural-debt list — see `HARDCODED_VALUES.md` / `PRODUCTION_ROADMAP.md`
+> for the current one.
 
 ---
 

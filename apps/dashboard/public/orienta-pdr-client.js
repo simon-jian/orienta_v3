@@ -61,6 +61,13 @@
     return [lng0 + dLng, lat0 + dLat];
   }
 
+  /** Cap outbound sensor-frame rate — devicemotion can fire far faster than the
+   *  PDR step-detection algorithm needs (min step period is 250ms server-side),
+   *  so sending every event wastes battery/bandwidth for no accuracy gain. */
+  var MIN_FRAME_INTERVAL_MS = 50; // 20 Hz
+  var RECONNECT_BASE_MS = 1000;
+  var RECONNECT_MAX_MS = 15000;
+
   var st = {
     active: false,
     stopping: false,
@@ -80,6 +87,13 @@
     motionWarnTimer: null,
     lastStatusMs: 0,
     lastPose: null,
+    lastFrameSentMs: 0,
+    // True while the page is hidden (screen locked / app backgrounded): sensor
+    // listeners are removed but the session/socket stay alive so a brief
+    // backgrounding resumes instantly instead of restarting from zero.
+    pausedForVisibility: false,
+    reconnectTimer: null,
+    reconnectAttempt: 0,
   };
 
   function clearMotionWarnTimer() {
@@ -246,8 +260,26 @@
     };
   }
 
+  function attachSensorListeners() {
+    if (st.motionHandler || st.orientHandler) return; // already attached
+    st.motionHandler = onMotion;
+    st.orientHandler = onOrientation;
+    window.addEventListener("devicemotion", onMotion, { passive: true });
+    window.addEventListener("deviceorientation", onOrientation, { passive: true });
+  }
+
+  function detachSensorListeners() {
+    if (st.motionHandler) window.removeEventListener("devicemotion", st.motionHandler);
+    if (st.orientHandler) window.removeEventListener("deviceorientation", st.orientHandler);
+    st.motionHandler = null;
+    st.orientHandler = null;
+  }
+
   function onMotion(e) {
     if (!st.socket || st.socket.readyState !== WebSocket.OPEN) return;
+    var nowThrottle = Date.now();
+    if (nowThrottle - st.lastFrameSentMs < MIN_FRAME_INTERVAL_MS) return;
+    st.lastFrameSentMs = nowThrottle;
     st.motionEvents++;
     if (st.motionEvents === 1) {
       clearMotionWarnTimer();
@@ -412,22 +444,33 @@
     st.motionEvents = 0;
     clearMotionWarnTimer();
 
+    connectPdrSocket(sid);
+  }
+
+  /**
+   * Opens the PDR WebSocket for an existing session id. Split out from
+   * startPdr() so a dropped connection can reconnect to the *same* session
+   * (the backend keeps a disconnected session's PDR state — step count,
+   * position — alive for a while; see pdr_airchina/backend/app.py
+   * SESSION_TTL_S) instead of the user having to restart from zero.
+   */
+  function connectPdrSocket(sid) {
     var wsUrl = wsBaseUrl() + "/ws/pdr/" + encodeURIComponent(sid);
     var ws = new WebSocket(wsUrl);
     st.socket = ws;
     ws.onopen = function () {
       st.active = true;
+      st.reconnectAttempt = 0;
       window.__ORIENTA_PDR__.active = true;
       setPdrButtonState("connected");
       setStatus("已连接 · 等待运动数据（请稍晃手机）");
-      st.motionHandler = onMotion;
-      st.orientHandler = onOrientation;
-      window.addEventListener("devicemotion", onMotion, { passive: true });
-      window.addEventListener("deviceorientation", onOrientation, { passive: true });
+      // Don't re-attach sensors if the page is currently hidden — visibility
+      // handling will attach them the moment it becomes visible again.
+      if (!st.pausedForVisibility) attachSensorListeners();
       clearMotionWarnTimer();
       st.motionWarnTimer = setTimeout(function () {
         st.motionWarnTimer = null;
-        if (st.active && st.motionEvents === 0) {
+        if (st.active && st.motionEvents === 0 && !st.pausedForVisibility) {
           setStatus("未收到 IMU · 请晃动手机或检查系统隐私设置");
         }
       }, 4000);
@@ -442,19 +485,48 @@
       st.active = false;
       window.__ORIENTA_PDR__.active = false;
       st.motionEvents = 0;
-      if (st.motionHandler) window.removeEventListener("devicemotion", st.motionHandler);
-      if (st.orientHandler) window.removeEventListener("deviceorientation", st.orientHandler);
-      st.motionHandler = null;
-      st.orientHandler = null;
+      detachSensorListeners();
       setPdrButtonState("off");
-      if (!st.stopping) setStatus("PDR 已断开");
-      st.stopping = false;
+      // A stale/superseded socket firing close (e.g. after a fresh reconnect
+      // already replaced st.socket) must not stomp on the new connection.
+      if (st.socket !== ws) return;
+      st.socket = null;
+      if (st.stopping) {
+        st.stopping = false;
+        return;
+      }
+      // Not an intentional stop — the user still wants PDR running (this
+      // mirrors src/services/realtime.ts's reconnect-with-backoff pattern).
+      // Reconnecting to the SAME sessionId resumes the backend's PDR state.
+      if (st.sessionId) {
+        setStatus("PDR 已断开 · 正在重连…");
+        scheduleReconnect();
+      } else {
+        setStatus("PDR 已断开");
+      }
     };
+  }
+
+  function scheduleReconnect() {
+    if (st.reconnectTimer != null) return;
+    var backoff = Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS * Math.pow(2, st.reconnectAttempt));
+    var jitter = backoff * (0.5 + Math.random() * 0.5);
+    st.reconnectAttempt++;
+    st.reconnectTimer = setTimeout(function () {
+      st.reconnectTimer = null;
+      if (!st.sessionId || st.stopping) return;
+      connectPdrSocket(st.sessionId);
+    }, jitter);
   }
 
   function stopPdr() {
     st.stopping = true;
     clearMotionWarnTimer();
+    if (st.reconnectTimer != null) {
+      clearTimeout(st.reconnectTimer);
+      st.reconnectTimer = null;
+    }
+    st.reconnectAttempt = 0;
     st.motionEvents = 0;
     setPdrButtonState("off");
     if (st.socket) {
@@ -466,14 +538,54 @@
     st.sessionId = null;
     st.active = false;
     window.__ORIENTA_PDR__.active = false;
-    if (st.motionHandler) window.removeEventListener("devicemotion", st.motionHandler);
-    if (st.orientHandler) window.removeEventListener("deviceorientation", st.orientHandler);
-    st.motionHandler = null;
-    st.orientHandler = null;
+    detachSensorListeners();
+    st.pausedForVisibility = false;
     st.trail = [];
     st.markerLngLat = null;
     setStatus("");
   }
+
+  /**
+   * Pauses/resumes sensor listeners (not the WebSocket/session) when the page
+   * is hidden — a locked screen or backgrounded app stops producing useful
+   * devicemotion/deviceorientation events on most platforms anyway, so this
+   * mainly avoids sending stale/garbage frames and gives the user an accurate
+   * status instead of a silently stalled "connected" state. The session/
+   * socket are left alone: if the OS itself kills the connection while
+   * hidden, the existing onclose → scheduleReconnect() path handles that
+   * independently, using the same still-known sessionId.
+   */
+  function onVisibilityChange() {
+    if (typeof document === "undefined") return;
+    if (document.visibilityState === "hidden") {
+      if (!st.active || st.pausedForVisibility) return;
+      st.pausedForVisibility = true;
+      detachSensorListeners();
+      clearMotionWarnTimer();
+      setStatus("已暂停（页面不可见）");
+    } else {
+      if (!st.pausedForVisibility) return;
+      st.pausedForVisibility = false;
+      st.motionEvents = 0;
+      if (st.active && st.socket && st.socket.readyState === WebSocket.OPEN) {
+        attachSensorListeners();
+        setStatus("已恢复 · 等待运动数据（请稍晃手机）");
+        clearMotionWarnTimer();
+        st.motionWarnTimer = setTimeout(function () {
+          st.motionWarnTimer = null;
+          if (st.active && st.motionEvents === 0 && !st.pausedForVisibility) {
+            setStatus("未收到 IMU · 请晃动手机或检查系统隐私设置");
+          }
+        }, 4000);
+      }
+      // If the socket isn't open, onclose's reconnect path (already running)
+      // will call attachSensorListeners() itself once it reconnects.
+    }
+  }
+
+  try {
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  } catch (eVis) {}
 
   function togglePdr() {
     if (st.active) stopPdr();

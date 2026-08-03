@@ -14,4 +14,6 @@ if (!password) {
   process.exit(1);
 }
 
-process.stdout.write(hashPassword(password) + "\n");
+hashPassword(password).then((hash) => {
+  process.stdout.write(hash + "\n");
+});

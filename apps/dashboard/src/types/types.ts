@@ -1,10 +1,10 @@
 /**
  * Single source of truth for all shared types.
  *
- * Previously split across three files with silent divergence:
- *   - src/services/types.ts
- *   - src/services/realtime.ts
- *   - vite/wsHub.ts
+ * Previously (pre-v3 restructure) split across three files with silent
+ * divergence: src/services/types.ts, src/services/realtime.ts, and the old
+ * v2-layout server/hub/wsHub.ts (that path has since moved under
+ * apps/dashboard/server/hub/wsHub.ts).
  *
  * Server code (server/) imports directly from this file too.
  */

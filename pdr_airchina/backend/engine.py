@@ -10,6 +10,18 @@ def clamp(x: float, a: float, b: float) -> float:
     return max(a, min(b, x))
 
 
+def safe_float(value, default: float = 0.0) -> float:
+    """Coerces `value` to a finite float, falling back to `default` for
+    anything that isn't one (wrong type, non-numeric string, NaN/inf) —
+    sensor frames come straight from a client's JSON payload with no
+    validation before reaching here, so any field can be malformed."""
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return default
+    return f if math.isfinite(f) else default
+
+
 def wrap_deg(d: float) -> float:
     d = d % 360.0
     return d + 360.0 if d < 0 else d
@@ -252,9 +264,9 @@ class PdrEngine:
 
     def _step_detect(self, frame: Dict, t_ms: float) -> bool:
         acc_g = frame.get("acc_including_g") or {}
-        ax = float(acc_g.get("x", 0.0))
-        ay = float(acc_g.get("y", 0.0))
-        az = float(acc_g.get("z", 0.0))
+        ax = safe_float(acc_g.get("x"))
+        ay = safe_float(acc_g.get("y"))
+        az = safe_float(acc_g.get("z"))
         if not (math.isfinite(ax) and math.isfinite(ay) and math.isfinite(az)):
             return False
         if abs(ax) + abs(ay) + abs(az) < 1e-6:
@@ -315,7 +327,7 @@ class PdrEngine:
         return True
 
     def process_frame(self, frame: Dict) -> Dict:
-        t_ms = float(frame.get("t_ms") or 0.0)
+        t_ms = safe_float(frame.get("t_ms"))
         if t_ms <= 0:
             t_ms = 0.0
         self.state.map_match_enabled = bool(frame.get("map_match_enabled"))

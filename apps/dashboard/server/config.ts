@@ -159,9 +159,44 @@ export const VIDEO_SOURCE_DIR = optional("VIDEO_SOURCE_DIR");
 
 // ─── Derived helpers ──────────────────────────────────────────────────────────
 
+/**
+ * Optional per-admin overrides, kept in separate env vars (rather than packed
+ * into ADMIN_CREDENTIALS with more colon-separated fields) so an existing
+ * "email:password" entry — including a dev-only plaintext password that
+ * happens to contain a colon — never becomes ambiguous to parse.
+ *
+ * Format for both: "email1=value1,email2=value2". ADMIN_TENANT_SCOPES' value
+ * is itself a "|"-separated list of tenant ids (e.g. "airchina|united").
+ * An email with no entry keeps the old behavior (role inferred from the
+ * "ops"-prefix heuristic; unrestricted to every tenant) — fully backward
+ * compatible with existing single-tenant deployments.
+ */
+function parseEmailKeyedMap(raw: string): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const pair of raw.split(",")) {
+    const eq = pair.indexOf("=");
+    if (eq <= 0) continue;
+    const email = pair.slice(0, eq).trim().toLowerCase();
+    const value = pair.slice(eq + 1).trim();
+    if (email && value) map.set(email, value);
+  }
+  return map;
+}
+
+const ADMIN_ROLE_OVERRIDES = optional("ADMIN_ROLES");
+const ADMIN_TENANT_SCOPES = optional("ADMIN_TENANT_SCOPES");
+
 /** Parse ADMIN_CREDENTIALS into a lookup map. */
-export function getAdminCredentials(): Map<string, { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string }> {
-  const map = new Map<string, { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string }>();
+export function getAdminCredentials(): Map<
+  string,
+  { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string; tenants: string[] | null }
+> {
+  const map = new Map<
+    string,
+    { password: string; role: "admin" | "ops" | "viewer"; displayName: string; org: string; tenants: string[] | null }
+  >();
+  const roleOverrides = parseEmailKeyedMap(ADMIN_ROLE_OVERRIDES);
+  const tenantScopes = parseEmailKeyedMap(ADMIN_TENANT_SCOPES);
 
   for (const pair of ADMIN_CREDENTIALS.split(",")) {
     const [email, ...rest] = pair.trim().split(":");
@@ -169,10 +204,20 @@ export function getAdminCredentials(): Map<string, { password: string; role: "ad
     if (!email || !password) continue;
 
     const e = email.trim().toLowerCase();
-    const role: "admin" | "ops" | "viewer" = e.startsWith("ops") ? "ops" : "admin";
+    const overriddenRole = roleOverrides.get(e);
+    const role: "admin" | "ops" | "viewer" =
+      overriddenRole === "admin" || overriddenRole === "ops" || overriddenRole === "viewer"
+        ? overriddenRole
+        : e.startsWith("ops")
+          ? "ops"
+          : "admin";
     const displayName = role === "ops" ? "国航运行席位" : "国航管理员";
     const org = "Air China";
-    map.set(e, { password, role, displayName, org });
+    // null = unrestricted (every tenant) — the default when ADMIN_TENANT_SCOPES
+    // doesn't mention this email, matching pre-existing single-tenant deploys.
+    const scopeRaw = tenantScopes.get(e);
+    const tenants = scopeRaw ? scopeRaw.split("|").map((t) => t.trim()).filter(Boolean) : null;
+    map.set(e, { password, role, displayName, org, tenants });
   }
 
   return map;

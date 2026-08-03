@@ -3,6 +3,12 @@
 > 上次工作：2026-06-08  
 > 项目：`orienta_v3/apps/dashboard`  
 > 目标：生产部署（国航云），替换硬编码 demo 旅客数据
+>
+> **⚠️ 历史存档文档。** 本文档描述的是 2026-06-08 时的状态，之后的 demo 清理
+> （删除 `PaxEntryWrapper`、静态 `pax*.html`、`src/data/airports/pek.demo.ts` 等）
+> 和多机场迁移已经让文中不少细节过期。当前状态请参考
+> `docs/2026-06-29-productionize-runtime-config.md` 和 `PRODUCTION_ROADMAP.md`。
+> 保留本文仅作历史记录，不代表当前代码结构。
 
 ---
 

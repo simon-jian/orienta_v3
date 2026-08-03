@@ -15,6 +15,8 @@ export type MetricEvent = {
   durationMs?: number;
   ok?: boolean;
   props?: Record<string, unknown>;
+  /** Best-effort — older clients / static pages may not send one. See migrationList.ts. */
+  tenantId?: string;
 };
 
 const MAX_NAME_LEN = 120;
@@ -24,6 +26,12 @@ export class MetricsRepository {
   constructor(private readonly db: SqlDb) {}
 
   async init(): Promise<void> {
+    // tenant_id is intentionally NOT in this CREATE TABLE: unlike a from-scratch
+    // column, `ALTER TABLE ADD COLUMN` (used by the migration below) errors if
+    // the column already exists, so it must be added exactly once, the same
+    // way, for both a fresh database and a pre-existing one — see
+    // migrationList.ts (2026_08_metrics_events_tenant_id), which always runs
+    // after this init() regardless of whether the database is new or old.
     await this.db.exec(`
       CREATE TABLE IF NOT EXISTS metrics_events (
         id          ${autoIncrementPk(this.db.dialect)},
@@ -55,8 +63,8 @@ export class MetricsRepository {
           props = s.length > MAX_PROPS_BYTES ? s.slice(0, MAX_PROPS_BYTES) : s;
         }
         await tx.run(
-          `INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO metrics_events (name, role, category, duration_ms, ok, props, created_at, tenant_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
           [
             name,
             ev.role ? String(ev.role).slice(0, 40) : null,
@@ -64,7 +72,12 @@ export class MetricsRepository {
             typeof ev.durationMs === "number" && Number.isFinite(ev.durationMs) ? ev.durationMs : null,
             typeof ev.ok === "boolean" ? (ev.ok ? 1 : 0) : null,
             props,
-            typeof ev.ts === "number" && Number.isFinite(ev.ts) ? ev.ts : now,
+            // Client-controlled: clamp to a sane window so a bad/malicious ts can't
+            // skew retention pruning (was previously accepted with no bound at all).
+            typeof ev.ts === "number" && Number.isFinite(ev.ts) && Math.abs(ev.ts - now) < 24 * 60 * 60_000
+              ? ev.ts
+              : now,
+            ev.tenantId ? String(ev.tenantId).slice(0, 60) : null,
           ],
         );
         written += 1;

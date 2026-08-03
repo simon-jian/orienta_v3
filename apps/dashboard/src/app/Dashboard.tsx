@@ -12,7 +12,7 @@ import { useDashboard } from "../features/passengers/useDashboard";
 import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 
 import type { Gate, Flight, PaxExtStatus, AdminSession } from "../types/types";
-import { loadGates } from "../services/gateService";
+import { loadGates } from "../services/poi/PoiService";
 import { buildFlights } from "../services/flightService";
 import { logout as authLogout } from "../services/auth";
 import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";

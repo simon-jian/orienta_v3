@@ -53,6 +53,40 @@ def selector_args(spec: dict) -> list[str]:
     return ["--from-gate", str(spec.get("from", "")), "--to-gate", str(spec.get("to", ""))]
 
 
+def has_valid_duration(path: str) -> bool:
+    """True if ffprobe reports a positive duration for `path`.
+
+    A truncated/corrupt ffmpeg output can still be a nonzero-size file — the
+    size-only check this replaces would report the job "done" and the web
+    process would serve it to a passenger as a finished video. Mirrors
+    server/services/videoMerge.ts's hasValidDuration() on the Node side
+    (used for the no-Redis, single-machine fallback).
+
+    Fails open (returns True) only if ffprobe itself can't be found — it
+    ships in the same `ffmpeg` package this whole worker already requires,
+    so a missing binary is a deployment problem, not a reason to fail every
+    job.
+    """
+    try:
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "json", path],
+            capture_output=True, text=True, timeout=10,
+        )
+    except FileNotFoundError:
+        log("ffprobe_not_found", note="skipping video duration validation")
+        return True
+    except Exception as exc:  # noqa: BLE001
+        log("ffprobe_failed", path=path, error=str(exc)[-300:])
+        return False
+    if proc.returncode != 0:
+        return False
+    try:
+        duration = float(json.loads(proc.stdout).get("format", {}).get("duration", ""))
+    except (ValueError, TypeError, json.JSONDecodeError):
+        return False
+    return duration > 0
+
+
 def run_job(job: dict, *, output_dir: str, source_dir: str, csv_path: str, script: str) -> None:
     out_name = str(job["outName"])
     spec = dict(job["spec"])
@@ -67,6 +101,8 @@ def run_job(job: dict, *, output_dir: str, source_dir: str, csv_path: str, scrip
     log("video_job_start", outName=out_name, spec=spec)
     proc = subprocess.run(args, capture_output=True, text=True, timeout=JOB_TIMEOUT_S)
     if proc.returncode == 0 and os.path.isfile(out_path) and os.path.getsize(out_path) > 0:
+        if not has_valid_duration(out_path):
+            raise RuntimeError("merge produced a file with no valid video duration (corrupt/truncated output)")
         log("video_job_done", outName=out_name, bytes=os.path.getsize(out_path))
         return
     detail = (proc.stderr or proc.stdout or "merge_failed")[-800:]

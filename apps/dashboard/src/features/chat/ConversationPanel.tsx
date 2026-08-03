@@ -83,6 +83,11 @@ export default function ConversationPanel({
 }) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
+  // Guards against a double-send from a rapid Enter-then-click (or two fast
+  // Enters) firing handleSend twice before setInput("") has visually cleared
+  // the field — onSend() is fire-and-forget (void), so there's nothing else
+  // to key a "still sending" state off of.
+  const sendingRef = useRef(false);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -90,9 +95,11 @@ export default function ConversationPanel({
 
   const handleSend = () => {
     const t = input.trim();
-    if (!t) return;
+    if (!t || sendingRef.current) return;
+    sendingRef.current = true;
     onSend(t);
     setInput("");
+    setTimeout(() => { sendingRef.current = false; }, 300);
   };
 
   const quickReplies = isPremium
@@ -114,13 +121,16 @@ export default function ConversationPanel({
         display: "flex", flexDirection: "column", border: "1px solid rgba(0,0,0,0.08)", overflow: "hidden",
       }
     : {
-        position: "fixed", bottom: 24, right: 24, width: 380, maxHeight: 560,
+        position: "fixed", bottom: 24, right: 24,
+        // min() so the panel never overflows a narrow phone viewport — a
+        // fixed 380px + 24px offset overflowed anything under ~430px wide.
+        width: "min(380px, calc(100vw - 32px))", maxHeight: "min(560px, calc(100vh - 48px))",
         background: "#f2f2f7", borderRadius: 16, boxShadow: "0 8px 32px rgba(0,0,0,0.28)",
         display: "flex", flexDirection: "column", zIndex: 9000, border: "1px solid rgba(0,0,0,0.10)",
       };
 
   return (
-    <div className="conversation-panel" style={{ ...shellStyle, color: "#111827" }}>
+    <div className="conversation-panel" role="dialog" aria-label={`Conversation with ${passenger?.name || passengerId}`} style={{ ...shellStyle, color: "#111827" }}>
       {/* Header */}
       <div style={{ padding: "12px 16px", borderBottom: "1px solid rgba(0,0,0,0.08)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div>
@@ -131,9 +141,9 @@ export default function ConversationPanel({
             : <span style={{ marginLeft: 6, fontSize: 10, opacity: 0.5 }}>🤖 AI Only</span>}
         </div>
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-          <span style={{ width: 7, height: 7, borderRadius: "50%", background: isOnline ? "#34c759" : "#636366" }} />
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: isOnline ? "#34c759" : "#636366" }} />
           <span style={{ fontSize: 11, color: "#6b7280" }}>{isOnline ? "Online" : "Offline"}</span>
-          <button className="btn" onClick={onClose} style={{ fontSize: 13, padding: "2px 8px" }}>✕</button>
+          <button className="btn" onClick={onClose} aria-label="Close conversation" style={{ fontSize: 13, padding: "2px 8px" }}>✕</button>
         </div>
       </div>
 
@@ -182,9 +192,10 @@ export default function ConversationPanel({
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
               placeholder="Type message (operator)…"
+              aria-label="Message to passenger"
               style={{ flex: 1, background: "#ffffff", border: "1px solid rgba(0,0,0,0.12)", borderRadius: 10, padding: "6px 10px", color: "#111827", fontSize: 13, resize: "none", height: 52 }}
             />
-            <button className="btn primary" onClick={handleSend} style={{ alignSelf: "flex-end", padding: "8px 14px" }}>Send</button>
+            <button className="btn primary" onClick={handleSend} disabled={!input.trim()} style={{ alignSelf: "flex-end", padding: "8px 14px" }}>Send</button>
           </div>
         </div>
       ) : (

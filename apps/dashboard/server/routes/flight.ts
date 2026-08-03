@@ -236,12 +236,7 @@ export function registerOrientaRoutes(router: Router): void {
   // Legacy PEK alias (kept for existing route_site links / QR codes).
   router.get("/pek-merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, "PEK"));
 
-  router.get("/route-site-map-embed", (req: Request, res: Response) => {
-    const host    = (String(req.headers["x-forwarded-host"] || req.headers.host || "").split(",")[0] ?? "").trim();
-    const xfProto = (String(req.headers["x-forwarded-proto"] || "").split(",")[0] ?? "").trim().toLowerCase();
-    const proto   = xfProto === "https" || xfProto === "http" ? xfProto : (req.secure ? "https" : "http");
-    const publicOrigin = host ? `${proto}://${host}` : "";
-
+  router.get("/route-site-map-embed", (_req: Request, res: Response) => {
     const e = (k: string) => String(process.env[k] || "").trim();
     const sameOrigin = e("VITE_INDOOR_MAP_SAME_ORIGIN") === "1" || e("VITE_ROUTE_SITE_INDOOR_MAP_SAME_ORIGIN") === "1";
     let url     = e("VITE_INDOOR_MAP_URL")      || e("VITE_ROUTE_SITE_INDOOR_MAP_URL");
@@ -249,10 +244,16 @@ export function registerOrientaRoutes(router: Router): void {
     const tileBase = e("VITE_INDOOR_MAP_TILE_BASE") || e("VITE_ROUTE_SITE_INDOOR_TILE_BASE");
     let tileUrl = e("VITE_INDOOR_MAP_TILE_URL") || e("VITE_ROUTE_SITE_INDOOR_TILE_URL");
 
-    if (sameOrigin && publicOrigin) {
-      url = `${publicOrigin}/indoor-map/airport-map.html`;
-      apiBase = `${publicOrigin}/indoor-map-api`;
-      tileUrl = `${publicOrigin}/indoor-map/tile/{z}/{x}/{y}.png`;
+    // Same-origin means "this API and the map live behind the same host", so a
+    // *relative* path resolves correctly for the caller with no origin needed
+    // at all — which also means there's no client-controlled host header to
+    // spoof. (Previously this built an absolute URL from X-Forwarded-Host /
+    // X-Forwarded-Proto, which a request could forge to point route_site's
+    // map embed at an attacker-controlled origin.)
+    if (sameOrigin) {
+      url = "/indoor-map/airport-map.html";
+      apiBase = "/indoor-map-api";
+      tileUrl = "/indoor-map/tile/{z}/{x}/{y}.png";
     }
 
     res.json({ url: url || null, apiBase: url && apiBase ? apiBase : null, tileBase: url && tileBase ? tileBase : null, tileUrl: url && tileUrl ? tileUrl : null });

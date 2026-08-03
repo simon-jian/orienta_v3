@@ -7,9 +7,9 @@
  *   - "static"     → the airport's `staticGates` table
  *   - "none"       → empty
  *
- * Consumers (Dashboard via gateService, MapView, PaxAppPage) no longer import
- * the PEK adapter directly, so adding a hub is a registry entry + (if needed) an
- * adapter, never new branches in feature code.
+ * Consumers (Dashboard, MapView, PaxAppPage) call this directly and no longer
+ * import the PEK adapter, so adding a hub is a registry entry + (if needed)
+ * an adapter, never new branches in feature code.
  */
 import type { Gate, LatLng } from "../../types/types";
 import type { AirportDefinition } from "../../config/airports/types";

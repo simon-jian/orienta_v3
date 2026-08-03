@@ -1,6 +1,14 @@
 # Orienta v3 — Codebase Overview
 
 > Last updated: 2026-05-31
+>
+> **⚠️ Historical / archived.** This describes the v2 → v3 refactor as of
+> 2026-05-31 and is now stale in places — e.g. it still refers to
+> `PaxEntryWrapper`, `pax.html`, and other files/flows removed by the later
+> demo-cleanup and multi-airport migration (see
+> `docs/2026-06-29-productionize-runtime-config.md` and `PRODUCTION_ROADMAP.md`
+> for what's current). Kept for historical context on the v2→v3 rationale, not
+> as a guide to the current codebase.
 
 ---
 

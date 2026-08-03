@@ -103,12 +103,15 @@ export function useDashboard(opts: {
     }
     setPassengersLoadError(false);
     setPassengersLastSyncAt(Date.now());
-    setPassengersRaw((prev) => {
-      if (!prev) return { passengers: incoming };
-      const existing = new Map(prev.passengers.map((p) => [p.id, p]));
-      const merged = incoming.map((p) => existing.get(p.id) ?? p);
-      return { passengers: merged };
-    });
+    // The server response is authoritative — no local-only fields get mixed
+    // into a Passenger record anywhere in this codebase (WS-driven overlays
+    // like presence/chat/trajectories live in their own separate state below),
+    // so there's nothing to preserve from the previous poll. A previous
+    // version of this merge preferred the *old* cached record whenever the id
+    // already existed, which meant a passenger's gate/status/plan changes on
+    // the server were silently discarded forever after the first successful
+    // load, not just delayed until the next poll.
+    setPassengersRaw({ passengers: incoming });
   }, [tenantId]);
 
   // Reset when gate data changes, then load
@@ -210,14 +213,15 @@ export function useDashboard(opts: {
         if (!r.ok) return;
         const j = await r.json();
         if (cancelled || !j?.ok || !Array.isArray(j.online)) return;
-        setPresence((m) => {
-          let changed = false;
-          const next = { ...m };
-          for (const id of j.online as string[]) {
-            if (!next[id]) { next[id] = true; changed = true; }
-          }
-          return changed ? next : m;
-        });
+        // Full reconciliation against the server's authoritative online list —
+        // every consumer reads this with `!!presence[id]`, so an id simply
+        // absent from the new map is correctly treated as offline. The
+        // previous version only ever added ids, so a passenger who
+        // disconnected without a clean WS close (missed the realtime
+        // `presence` event too) stayed "online" here forever.
+        const next: Record<string, boolean> = {};
+        for (const id of j.online as string[]) next[id] = true;
+        setPresence(next);
       } catch {}
     };
     poll();

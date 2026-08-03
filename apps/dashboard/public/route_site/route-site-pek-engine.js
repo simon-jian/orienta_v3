@@ -1007,7 +1007,7 @@ var PATH_LONLAT_PEK = orientaBuildPekPathLonLatFromLandmarks_() || PATH_LONLAT_P
       var mainFile = ORIENTA_PEK_MERGED_FROM_CSV_BASENAME + '（由 CSV + concat 脚本生成）';
       var tried = String(v.currentSrc || v.src || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
       var pekList =
-        '<li>按 <code>PEK_gate_timestamp.csv</code> 裁切并合并：在 <code>orienta_v3</code> 目录执行 <code>python3 scripts/concat_pek_video_from_csv.py ...</code>，生成 <code>' +
+        '<li>按 <code>PEK_gate_timestamp_full_with_E24_E36.csv</code> 裁切并合并：在 <code>orienta_v3</code> 目录执行 <code>python3 scripts/concat_pek_video_from_csv.py ...</code>，生成 <code>' +
           ORIENTA_PEK_MERGED_FROM_CSV_BASENAME +
           '</code>；ffmpeg 只读分段素材、不写回原文件。</li>' +
         '<li>临时换片：<code>?pekVideo=文件名.mp4</code>（与 index.html 同目录）。</li>';

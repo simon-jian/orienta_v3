@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Build one merged route MP4 from PEK_gate_timestamp.csv + per-scene clips (trim + concat).
+Build one merged route MP4 from PEK_gate_timestamp_full_with_E24_E36.csv +
+per-scene clips (trim + concat).
 
 CSV columns: point_of_interest, floor, video, video_time
 Each row is a cue point at video_time within that row's `video` asset.
@@ -12,11 +13,11 @@ ffmpeg reads each {video}.mp4 and writes --out only; source files are not modifi
 
 Requires: ffmpeg on PATH. Source clips: {SRC_DIR}/{video}.mp4
 
-Usage:
+Usage (from the orienta_v3 repo root):
   python3 scripts/concat_pek_video_from_csv.py \\
-    --csv vite/public/route_site/PEK_gate_timestamp.csv \\
-    --src-dir vite/public/route_site \\
-    --out vite/public/route_site/PEK_gate_timestamp_merged.mp4
+    --csv apps/dashboard/public/route_site/PEK_gate_timestamp_full_with_E24_E36.csv \\
+    --src-dir apps/dashboard/public/route_site \\
+    --out apps/dashboard/public/route_site/PEK_gate_timestamp_merged.mp4
 """
 from __future__ import annotations
 

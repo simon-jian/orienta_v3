@@ -45,6 +45,69 @@ jobs:
         run: npm audit --audit-level=high
         continue-on-error: true
 
+  pdr:
+    name: PDR service build & test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: pdr_airchina
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run tests
+        run: python -m pytest backend/ -v
+
+  postgres:
+    name: Postgres-specific test coverage
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/dashboard
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: orienta_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: apps/dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Every other test file exercises SQLite only. sqlDb.pg.test.ts is
+      # skipped everywhere else and only actually runs against a real
+      # Postgres here — see that file for why (?-> $n placeholder rewrite,
+      # ON CONFLICT semantics, and PgDb.transaction's dedicated-client
+      # handling were previously never exercised before a --profile scale
+      # (DATABASE_URL) deploy).
+      - name: Run Postgres-specific tests
+        run: npm test -- server/db/sqlDb.pg.test.ts
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:test@localhost:5432/orienta_test
+
   docker:
     name: Docker build smoke test
     runs-on: ubuntu-latest
@@ -58,11 +121,36 @@ jobs:
       - name: Build video-worker image
         run: docker build -f apps/dashboard/worker/Dockerfile -t orienta-video-worker:ci .
 
+      - name: Build PDR image
+        run: docker build -f pdr_airchina/Dockerfile -t orienta-pdr:ci .
+
+      - name: Boot the PDR image and check /health
+        run: |
+          docker run -d --name orienta-pdr-ci -p 10000:10000 orienta-pdr:ci
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:10000/health; then exit 0; fi
+            sleep 1
+          done
+          echo "PDR server did not become healthy in time"
+          docker logs orienta-pdr-ci
+          exit 1
+
       - name: Boot the dashboard image and check /health
         run: |
+          # The image runs with NODE_ENV=production (set in the Dockerfile), which
+          # makes server/config.ts validateProductionSecurity() refuse to start
+          # unless ADMIN_CREDENTIALS is scrypt-hashed and KIOSK_SCAN_SECRET is set
+          # — a plaintext password (the pre-fix version of this smoke test used
+          # one) makes the container exit immediately, and this job would fail on
+          # every run. Hash the password with the image's own built-in script so
+          # the smoke test never drifts from whatever validateProductionSecurity()
+          # currently requires.
+          ADMIN_PASSWORD="$(openssl rand -hex 16)"
+          ADMIN_HASH="$(docker run --rm orienta-v3-dashboard:ci node dist-server/server/scripts/hashAdminPassword.js "$ADMIN_PASSWORD")"
           docker run -d --name orienta-ci -p 5174:5174 \
             -e JWT_SECRET="$(openssl rand -hex 32)" \
-            -e ADMIN_CREDENTIALS="admin@ci.test:$(openssl rand -hex 16)" \
+            -e ADMIN_CREDENTIALS="admin@ci.test:${ADMIN_HASH}" \
+            -e KIOSK_SCAN_SECRET="$(openssl rand -hex 16)" \
             orienta-v3-dashboard:ci
           for i in $(seq 1 20); do
             if curl -sf http://127.0.0.1:5174/health; then exit 0; fi
@@ -74,4 +162,6 @@ jobs:
 
       - name: Dump logs on failure
         if: failure()
-        run: docker logs orienta-ci || true
+        run: |
+          docker logs orienta-ci || true
+          docker logs orienta-pdr-ci || true

@@ -51,6 +51,8 @@ import { registerConfigRoutes } from "./routes/config";
 import { hydrateRegistriesFromDisk } from "./config/loadConfig";
 import { ROUTE_SITE_DEFAULT_TENANT } from "./config";
 import { getSqlDb } from "./db/sqlDb";
+import { runMigrations } from "./db/migrations";
+import { migrations } from "./db/migrationList";
 import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
 import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
 import { REDIS_ENABLED, INSTANCE_ID, VIDEO_OUTPUT_DIR } from "./config";
@@ -369,7 +371,17 @@ async function pingHttpUpstream(baseUrl: string, path: string): Promise<boolean>
   }
 }
 
-app.get("/health", async (_req, res) => {
+// Liveness: "is the Node process alive and responsive" — no dependency I/O at
+// all. This is what should decide whether an orchestrator restarts the
+// container: a slow/unreachable DB or Redis is not a reason to kill and
+// restart an otherwise-healthy process (that just makes a transient outage
+// worse by dropping every in-flight WS connection too), but a truly wedged
+// event loop that can't even answer this cheap request is.
+app.get("/livez", (_req, res) => {
+  res.status(200).json({ status: "ok", uptime_s: Math.round((Date.now() - SERVER_START_MS) / 1000) });
+});
+
+async function readinessBody(): Promise<{ overallOk: boolean; body: Record<string, unknown> }> {
   const [dbOk, redisStatus, pdrReachable, indoorMapReachable] = await Promise.all([
     sqlDb.ping().catch(() => false),
     pingRedisHealth(),
@@ -379,19 +391,38 @@ app.get("/health", async (_req, res) => {
 
   const redisOk = redisStatus !== "fail";
   const overallOk = dbOk && redisOk;
-  const body = {
-    status: overallOk ? "ok" : "degraded",
-    uptime_s: Math.round((Date.now() - SERVER_START_MS) / 1000),
-    checks: {
-      process: "ok",
-      db: dbOk ? "ok" : "fail",
-      db_dialect: sqlDb.dialect,
-      redis: redisStatus,
-      pdr_proxy: !PDR_API_ORIGIN ? "disabled" : pdrReachable ? "ok" : "unreachable",
-      indoor_map: !INDOOR_MAP_UPSTREAM ? "bundled" : indoorMapReachable ? "ok" : "unreachable",
+  return {
+    overallOk,
+    body: {
+      status: overallOk ? "ok" : "degraded",
+      uptime_s: Math.round((Date.now() - SERVER_START_MS) / 1000),
+      checks: {
+        process: "ok",
+        db: dbOk ? "ok" : "fail",
+        db_dialect: sqlDb.dialect,
+        redis: redisStatus,
+        pdr_proxy: !PDR_API_ORIGIN ? "disabled" : pdrReachable ? "ok" : "unreachable",
+        indoor_map: !INDOOR_MAP_UPSTREAM ? "bundled" : indoorMapReachable ? "ok" : "unreachable",
+      },
+      ts: new Date().toISOString(),
     },
-    ts: new Date().toISOString(),
   };
+}
+
+// Readiness: "can this instance actually serve real requests right now" —
+// checks every dependency this process talks to. Use this (not /livez) to
+// gate load-balancer routing in a multi-instance deployment, or for
+// operator/monitoring visibility into dependency health.
+app.get("/readyz", async (_req, res) => {
+  const { overallOk, body } = await readinessBody();
+  res.status(overallOk ? 200 : 503).json(body);
+});
+
+// Back-compat alias: existing docs/scripts/monitoring point at /health.
+// Same dependency-aware body as /readyz — prefer /livez for container
+// restart decisions and /readyz for the same check under an unambiguous name.
+app.get("/health", async (_req, res) => {
+  const { overallOk, body } = await readinessBody();
   res.status(overallOk ? 200 : 503).json(body);
 });
 
@@ -445,6 +476,17 @@ const wss = attachWsHub(server, store, registry);
 /** Set once bootstrap() starts the pruning interval; cleared on shutdown(). */
 let stopMaintenanceJobs: (() => void) | null = null;
 
+/**
+ * Re-stamps every locally-connected passenger's Redis presence entry — see
+ * HubStore.heartbeatLocalPresence()/PRESENCE_STALE_MS. No-op (and cheap) when
+ * Redis isn't configured. Interval is `unref()`d so it never keeps the
+ * process alive on its own, but is still cleared explicitly on shutdown for
+ * a prompt, clean exit rather than waiting on the unref'd timer.
+ */
+const PRESENCE_HEARTBEAT_INTERVAL_MS = 2 * 60_000;
+const presenceHeartbeat = setInterval(() => store.heartbeatLocalPresence(), PRESENCE_HEARTBEAT_INTERVAL_MS);
+presenceHeartbeat.unref();
+
 async function bootstrap(): Promise<void> {
   // Load airport/tenant config from disk and hydrate the shared registries
   // before anything serves a request (Multi-airport Model B).
@@ -453,7 +495,8 @@ async function bootstrap(): Promise<void> {
     defaultTenant: ROUTE_SITE_DEFAULT_TENANT,
   });
 
-  // Run SqlDb migrations (creates tables in SQLite or Postgres) before serving.
+  // Create each store's baseline schema (idempotent CREATE TABLE IF NOT EXISTS —
+  // safe to run on every boot) before serving.
   await Promise.all([
     registry.init(),
     chatRepo.init(),
@@ -462,6 +505,10 @@ async function bootstrap(): Promise<void> {
     auditLog.init(),
     accountStore.init(),
   ]);
+  // Then apply versioned migrations — anything a bare CREATE TABLE IF NOT
+  // EXISTS can't express on a database that already has data (see
+  // server/db/migrations.ts). Each one runs at most once, ever.
+  await runMigrations(sqlDb, migrations);
   logger.info("db_ready", { dialect: sqlDb.dialect, redis: REDIS_ENABLED, instance: INSTANCE_ID });
 
   // Start background pruning only after tables exist. The disposer is
@@ -492,6 +539,7 @@ function shutdown(signal: string): void {
   logger.info("shutdown_start", { signal });
 
   try { stopMaintenanceJobs?.(); } catch { /* ignore */ }
+  try { clearInterval(presenceHeartbeat); } catch { /* ignore */ }
 
   // Stop accepting new HTTP connections; close existing WS clients.
   if (wss) {

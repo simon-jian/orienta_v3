@@ -2,7 +2,7 @@
  * Premium passenger accounts (replaces PAX_ACCOUNT_CREDENTIALS),
  * backed by the async SqlDb (P2-1).
  */
-import { hashPassword, verifyPassword } from "../lib/passwordHash";
+import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "../lib/passwordHash";
 import { PAX_ACCOUNT_CREDENTIALS, ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { SqlDb } from "../db/sqlDb";
 import { logger } from "../lib/logger";
@@ -80,6 +80,7 @@ export class PaxAccountStore {
   }): Promise<PaxAccountRecord> {
     const now = Date.now();
     const email = input.email.trim().toLowerCase();
+    const passwordHash = await hashPassword(input.password);
     await this.db.run(
       `INSERT INTO pax_accounts (email, tenant_id, display_name, password_hash, plan, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -93,7 +94,7 @@ export class PaxAccountStore {
         email,
         input.tenantId?.trim() || ROUTE_SITE_DEFAULT_TENANT,
         input.displayName?.trim() || email.split("@")[0] || "Premium Passenger",
-        hashPassword(input.password),
+        passwordHash,
         "premium",
         now,
         now,
@@ -111,12 +112,22 @@ export class PaxAccountStore {
     return row ? toRecord(row) : null;
   }
 
-  /** Admin: list all premium accounts (no password material). */
-  async listAccounts(): Promise<PaxAccountRecord[]> {
-    const rows = await this.db.all<Row>(
-      `SELECT email, tenant_id, display_name, plan, created_at, updated_at
-       FROM pax_accounts ORDER BY email`,
-    );
+  /**
+   * Admin: list premium accounts (no password material). Pass `tenantId` to
+   * scope to one tenant — omitting it returns every tenant's accounts, so
+   * callers should default to the caller's own tenant rather than "all".
+   */
+  async listAccounts(tenantId?: string): Promise<PaxAccountRecord[]> {
+    const rows = tenantId
+      ? await this.db.all<Row>(
+          `SELECT email, tenant_id, display_name, plan, created_at, updated_at
+           FROM pax_accounts WHERE tenant_id = ? ORDER BY email`,
+          [tenantId],
+        )
+      : await this.db.all<Row>(
+          `SELECT email, tenant_id, display_name, plan, created_at, updated_at
+           FROM pax_accounts ORDER BY email`,
+        );
     return rows.map(toRecord);
   }
 
@@ -135,7 +146,11 @@ export class PaxAccountStore {
        FROM pax_accounts WHERE email = ?`,
       [email.trim().toLowerCase()],
     );
-    if (!row || !verifyPassword(password, row.password_hash)) return null;
+    // Always run the scrypt comparison, even for a nonexistent email — against
+    // a fixed dummy hash when there's no real row — so the response time
+    // doesn't reveal whether the email has an account (timing side-channel).
+    const ok = await verifyPassword(password, row?.password_hash ?? DUMMY_PASSWORD_HASH);
+    if (!row || !ok) return null;
     return toRecord(row);
   }
 }

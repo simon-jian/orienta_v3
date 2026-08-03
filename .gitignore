@@ -12,14 +12,26 @@ apps/dashboard/.tsbuild-node/
 # Passenger registry database (runtime data — do not commit)
 apps/dashboard/data/
 
-# Environment secrets — never commit real values
+# Environment secrets — never commit real values.
+# `.env.*` (not just `.env`/`.env.local`/`.env.*.local`) so a locally-named
+# variant like `.env.production` or `deploy.env` can't slip in by not
+# matching the narrower patterns below; `.env.example` is explicitly
+# un-ignored since it's the checked-in template.
 .env
 .env.local
 .env.*.local
+.env.*
 !.env.example
+deploy.env
+*.env.local
 
-# Apple private key — rotate immediately if found in history
+# Private keys / certs / credential material — rotate immediately if any of
+# these are ever found in history.
 *.p8
+*.pem
+*.key
+*credentials*.json
+*license*.json
 
 # Python
 **/__pycache__/

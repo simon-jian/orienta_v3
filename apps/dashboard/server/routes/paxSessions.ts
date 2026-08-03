@@ -8,8 +8,8 @@ import type { PaxAccountStore } from "../passengers/PaxAccountStore";
 import { parseBcbp } from "../passengers/bcbpParser";
 import { bearerTokenFromHeader, PAX_SESSION_AUDIENCE, verifyPaxSessionToken } from "../passengers/paxSessionToken";
 import { resolveOutbound as resolveOutboundFlight } from "../services/fidsService";
-import { airportForTenant } from "../../src/config/tenants/registry";
-import { requireRole, adminEmailFromRequest } from "./auth";
+import { airportForTenant, getTenant } from "../../src/config/tenants/registry";
+import { requireRole, requireTenantAccess, adminEmailFromRequest } from "./auth";
 import type { AuditLog } from "../lib/auditLog";
 import type { PaxPlan } from "../../src/types/types";
 
@@ -51,8 +51,16 @@ function isKioskAuthorized(req: Request): boolean {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+/**
+ * Resolve a tenant id from a public, unauthenticated request body. Falls back
+ * to the deployment default rather than trusting an arbitrary caller-supplied
+ * string — otherwise anyone could mint free-plan sessions/registry rows under
+ * a made-up (or a *different*, real) tenant id, from the /scan and
+ * /basic-session endpoints, which have no other tenant binding available.
+ */
 function tenantFromBody(body: Record<string, unknown>): string {
-  return String(body.tenantId || body.tenant_id || ROUTE_SITE_DEFAULT_TENANT).trim();
+  const requested = String(body.tenantId || body.tenant_id || "").trim();
+  return requested && getTenant(requested) ? requested : ROUTE_SITE_DEFAULT_TENANT;
 }
 
 function capabilitiesFor(plan: PaxPlan): PaxCapability[] {
@@ -239,7 +247,6 @@ export function registerPaxSessionRoutes(
 
   router.post("/account-login", async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
-    const tenantId = tenantFromBody(body);
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     const departureFlight = String(body.departureFlight || body.dep || "").trim();
@@ -250,6 +257,10 @@ export function registerPaxSessionRoutes(
     if (!account) {
       return res.status(401).json({ ok: false, error: "invalid_credentials" });
     }
+    // Always the account's own bound tenant, never a body-supplied one —
+    // otherwise any valid premium credentials could mint a session for a
+    // tenant the account was never assigned to.
+    const tenantId = account.tenantId;
 
     const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
@@ -277,8 +288,10 @@ export function registerPaxSessionRoutes(
   });
 
   // ── Admin: premium account management (P0-13) — beyond the env seed ──────────
-  router.get("/accounts", requireRole("admin", "ops"), async (_req: Request, res: Response) => {
-    res.json({ ok: true, accounts: await accountStore.listAccounts() });
+  router.get("/accounts", requireRole("admin", "ops"), async (req: Request, res: Response) => {
+    const tenantId = String(req.query.tenant || ROUTE_SITE_DEFAULT_TENANT).trim();
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    res.json({ ok: true, accounts: await accountStore.listAccounts(tenantId) });
   });
 
   router.post("/accounts", requireRole("admin"), async (req: Request, res: Response) => {
@@ -286,10 +299,12 @@ export function registerPaxSessionRoutes(
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
+    const tenantId = String(body.tenantId || body.tenant_id || "").trim() || ROUTE_SITE_DEFAULT_TENANT;
+    if (!requireTenantAccess(req, res, tenantId)) return;
     const account = await accountStore.upsertAccount({
       email,
       password,
-      tenantId: String(body.tenantId || body.tenant_id || "").trim() || undefined,
+      tenantId,
       displayName: String(body.displayName || body.display_name || "").trim() || undefined,
     });
     void auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_upsert", detail: email });
@@ -298,6 +313,9 @@ export function registerPaxSessionRoutes(
 
   router.delete("/accounts/:email", requireRole("admin"), async (req: Request, res: Response) => {
     const email = String(req.params.email || "");
+    const existing = await accountStore.getAccount(email);
+    if (!existing) return res.status(404).json({ ok: false, error: "account_not_found" });
+    if (!requireTenantAccess(req, res, existing.tenantId)) return;
     const deleted = await accountStore.deleteAccount(email);
     if (!deleted) return res.status(404).json({ ok: false, error: "account_not_found" });
     void auditLog?.record({ actorEmail: adminEmailFromRequest(req), action: "pax_account_delete", detail: email });

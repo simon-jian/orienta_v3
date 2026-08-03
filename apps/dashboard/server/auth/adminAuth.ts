@@ -11,6 +11,7 @@
  */
 import { jwtVerify, type JWTPayload } from "jose";
 import { JWT_SECRET } from "../config";
+import { isAdminTokenRevoked } from "./adminSessionRevocation";
 
 export const ADMIN_COOKIE_NAME = "orienta_admin_token";
 export const ADMIN_JWT_TTL_S = 60 * 60 * 8;
@@ -37,6 +38,18 @@ export function adminTokenFromCookieHeader(header: string | undefined): string {
 }
 
 /**
+ * True when this admin's token is allowed to act on `tenantId` — either the
+ * token carries no `tenants` restriction (legacy/default: every admin can act
+ * on every tenant, matching pre-existing single-tenant deployments) or
+ * `tenantId` is explicitly in its list. See config.ts ADMIN_TENANT_SCOPES.
+ */
+export function adminAllowedForTenant(payload: JWTPayload, tenantId: string): boolean {
+  const tenants = payload.tenants;
+  if (!Array.isArray(tenants) || tenants.length === 0) return true;
+  return tenants.includes(tenantId);
+}
+
+/**
  * Verify an admin JWT: signature, expiry, issuer/audience, and that the payload
  * carries a recognized role. Returns null for anything else (including a
  * well-formed but foreign token, e.g. a passenger session).
@@ -50,6 +63,10 @@ export async function verifyAdminToken(token: string): Promise<JWTPayload | null
       audience: ADMIN_TOKEN_AUDIENCE,
     });
     if (!ADMIN_ROLES.has(String(payload.role))) return null;
+    // Checked after signature verification (cheap for the common case: no
+    // jti recorded as revoked) so a logged-out token stops working
+    // immediately instead of staying valid until its natural expiry.
+    if (await isAdminTokenRevoked(payload.jti)) return null;
     return payload;
   } catch {
     return null;

@@ -23,8 +23,9 @@ import type { ChatKind, MsgRecord, MsgStatus } from "../../src/types/types";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { resolvePaxWsHello } from "../passengers/paxWsIdentity";
 import type { PaxSessionClaims } from "../passengers/paxSessionToken";
-import { ADMIN_ROLES, adminPayloadFromCookieHeader } from "../auth/adminAuth";
+import { ADMIN_ROLES, adminAllowedForTenant, adminPayloadFromCookieHeader } from "../auth/adminAuth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
+import { logger } from "../lib/logger";
 
 type Role = "admin" | "pax";
 
@@ -36,6 +37,15 @@ const MESSAGE_RATE_LIMIT = 60;
 const MESSAGE_RATE_WINDOW_MS = 10_000;
 /** Matches the cap on the HTTP chat fallback (server/routes/push.ts POST /chat-send). */
 const MAX_CHAT_BODY_LEN = 12_000;
+/**
+ * The HTTP chat fallback (server/routes/push.ts) validates `kind` against
+ * this same set; the WS path previously cast whatever string a client sent
+ * straight to `ChatKind` with no check.
+ */
+const VALID_CHAT_KINDS = new Set<ChatKind>(["text", "location", "system", "ai_agent", "operator"]);
+function normalizeChatKind(raw: unknown): ChatKind {
+  return typeof raw === "string" && VALID_CHAT_KINDS.has(raw as ChatKind) ? (raw as ChatKind) : "text";
+}
 
 /**
  * Same-origin check for the WS upgrade. Browsers always send `Origin`; non-
@@ -74,6 +84,20 @@ function safeJsonParse(s: string): WsMsg | null {
 function wsSend(ws: WebSocket, obj: unknown): void {
   if (ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify(obj));
+}
+
+/**
+ * Runs an async WS message handler and guarantees its rejection never escapes
+ * as an unhandled rejection — errorTracking.ts now treats those as fatal
+ * (process.exit), so a single transient DB/Redis failure during, say, one
+ * passenger's hello must close that one connection, not crash the process
+ * and drop every other connected user.
+ */
+function safeAsyncHandler(ws: WebSocket, context: string, fn: () => Promise<void>): void {
+  fn().catch((err: unknown) => {
+    logger.error("ws_handler_failed", { context, error: err instanceof Error ? err.message : String(err) });
+    try { ws.close(1011, "internal_error"); } catch { /* already closing/closed */ }
+  });
 }
 
 export { HubStore };
@@ -149,7 +173,7 @@ export function attachWsHub(
         role = msg.role === "admin" || msg.role === "pax" ? msg.role : null;
 
         if (role === "admin") {
-          void (async () => {
+          safeAsyncHandler(ws, "admin_hello", async () => {
             // verifyAdminToken (via adminPayloadFromCookieHeader) already rejects
             // tokens without a recognized admin role/audience, but the check is
             // repeated here explicitly since this is the only gate protecting the
@@ -162,6 +186,10 @@ export function attachWsHub(
 
             tenantId = typeof msg.tenantId === "string" ? msg.tenantId : null;
             if (!tenantId) { ws.close(1008, "missing tenant"); return; }
+            if (!adminAllowedForTenant(adminPayload, tenantId)) {
+              ws.close(1008, "tenant_not_allowed");
+              return;
+            }
 
             const set = store.adminSockets.get(tenantId) || new Set<WebSocket>();
             set.add(ws);
@@ -182,12 +210,12 @@ export function attachWsHub(
             for (const r of store.recentMessages(tenantId)) {
               wsSend(ws, { type: "msg", record: r });
             }
-          })();
+          });
           return;
         }
 
         if (role === "pax") {
-          void (async () => {
+          safeAsyncHandler(ws, "pax_hello", async () => {
             const resolved = await resolvePaxWsHello(msg);
             if (!resolved.ok) {
               ws.close(1008, resolved.reason);
@@ -280,7 +308,7 @@ export function attachWsHub(
             // Send chat history (last 20)
             const hist = (await store.ensureChatHistory(tenantId, passengerId)).slice(-20);
             wsSend(ws, { type: "chat_history", passengerId, messages: hist });
-          })();
+          });
           return;
         }
 
@@ -344,12 +372,12 @@ export function attachWsHub(
       if (role === "admin" && msg.type === "chat_send") {
         const pid = String(msg.passengerId ?? "").trim();
         const body = typeof msg.body === "string" ? msg.body : "";
-        const kind = typeof msg.kind === "string" ? msg.kind : "text";
+        const kind = normalizeChatKind(msg.kind);
         const gateRef = typeof msg.gateRef === "string" ? msg.gateRef : undefined;
         if (!pid || !body || body.length > MAX_CHAT_BODY_LEN) return;
         const chatMsg = {
           id: crypto.randomUUID(), passengerId: pid, tenantId,
-          from: "admin" as const, kind: kind as ChatKind, body, gateRef,
+          from: "admin" as const, kind, body, gateRef,
           createdAt: Date.now(),
         };
         store.appendChat(tenantId, pid, chatMsg);
@@ -362,14 +390,14 @@ export function attachWsHub(
       if (role === "pax" && msg.type === "chat_send") {
         if (!passengerId) return;
         const body = typeof msg.body === "string" ? msg.body : "";
-        const kind = typeof msg.kind === "string" ? msg.kind : "text";
+        const kind = normalizeChatKind(msg.kind);
         const gateRef = typeof msg.gateRef === "string" ? msg.gateRef : undefined;
         if (!body || body.length > MAX_CHAT_BODY_LEN) return;
         if (!paxCanSendChat(paxClaims, kind)) {
           wsSend(ws, { type: "error", code: "chat_not_allowed_for_plan" });
           return;
         }
-        handlePaxOutboundChat(store, tenantId, passengerId, body, kind as ChatKind, gateRef);
+        handlePaxOutboundChat(store, tenantId, passengerId, body, kind, gateRef);
         return;
       }
 
@@ -446,10 +474,10 @@ export function attachWsHub(
             : String(msg.passengerId ?? "").trim();
         if (!pid) return;
         const tid = tenantId;
-        void (async () => {
+        safeAsyncHandler(ws, "chat_fetch", async () => {
           const hist = (await store.ensureChatHistory(tid, pid)).slice(-20);
           wsSend(ws, { type: "chat_history", passengerId: pid, messages: hist });
-        })();
+        });
         return;
       }
     });
@@ -473,7 +501,9 @@ export function attachWsHub(
         const still = store.paxSockets.get(key);
         if (!still || still.size === 0) {
           schedulePaxOffline(store, tenantId, passengerId);
-          void registry?.markOffline(tenantId, passengerId);
+          registry?.markOffline(tenantId, passengerId).catch((err: unknown) => {
+            logger.error("mark_offline_failed", { error: err instanceof Error ? err.message : String(err) });
+          });
         }
       }
     });

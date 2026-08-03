@@ -5,16 +5,29 @@
  */
 import { HubStore } from "./HubStore";
 
+/**
+ * Caps how many points a single trajectory update can contribute. Without
+ * this, a buggy or malicious client could grow one passenger's stored path
+ * without bound — it's kept in memory for as long as the passenger stays
+ * connected and re-sent in full to every admin socket on every update.
+ */
+const MAX_TRAJECTORY_POINTS = 500;
+
 function normalizeTrajectoryPath(
   raw: unknown[]
 ): { lat: number; lng: number }[] {
   if (!Array.isArray(raw)) return [];
-  return raw
+  const points = raw
     .map((p: unknown) => {
       const point = p as Record<string, unknown>;
       return { lat: Number(point.lat), lng: Number(point.lng) };
     })
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  // Keep the most recent points — older history matters less than a bounded
+  // memory/bandwidth footprint for a live "where are they now" trail.
+  return points.length > MAX_TRAJECTORY_POINTS
+    ? points.slice(points.length - MAX_TRAJECTORY_POINTS)
+    : points;
 }
 
 export function storeAndBroadcastTrajectory(

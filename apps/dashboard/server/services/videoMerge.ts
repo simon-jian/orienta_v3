@@ -11,9 +11,10 @@
  *
  * Either way the HTTP contract is unchanged: callers get { url, cached, bytes }.
  */
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
 import { existsSync, statSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { promisify } from "node:util";
 import { PEK_VIDEO_CONCAT_SCRIPT, PEK_CSV_PATH, ROUTE_SITE_DIR, DIST_DIR } from "../paths";
 import { VIDEO_OUTPUT_DIR } from "../config";
 import { getRedisCmd } from "../redis/redisClient";
@@ -52,10 +53,52 @@ function selectorArgs(spec: MergeSpec): string[] {
     : ["--from-gate", spec.from, "--to-gate", spec.to];
 }
 
-function readyResult(outPath: string, outName: string): MergeResult | null {
+const execFileAsync = promisify(execFile);
+
+/**
+ * True if `path` is a playable video with a positive duration. A truncated or
+ * otherwise corrupt ffmpeg output can still be a nonzero-size file — the
+ * size-only check this replaces would mark that "ready" and serve it to a
+ * passenger as a finished video.
+ *
+ * Fails open (treats the file as valid) only if ffprobe itself can't be
+ * spawned (e.g. missing from PATH) — ffprobe ships with the same `ffmpeg`
+ * package this whole feature already depends on, so that's a deployment
+ * issue to fix, not a reason to block every merge. Any other outcome
+ * (ffprobe runs but reports no/zero duration, or exits non-zero because the
+ * file is unparseable) fails closed.
+ */
+export async function hasValidDuration(filePath: string): Promise<boolean> {
+  let stdout: string;
+  try {
+    ({ stdout } = await execFileAsync(
+      "ffprobe",
+      ["-v", "error", "-show_entries", "format=duration", "-of", "json", filePath],
+      { timeout: 10_000 },
+    ));
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") {
+      logger.warn("ffprobe_not_found", { note: "skipping video duration validation" });
+      return true;
+    }
+    logger.warn("ffprobe_failed", { filePath, error: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(stdout) as { format?: { duration?: string } };
+    const duration = parseFloat(parsed.format?.duration ?? "");
+    return Number.isFinite(duration) && duration > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function readyResult(outPath: string, outName: string): Promise<MergeResult | null> {
   if (!existsSync(outPath)) return null;
   const st = statSync(outPath);
   if (!st.isFile() || st.size <= 0) return null;
+  if (!(await hasValidDuration(outPath))) return null;
   return { url: `/route_site/dynamic/${outName}`, cached: true, bytes: st.size };
 }
 
@@ -75,7 +118,7 @@ export async function requestMerge(spec: MergeSpec): Promise<MergeResult> {
   }
   mkdirSync(outDir, { recursive: true });
 
-  const cached = readyResult(outPath, outName);
+  const cached = await readyResult(outPath, outName);
   if (cached) return cached;
 
   const redis = getRedisCmd();
@@ -102,7 +145,7 @@ async function enqueueAndWait(
 
   const deadline = Date.now() + JOB_TIMEOUT_MS;
   while (Date.now() < deadline) {
-    const ready = readyResult(outPath, outName);
+    const ready = await readyResult(outPath, outName);
     if (ready) return { ...ready, cached: false };
     const status = await redis.get(statusKey);
     if (status && status.startsWith("failed")) {
@@ -125,8 +168,8 @@ function runLocal(spec: MergeSpec, outName: string, outPath: string): Promise<Me
   if (existing) return existing;
 
   const job = spawnConcat(spec, outPath)
-    .then(() => {
-      const ready = readyResult(outPath, outName);
+    .then(async () => {
+      const ready = await readyResult(outPath, outName);
       if (!ready) throw new Error("merge_produced_no_output");
       return { ...ready, cached: false };
     })

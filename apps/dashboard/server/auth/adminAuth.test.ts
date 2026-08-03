@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SignJWT } from "jose";
-import { ADMIN_TOKEN_AUDIENCE, verifyAdminToken } from "./adminAuth";
+import { ADMIN_TOKEN_AUDIENCE, adminAllowedForTenant, verifyAdminToken } from "./adminAuth";
+import { revokeAdminToken } from "./adminSessionRevocation";
 import { PAX_SESSION_AUDIENCE } from "../passengers/paxSessionToken";
 import { JWT_SECRET } from "../config";
 
@@ -13,8 +14,10 @@ import { JWT_SECRET } from "../config";
 
 const secret = new TextEncoder().encode(JWT_SECRET);
 
-async function signAdminToken(overrides: Partial<{ role: string; aud: string; iss: string }> = {}): Promise<string> {
-  return new SignJWT({ role: overrides.role ?? "admin" })
+async function signAdminToken(
+  overrides: Partial<{ role: string; aud: string; iss: string; jti: string }> = {},
+): Promise<string> {
+  return new SignJWT({ role: overrides.role ?? "admin", ...(overrides.jti ? { jti: overrides.jti } : {}) })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuer(overrides.iss ?? ADMIN_TOKEN_AUDIENCE)
     .setAudience(overrides.aud ?? ADMIN_TOKEN_AUDIENCE)
@@ -65,5 +68,53 @@ describe("verifyAdminToken", () => {
   it("rejects garbage input", async () => {
     expect(await verifyAdminToken("")).toBeNull();
     expect(await verifyAdminToken("not-a-jwt")).toBeNull();
+  });
+});
+
+// Regression coverage for admin tenant scoping (config.ts ADMIN_TENANT_SCOPES):
+// before this, any valid admin/ops/viewer credential could read or act on
+// every tenant in the deployment, regardless of which one(s) it was meant to
+// operate.
+describe("adminAllowedForTenant", () => {
+  it("allows any tenant when the token carries no tenants claim (legacy/unscoped admin)", async () => {
+    const payload = await verifyAdminToken(await signAdminToken({ role: "admin" }));
+    expect(adminAllowedForTenant(payload!, "airchina")).toBe(true);
+    expect(adminAllowedForTenant(payload!, "some-other-tenant")).toBe(true);
+  });
+
+  it("restricts to the listed tenants when the token carries a tenants claim", () => {
+    const scoped = { role: "admin", tenants: ["airchina", "united"] };
+    expect(adminAllowedForTenant(scoped, "airchina")).toBe(true);
+    expect(adminAllowedForTenant(scoped, "united")).toBe(true);
+    expect(adminAllowedForTenant(scoped, "delta")).toBe(false);
+  });
+
+  it("treats an empty tenants array as unscoped, not as 'no tenants allowed'", () => {
+    expect(adminAllowedForTenant({ role: "admin", tenants: [] }, "airchina")).toBe(true);
+  });
+});
+
+// Regression coverage for POST /api/auth/logout actually invalidating the
+// token immediately, rather than only clearing the browser's cookie.
+describe("admin session revocation", () => {
+  it("a revoked token is rejected even though its signature/issuer/role are all valid", async () => {
+    const jti = `test-jti-${Math.random()}`;
+    const token = await signAdminToken({ role: "admin", jti });
+    expect((await verifyAdminToken(token))?.role).toBe("admin"); // valid before revocation
+
+    await revokeAdminToken(jti, Date.now() + 60_000);
+
+    expect(await verifyAdminToken(token)).toBeNull();
+  });
+
+  it("revoking one token does not affect a different token (different jti)", async () => {
+    const tokenA = await signAdminToken({ role: "admin", jti: `jti-a-${Math.random()}` });
+    const tokenB = await signAdminToken({ role: "admin", jti: `jti-b-${Math.random()}` });
+
+    const payloadA = await verifyAdminToken(tokenA);
+    await revokeAdminToken(String(payloadA!.jti), Date.now() + 60_000);
+
+    expect(await verifyAdminToken(tokenA)).toBeNull();
+    expect(await verifyAdminToken(tokenB)).not.toBeNull();
   });
 });

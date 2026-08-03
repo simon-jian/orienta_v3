@@ -58,6 +58,12 @@ RUN mkdir -p /app/data \
 USER orienta
 
 EXPOSE 5174
+# /livez (not /health or /readyz): liveness only — is the process itself
+# responsive, with no dependency I/O. A container-level healthcheck like this
+# is what an orchestrator would use to decide whether to restart the
+# container, and a slow/unreachable DB or Redis is not a good reason to kill
+# an otherwise-healthy process (that just drops every in-flight WS connection
+# too). Use GET /readyz for dependency-aware monitoring instead.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:5174/health >/dev/null 2>&1 || exit 1
+  CMD wget -qO- http://127.0.0.1:5174/livez >/dev/null 2>&1 || exit 1
 CMD ["node", "dist-server/server/server.js"]

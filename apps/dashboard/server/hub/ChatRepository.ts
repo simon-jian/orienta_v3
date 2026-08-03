@@ -17,6 +17,9 @@ export class ChatRepository {
   constructor(private readonly db: SqlDb) {}
 
   async init(): Promise<void> {
+    // Composite PK from the start for a fresh database — pre-existing
+    // databases created before this were keyed by a bare `id` and are
+    // upgraded in place by migrationList.ts (2026_08_chat_messages_composite_pk).
     await this.db.exec(`
       CREATE TABLE IF NOT EXISTS chat_messages (
         id            TEXT NOT NULL,
@@ -27,21 +30,29 @@ export class ChatRepository {
         body          TEXT NOT NULL,
         gate_ref      TEXT,
         created_at    BIGINT NOT NULL,
-        PRIMARY KEY (id)
+        PRIMARY KEY (tenant_id, id)
       );
     `);
     await this.db.exec(`
       CREATE INDEX IF NOT EXISTS idx_chat_messages_pax
         ON chat_messages (tenant_id, passenger_id, created_at);
     `);
+    await this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_chat_messages_created
+        ON chat_messages (created_at);
+    `);
   }
 
   async append(tenantId: string, passengerId: string, message: ChatMessage): Promise<void> {
+    // Composite (tenant_id, id) conflict target — see migrationList.ts
+    // 2026_08_chat_messages_composite_pk. A bare `id` conflict target here
+    // would let a colliding message id from a *different* tenant overwrite
+    // this row instead of being treated as a distinct message.
     await this.db.run(
       `INSERT INTO chat_messages
          (id, tenant_id, passenger_id, sender, kind, body, gate_ref, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET
+       ON CONFLICT (tenant_id, id) DO UPDATE SET
          sender = excluded.sender,
          kind = excluded.kind,
          body = excluded.body,

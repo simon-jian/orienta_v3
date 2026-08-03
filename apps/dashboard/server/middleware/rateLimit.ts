@@ -11,6 +11,9 @@ import { logger } from "../lib/logger";
 
 type Bucket = { count: number; resetAt: number };
 
+/** How often to sweep expired in-memory buckets for one limiter instance. */
+const SWEEP_INTERVAL_MS = 5 * 60_000;
+
 export function createRateLimiter(options: {
   windowMs: number;
   maxRequests: number;
@@ -24,6 +27,20 @@ export function createRateLimiter(options: {
   const keyFn = options.keyFn ?? ((req) => req.ip || "unknown");
   const redis = options.redis ?? null;
   const ns = options.name ?? "default";
+
+  // Buckets are only ever replaced (not deleted) when the SAME key comes back
+  // after expiry — under broad/scanned traffic, unique IPs would otherwise
+  // accumulate in this Map for the life of the process. Only relevant for the
+  // in-memory path; the Redis path expires keys itself via PEXPIRE.
+  if (!redis) {
+    const sweep = setInterval(() => {
+      const now = Date.now();
+      for (const [key, bucket] of buckets) {
+        if (now >= bucket.resetAt) buckets.delete(key);
+      }
+    }, SWEEP_INTERVAL_MS);
+    sweep.unref();
+  }
 
   function checkMemory(req: Request, res: Response, next: NextFunction): void {
     const now = Date.now();

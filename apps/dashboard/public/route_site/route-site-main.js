@@ -5,6 +5,18 @@
  * loop. Loads last, after route-site-pek-engine.js and route-site-map-geometry.js,
  * whose globals it consumes. Split verbatim from the former route-site-app.js.
  */
+/** Escapes a string for safe interpolation into innerHTML. CSP is intentionally
+ *  off for this page (see server/server.ts), so this is the only XSS guard
+ *  for any config/API-sourced label rendered via innerHTML below. */
+function orientaEscapeHtml_(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /** Same-origin /api on the Vite admin server (e.g. :5174); override with ?sensorBackend=http://host:port */
 var ROUTE_SITE_TENANT_ID = orientaRouteSiteCfg_().tenantId || "airchina";
 var ROUTE_SITE_PASSENGER_ID = "";
@@ -124,9 +136,10 @@ function showGateCheckpointModal(gateName, segmentTime, category) {
   var isSecurity = /security|checkpoint|安检/i.test(String(gateName || '') + String(category || ''));
   var qEl = document.getElementById('gateCheckpointQuestion');
   if (qEl) {
+    var safeLabel = orientaEscapeHtml_(label || '—');
     qEl.innerHTML = isSecurity
-      ? 'Have you reached <span id="gateCheckpointName">' + (label || '—') + '</span>?'
-      : 'Did you get to Gate <span id="gateCheckpointName">' + (label || '—') + '</span>?';
+      ? 'Have you reached <span id="gateCheckpointName">' + safeLabel + '</span>?'
+      : 'Did you get to Gate <span id="gateCheckpointName">' + safeLabel + '</span>?';
   } else if (gateCheckpointNameEl) {
     gateCheckpointNameEl.textContent = label;
   }
@@ -1129,7 +1142,7 @@ function orientaMountIndoorEmbedInMapPeople_(mapEl, baseUrl, apiBase, tileBase, 
       var _ifrU = new URL(fullSrc);
       if (_ifrU.protocol === "http:") {
         orientaRouteSiteDebugLog_(
-          "[indoor] HTTPS page + HTTP map iframe → Safari blocks mixed content (blank map). Set VITE_INDOOR_MAP_SAME_ORIGIN=1 and INDOOR_MAP_* proxies in vite/.env, or use an https map URL on this host.",
+          "[indoor] HTTPS page + HTTP map iframe → Safari blocks mixed content (blank map). Set VITE_INDOOR_MAP_SAME_ORIGIN=1 and INDOOR_MAP_* proxies in apps/dashboard/.env, or use an https map URL on this host.",
           true
         );
       }
@@ -3033,12 +3046,12 @@ function drawPeoplePage(){
       return (fa || 0) - (fb || 0);
     }).slice(0, AMENITIES_MAX_SHOW);
     var chipHtml = approaching.map(function(a){
-      var name = (a.name || a.label || '').replace(/</g,'&lt;');
+      var name = orientaEscapeHtml_(a.name || a.label || '');
       var cls = 'amenity-chip' + (a.type === 'shop' ? ' shop' : '');
       return '<span class="'+cls+'">'+name+'</span>';
     }).join('');
     if (amenitiesPanel) amenitiesPanel.innerHTML = approaching.map(function(a){
-      var name = (a.name || a.label || '').replace(/</g,'&lt;');
+      var name = orientaEscapeHtml_(a.name || a.label || '');
       var cls = 'amenity-item' + (a.type === 'shop' ? ' shop' : '');
       return '<div class="'+cls+'">'+name+'</div>';
     }).join('');

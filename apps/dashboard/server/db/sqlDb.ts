@@ -13,6 +13,7 @@ import { Pool, type PoolClient, types as pgTypes } from "pg";
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DB_DIALECT, DATABASE_URL, DB_PATH } from "../config";
+import { logger } from "../lib/logger";
 
 /** BIGINT (oid 20) comes back as string by default; epoch-ms fits in a JS number. */
 pgTypes.setTypeParser(20, (v: string) => parseInt(v, 10));
@@ -171,6 +172,14 @@ class PgDb extends PgQueries implements SqlDb {
       max: 10,
       connectionTimeoutMillis: PG_CONNECTION_TIMEOUT_MS,
       idleTimeoutMillis: PG_IDLE_TIMEOUT_MS,
+    });
+    // node-postgres emits "error" on the pool when an *idle* client hits a
+    // network/backend error — an EventEmitter "error" with no listener is
+    // fatal in Node (crashes the process) even though the pool itself
+    // recovers fine by discarding that client. Without this listener, a
+    // single idle-connection blip would take the whole server down.
+    pool.on("error", (err: Error) => {
+      logger.error("pg_pool_error", { error: err.message });
     });
     super(pool);
     this.pool = pool;
