@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type { Gate, Flight, PassengerComputed, MsgRecord } from "../types/types";
 import { defaultSmsTemplate } from "../utils/passenger-compute";
 
@@ -20,6 +20,19 @@ export default function PassengerCard(props: {
     () => defaultSmsTemplate(p, gate?.name || "—", flight?.id || p.flightId),
     [p, gate, flight]
   );
+  // Guards against a double-fire from a rapid double-click sending the same
+  // notification twice — onSendSms is fire-and-forget (void), so there's
+  // nothing else to key a "still sending" state off of. Same pattern as
+  // ConversationPanel's handleSend.
+  const sendingRef = useRef(false);
+  const handleSendSms = () => {
+    const msg = custom || suggested;
+    if (!msg.trim() || sendingRef.current) return;
+    sendingRef.current = true;
+    props.onSendSms(msg);
+    setCustom("");
+    setTimeout(() => { sendingRef.current = false; }, 300);
+  };
 
   const statusColor = { green: "#34c759", yellow: "#ffcc00", red: "#ff3b30", gray: "#8e8e93" }[p.status] || "#8e8e93";
 
@@ -117,7 +130,7 @@ export default function PassengerCard(props: {
         onChange={(e) => setCustom(e.target.value)}
         placeholder="Notification message…"
       />
-      <button className="btn" style={{ width: "100%" }} onClick={() => props.onSendSms(custom || suggested)}>
+      <button className="btn" style={{ width: "100%" }} onClick={handleSendSms} disabled={!(custom || suggested).trim()}>
         📨 Send Notification
       </button>
     </div>

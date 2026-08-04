@@ -20,22 +20,24 @@ export type ResolvedOutbound = {
 };
 
 const CACHE_TTL_MS = 5 * 60_000;
-/** Last-resort gate when no live data and no caller hint is available. */
-const DEFAULT_GATE = "E19";
+/** Last-resort gate when an airport has no defaultGate configured either. */
+const GENERIC_FALLBACK_GATE = "UNKNOWN";
 const cache = new Map<string, { at: number; value: ResolvedOutbound }>();
 
 /**
  * Fallback used when live FlightAware data is unavailable: caller-provided hints
- * win, otherwise a generic default gate and a +90min departure estimate.
+ * win, otherwise the airport's configured defaultGate (config/airports/*.yaml),
+ * else a generic placeholder — and a +90min departure estimate.
  */
 function fallbackResolve(
   flightId: string,
   fallbackGateId: string | undefined,
   fallbackTo: string | undefined,
+  airportId: string | undefined,
 ): ResolvedOutbound {
   return {
     flightId,
-    gateId: fallbackGateId || DEFAULT_GATE,
+    gateId: fallbackGateId || getAirportOrDefault(airportId).defaultGate || GENERIC_FALLBACK_GATE,
     outboundTo: fallbackTo || "",
     scheduledDepMs: Date.now() + 90 * 60_000,
     source: "fallback",
@@ -53,7 +55,7 @@ export async function resolveOutbound(
   airportId?: string,
 ): Promise<ResolvedOutbound> {
   const flightId = normalizeFlight(rawFlightId);
-  const fallback = fallbackResolve(flightId, fallbackGateId, fallbackTo);
+  const fallback = fallbackResolve(flightId, fallbackGateId, fallbackTo, airportId);
 
   if (!FLIGHTAWARE_API_KEY) return fallback;
 

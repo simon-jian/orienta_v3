@@ -25,7 +25,9 @@ try {
   var __defTenant = orientaRouteSiteCfg_().tenantId || "airchina";
   ROUTE_SITE_TENANT_ID = (__osp.get("tenant") || __defTenant).trim() || __defTenant;
   var __rawPax = (__osp.get("pax") || __osp.get("pid") || __osp.get("pix") || "").trim();
-  var __paxAlias = orientaRouteSiteCfg_().paxAliases || { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" };
+  // Deployment-specific (config/<hub>.json) — no baked-in default; see the
+  // matching comment in route-site-pek-engine.js.
+  var __paxAlias = orientaRouteSiteCfg_().paxAliases || {};
   ROUTE_SITE_PASSENGER_ID = __paxAlias[__rawPax.toUpperCase()] || __rawPax;
 } catch (e) {}
 var SENSOR_BACKEND_URL = "";

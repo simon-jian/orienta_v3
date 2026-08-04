@@ -72,6 +72,8 @@ export type AirportDefinition = {
   name: string;
   terminals: Terminal[];
   defaultTerminal: string;
+  /** Last-resort gate for a passenger session with no live data and no caller hint. Optional. */
+  defaultGate?: string;
   poi: AirportPoiConfig;
   routeSite?: AirportRouteSiteConfig;
   map: {

@@ -19,12 +19,13 @@
       terminal: "T3E",
       poiTerminalQuery: "T3E",
       defaultRouteGates: { from: "E16", to: "E19" },
-      paxAliases: { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" },
-      paxRouteGates: {
-        TX1: { from: "E16", to: "E19" },
-        TX2: { from: "E18", to: "E19" },
-        TX3: { from: "E17", to: "E19" },
-      },
+      // No default alias mapping — see the comment in config/pek.json.
+      // Deployments that want short-code QR aliases add their own
+      // paxAliases/paxRouteGates there; this synchronous fallback (used only
+      // until that async fetch resolves, or if it fails) stays empty rather
+      // than shipping one tenant's specific mapping to every deployment.
+      paxAliases: {},
+      paxRouteGates: {},
       video: {
         gateCsv: "PEK_gate_timestamp_full_with_E24_E36.csv",
         mergedFromCsvBasename: "PEK_gate_timestamp_merged.mp4",

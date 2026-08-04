@@ -5,13 +5,15 @@
  *   GET    /api/passengers?tenant=airchina
  *   POST   /api/passengers?tenant=airchina
  *   PATCH  /api/passengers/:id?tenant=airchina
- *   DELETE /api/passengers/:id?tenant=airchina
+ *   GET    /api/passengers/:id/export?tenant=airchina  (data subject access request bundle)
+ *   DELETE /api/passengers/:id?tenant=airchina          (cascading erasure)
  *
  * Returns passengers as WorldState-compatible Passenger objects with
  * outboundDep filled in from the live flight schedule.
  */
 import type { Router, Request, Response } from "express";
 import { requireAdmin, requireRole, requireTenantAccess, adminEmailFromRequest } from "./auth";
+import { revokePaxSessionsForPassenger } from "../auth/paxSessionRevocation";
 import { ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { HubStore } from "../hub/HubStore";
@@ -20,11 +22,12 @@ import type { PushSubscriptionStore } from "../passengers/PushSubscriptionStore"
 import { buildFlights } from "../../src/services/flightService";
 import { airportForTenant } from "../../src/config/tenants/registry";
 import type { Passenger, PaxPlan, PaxExtStatus, PassengerActivity } from "../../src/types/types";
+import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function tenantFromQuery(req: Request): string {
-  return String(req.query.tenant || ROUTE_SITE_DEFAULT_TENANT).trim();
+  return canonicalTenantId(req.query.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
 }
 
 // Runtime mirrors of the PaxPlan/PaxExtStatus/PassengerActivity union types —
@@ -96,8 +99,8 @@ export function registerPassengerRoutes(
     const body     = req.body || {};
 
     const id      = String(body.id || "").trim();
-    const flightId = String(body.flightId || body.flight_id || "").trim();
-    const gateId   = String(body.gateId   || body.gate_id   || "").trim();
+    const flightId = canonicalFlightId(body.flightId || body.flight_id);
+    const gateId   = canonicalGateId(body.gateId || body.gate_id);
 
     if (!id)       return res.status(400).json({ ok: false, error: "missing_id" });
     if (!flightId) return res.status(400).json({ ok: false, error: "missing_flightId" });
@@ -111,7 +114,7 @@ export function registerPassengerRoutes(
       needsWheelchair:  !!body.needsWheelchair,
       plan:             body.plan === "premium" ? "premium" : "free",
       flightId, gateId,
-      inboundFlightId:  String(body.inboundFlightId || body.arr || "").trim() || undefined,
+      inboundFlightId:  canonicalFlightId(body.inboundFlightId || body.arr) || undefined,
       inboundFrom:      String(body.inboundFrom     || "").trim() || undefined,
       outboundTo:       String(body.outboundTo      || "").trim() || undefined,
       source: "manual",
@@ -138,6 +141,8 @@ export function registerPassengerRoutes(
     for (const key of allowed) {
       if (body[key] !== undefined) patch[key] = body[key];
     }
+    if (patch.flightId !== undefined) patch.flightId = canonicalFlightId(patch.flightId);
+    if (patch.gateId !== undefined) patch.gateId = canonicalGateId(patch.gateId);
 
     if (patch.plan !== undefined && !VALID_PLANS.has(patch.plan as PaxPlan)) {
       return res.status(400).json({ ok: false, error: "invalid_plan", allowed: [...VALID_PLANS] });
@@ -152,6 +157,14 @@ export function registerPassengerRoutes(
     const updated = await registry.update(tenantId, passengerId, patch);
     if (!updated) return res.status(404).json({ ok: false, error: "passenger_not_found" });
 
+    // plan/capabilities are frozen into the passenger's session JWT at issue
+    // time (paxSessionToken.ts) — without this, a plan downgrade wouldn't
+    // take effect until whatever session they're currently holding expires
+    // naturally (up to 30 days for a registered account).
+    if (patch.plan !== undefined) {
+      await revokePaxSessionsForPassenger(tenantId, passengerId);
+    }
+
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_update",
@@ -159,6 +172,44 @@ export function registerPassengerRoutes(
       detail: Object.keys(patch).join(","),
     });
     return res.json({ ok: true, passenger: updated });
+  });
+
+  /**
+   * GET /api/passengers/:id/export — admin only. Bundles everything stored
+   * about one passenger (registry record, chat history, push subscription
+   * endpoints, audit trail) into a single JSON response — the export/access
+   * counterpart to DELETE's erasure, for a data subject access request.
+   */
+  router.get("/:id/export", requireRole("admin"), async (req: Request, res: Response) => {
+    const tenantId    = tenantFromQuery(req);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    const passengerId = req.params.id ?? "";
+
+    const record = await registry.get(tenantId, passengerId);
+    if (!record) return res.status(404).json({ ok: false, error: "passenger_not_found" });
+
+    const [chatHistory, pushSubscriptions, auditTrail] = await Promise.all([
+      store.ensureChatHistory(tenantId, passengerId),
+      pushSubs?.list(HubStore.key(tenantId, passengerId)) ?? Promise.resolve([]),
+      auditLog?.listForPassenger(tenantId, passengerId) ?? Promise.resolve([]),
+    ]);
+
+    // Exporting a passenger's full data bundle is itself a sensitive,
+    // auditable action — same bar as the delete below.
+    void auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "passenger_data_export",
+      tenantId, passengerId,
+    });
+
+    return res.json({
+      ok: true,
+      exportedAt: new Date().toISOString(),
+      passenger: record,
+      chatHistory,
+      pushSubscriptions,
+      auditTrail,
+    });
   });
 
   /** DELETE /api/passengers/:id — admin only. Cascades to chat history and push subscriptions. */
@@ -171,6 +222,7 @@ export function registerPassengerRoutes(
 
     const { chatRowsDeleted } = await store.purgePassenger(tenantId, passengerId);
     await pushSubs?.removeAllForKey(HubStore.key(tenantId, passengerId));
+    await revokePaxSessionsForPassenger(tenantId, passengerId);
 
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),

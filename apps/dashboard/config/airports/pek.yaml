@@ -19,6 +19,11 @@ poi:
   gatePattern: "^E\\d{1,2}$"
   spawnRadiusM: 400
 
+# Last-resort gate when a passenger session has no live FlightAware data and
+# no caller-provided gate hint (server/services/fidsService.ts). Optional —
+# an airport with no sensible single "default" can omit this.
+defaultGate: E19
+
 routeSite:
   hubKey: PEK
   configUrl: /route_site/config/pek.json

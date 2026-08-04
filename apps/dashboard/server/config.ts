@@ -59,6 +59,21 @@ function normalizePdrOrigin(raw: string): string {
 
 // Auth — required at startup
 export const JWT_SECRET = required("JWT_SECRET");
+/**
+ * Optional comma-separated list of previously-used JWT_SECRET values, still
+ * ACCEPTED for verification but never used for signing new tokens. Without
+ * this, rotating JWT_SECRET is a hard cutover — every admin and passenger
+ * session in flight is invalidated the instant the new secret deploys.
+ * Rotation procedure: set JWT_SECRET to the new value and add the old value
+ * here, deploy, then once the longest session TTL has elapsed (30 days —
+ * see paxSessions.ts REGISTERED_SESSION_TTL_MS) remove it from here too.
+ */
+export const JWT_SECRET_PREVIOUS = optional("JWT_SECRET_PREVIOUS");
+/** [current, ...previous] — verification tries each in order; signing always uses JWT_SECRET (index 0). */
+export const JWT_VERIFICATION_SECRETS: string[] = [
+  JWT_SECRET,
+  ...JWT_SECRET_PREVIOUS.split(",").map((s) => s.trim()).filter(Boolean),
+];
 /** "email:password,email2:password2" */
 export const ADMIN_CREDENTIALS = required("ADMIN_CREDENTIALS");
 
@@ -258,6 +273,12 @@ export function validateProductionSecurity(): void {
   }
   if (PLACEHOLDER_SECRETS.has(JWT_SECRET.trim().toLowerCase())) {
     problems.push("JWT_SECRET is a known placeholder value — replace it with a real secret.");
+  }
+  for (const prev of JWT_SECRET_PREVIOUS.split(",").map((s) => s.trim()).filter(Boolean)) {
+    if (prev.length < MIN_JWT_SECRET_LENGTH || PLACEHOLDER_SECRETS.has(prev.toLowerCase())) {
+      problems.push("JWT_SECRET_PREVIOUS contains a weak or placeholder value — every entry must meet the same bar as JWT_SECRET.");
+      break;
+    }
   }
 
   for (const [email, cred] of getAdminCredentials()) {

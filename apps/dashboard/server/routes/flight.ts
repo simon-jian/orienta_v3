@@ -194,14 +194,20 @@ function normalizeGateToken(raw: string): string {
  * Merged route-video handler, airport-aware (Multi-airport Phase 4).
  *
  * `airportId` is undefined for the legacy `/pek-merged-video` alias (→ PEK) and
- * set from the path param for the generalized `/:airportId/merged-video`. The
- * merge assets/script are PEK-only today, so other (valid) airports return 501.
+ * set from the path param for the generalized `/:airportId/merged-video`.
+ * Gated on the airport having `video` config at all (config/airports/*.yaml)
+ * rather than a hardcoded "PEK" comparison — but note the merge pipeline
+ * itself (server/services/videoMerge.ts, scripts/pek_video_worker.py) still
+ * only actually reads PEK's specific CSV/source-clip paths today, so a
+ * second airport declaring `video:` config isn't fully supported yet either;
+ * this at least stops rejecting on a literal id string instead of the real,
+ * config-driven signal for "does this airport have video merge configured".
  */
 async function handleMergedVideo(req: Request, res: Response, airportId?: string): Promise<Response> {
   const requested = String(airportId || "PEK").toUpperCase();
   const def = getAirport(requested);
   if (!def) return res.status(404).json({ ok: false, error: "unknown_airport", airportId: requested });
-  if (def.id !== "PEK") {
+  if (!def.video) {
     return res.status(501).json({ ok: false, error: "merge_not_supported_for_airport", airportId: def.id });
   }
 

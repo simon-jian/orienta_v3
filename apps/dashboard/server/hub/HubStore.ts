@@ -25,6 +25,16 @@ const MAX_CHAT_HISTORY = 100;
  * forever the way a plain SADD/SREM set would after a crash.
  */
 const PRESENCE_STALE_MS = 6 * 60_000;
+/**
+ * A passenger's chatHistories/paxMeta/paxTrajectories cache entry is eligible
+ * for eviction once it's been this long since it was last touched AND the
+ * passenger isn't currently connected — see pruneIdleCaches(). Comfortably
+ * longer than the temporary-passenger grace window (48h) so a returning
+ * passenger's chat history is very unlikely to have been evicted, but still
+ * bounded — without this, every passenger who ever connects and later goes
+ * offline (without being deleted) stays cached in memory forever.
+ */
+const IDLE_CACHE_MAX_AGE_MS = 72 * 60 * 60_000;
 
 export type PaxMeta = { displayName?: string; plan?: string };
 export type TrajectoryData = {
@@ -67,6 +77,19 @@ export class HubStore {
   readonly paxMeta = new Map<string, PaxMeta>();
   /** Live PDR trajectories: keyed by `tenantId::passengerId` */
   readonly paxTrajectories = new Map<string, TrajectoryData>();
+  /** When each key's chatHistories/paxMeta/paxTrajectories entry was last touched — see pruneIdleCaches(). */
+  private readonly lastTouched = new Map<string, number>();
+
+  private touch(key: string): void {
+    this.lastTouched.set(key, Date.now());
+  }
+
+  /** Sets a passenger's display-name/plan override, tracked for idle eviction (see pruneIdleCaches()). */
+  setPaxMeta(tenantId: string, passengerId: string, meta: PaxMeta): void {
+    const key = HubStore.key(tenantId, passengerId);
+    this.paxMeta.set(key, meta);
+    this.touch(key);
+  }
 
   // ── Keys ────────────────────────────────────────────────────────────────────
 
@@ -166,10 +189,10 @@ export class HubStore {
   async ensureChatHistory(tenantId: string, passengerId: string): Promise<ChatMessage[]> {
     const key = HubStore.key(tenantId, passengerId);
     const cached = this.chatHistories.get(key);
-    if (cached?.length) return cached;
+    if (cached?.length) { this.touch(key); return cached; }
     if (!this.chatRepo) return [];
     const loaded = await this.chatRepo.loadRecent(tenantId, passengerId, MAX_CHAT_HISTORY);
-    if (loaded.length) this.chatHistories.set(key, loaded);
+    if (loaded.length) { this.chatHistories.set(key, loaded); this.touch(key); }
     return loaded;
   }
 
@@ -179,6 +202,7 @@ export class HubStore {
     hist.push(msg);
     if (hist.length > MAX_CHAT_HISTORY) hist.splice(0, hist.length - MAX_CHAT_HISTORY);
     this.chatHistories.set(key, hist);
+    this.touch(key);
     // Persist asynchronously; the in-memory cache is authoritative for live reads.
     void this.chatRepo?.append(tenantId, passengerId, msg).catch((err) => {
       logger.error("chat_persist_failed", {
@@ -202,11 +226,42 @@ export class HubStore {
     this.chatHistories.delete(key);
     this.paxMeta.delete(key);
     this.paxTrajectories.delete(key);
+    this.lastTouched.delete(key);
     for (const [messageId, rec] of this.messages) {
       if (rec.tenantId === tenantId && rec.passengerId === passengerId) this.messages.delete(messageId);
     }
     const chatRowsDeleted = (await this.chatRepo?.deleteForPassenger(tenantId, passengerId)) ?? 0;
     return { chatRowsDeleted };
+  }
+
+  /**
+   * Evicts chatHistories/paxMeta/paxTrajectories entries for passengers that
+   * are both currently disconnected AND haven't been touched in over
+   * `maxIdleMs` (default IDLE_CACHE_MAX_AGE_MS) — called from the hourly
+   * maintenance job (server/jobs/maintenance.ts). A currently-connected
+   * passenger's entry is never evicted regardless of `lastTouched`, since a
+   * long-lived, quiet WS connection is still real activity. Returns the
+   * number of keys evicted.
+   */
+  pruneIdleCaches(maxIdleMs = IDLE_CACHE_MAX_AGE_MS): number {
+    const cutoff = Date.now() - maxIdleMs;
+    const candidateKeys = new Set<string>([
+      ...this.chatHistories.keys(),
+      ...this.paxMeta.keys(),
+      ...this.paxTrajectories.keys(),
+    ]);
+    let evicted = 0;
+    for (const key of candidateKeys) {
+      if (this.paxSockets.has(key)) continue; // currently connected — never evict
+      const touchedAt = this.lastTouched.get(key) ?? 0;
+      if (touchedAt >= cutoff) continue;
+      this.chatHistories.delete(key);
+      this.paxMeta.delete(key);
+      this.paxTrajectories.delete(key);
+      this.lastTouched.delete(key);
+      evicted += 1;
+    }
+    return evicted;
   }
 
   // ── Trajectories ─────────────────────────────────────────────────────────────

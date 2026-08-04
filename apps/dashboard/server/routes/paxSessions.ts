@@ -12,6 +12,7 @@ import { airportForTenant, getTenant } from "../../src/config/tenants/registry";
 import { requireRole, requireTenantAccess, adminEmailFromRequest } from "./auth";
 import type { AuditLog } from "../lib/auditLog";
 import type { PaxPlan } from "../../src/types/types";
+import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 
 type AccountType = "temporary" | "registered";
 
@@ -59,17 +60,18 @@ function isKioskAuthorized(req: Request): boolean {
  * /basic-session endpoints, which have no other tenant binding available.
  */
 function tenantFromBody(body: Record<string, unknown>): string {
-  const requested = String(body.tenantId || body.tenant_id || "").trim();
-  return requested && getTenant(requested) ? requested : ROUTE_SITE_DEFAULT_TENANT;
+  const requested = canonicalTenantId(body.tenantId || body.tenant_id);
+  // getTenant() itself lowercases before its lookup, but the *canonical*
+  // (lowercased) form is what must actually get stored/keyed on below —
+  // otherwise "AirChina" and "airchina" resolve to the same airport but
+  // partition into different rows in the passenger registry/chat/metrics
+  // tables.
+  return requested && getTenant(requested) ? requested : canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
 }
 
 function capabilitiesFor(plan: PaxPlan): PaxCapability[] {
   const base: PaxCapability[] = ["navigate", "receive_notifications", "share_location"];
   return plan === "premium" ? [...base, "operator_chat"] : base;
-}
-
-function normalizeFlightId(raw: string): string {
-  return raw.toUpperCase().replace(/\s+/g, "");
 }
 
 function temporaryExpiryFromDeparture(scheduledDepMs: number): number {
@@ -168,8 +170,8 @@ export function registerPaxSessionRoutes(
       const firstLeg = parsed.legs[0]!;
       const outboundLeg = parsed.legs[parsed.legs.length - 1]!;
       const outbound = await resolveOutboundFlight(
-        String(body.departureFlight || outboundLeg.flightId),
-        String(body.gateId || "").trim() || undefined,
+        canonicalFlightId(body.departureFlight || outboundLeg.flightId),
+        canonicalGateId(body.gateId) || undefined,
         outboundLeg.toAirport,
         airportForTenant(tenantId),
       );
@@ -210,12 +212,15 @@ export function registerPaxSessionRoutes(
   router.post("/basic-session", async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const tenantId = tenantFromBody(body);
-    const departureFlight = String(body.departureFlight || body.dep || "").trim();
-    const arrivalFlight = String(body.arrivalFlight || body.arr || "").trim();
+    // Canonicalized so "ca123" and "CA123" hash to the same passenger id
+    // below (passengerIdFromStableParts) instead of silently creating two
+    // separate registry rows for what's the same self-reported flight.
+    const departureFlight = canonicalFlightId(body.departureFlight || body.dep);
+    const arrivalFlight = canonicalFlightId(body.arrivalFlight || body.arr);
     if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
     if (!arrivalFlight) return res.status(400).json({ ok: false, error: "missing_arrival_flight" });
 
-    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined, undefined, airportForTenant(tenantId));
+    const outbound = await resolveOutboundFlight(departureFlight, canonicalGateId(body.gateId) || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("BASIC", [
       tenantId,
       arrivalFlight,
@@ -229,7 +234,7 @@ export function registerPaxSessionRoutes(
       plan: "free",
       flightId: outbound.flightId,
       gateId: outbound.gateId,
-      inboundFlightId: normalizeFlightId(arrivalFlight),
+      inboundFlightId: arrivalFlight,
       outboundTo: outbound.outboundTo || undefined,
       source: "manual",
     });
@@ -249,7 +254,7 @@ export function registerPaxSessionRoutes(
     const body = (req.body || {}) as Record<string, unknown>;
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
-    const departureFlight = String(body.departureFlight || body.dep || "").trim();
+    const departureFlight = canonicalFlightId(body.departureFlight || body.dep);
     if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
     if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
 
@@ -262,7 +267,7 @@ export function registerPaxSessionRoutes(
     // tenant the account was never assigned to.
     const tenantId = account.tenantId;
 
-    const outbound = await resolveOutboundFlight(departureFlight, String(body.gateId || "").trim() || undefined, undefined, airportForTenant(tenantId));
+    const outbound = await resolveOutboundFlight(departureFlight, canonicalGateId(body.gateId) || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
     const passenger = await registry.getOrCreate({
       id: passengerId,
@@ -271,7 +276,7 @@ export function registerPaxSessionRoutes(
       plan: "premium",
       flightId: outbound.flightId,
       gateId: outbound.gateId,
-      inboundFlightId: String(body.arrivalFlight || body.arr || "").trim() || undefined,
+      inboundFlightId: canonicalFlightId(body.arrivalFlight || body.arr) || undefined,
       outboundTo: outbound.outboundTo || undefined,
       source: "account_login",
     });
@@ -289,7 +294,7 @@ export function registerPaxSessionRoutes(
 
   // ── Admin: premium account management (P0-13) — beyond the env seed ──────────
   router.get("/accounts", requireRole("admin", "ops"), async (req: Request, res: Response) => {
-    const tenantId = String(req.query.tenant || ROUTE_SITE_DEFAULT_TENANT).trim();
+    const tenantId = canonicalTenantId(req.query.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
     if (!requireTenantAccess(req, res, tenantId)) return;
     res.json({ ok: true, accounts: await accountStore.listAccounts(tenantId) });
   });
@@ -299,7 +304,7 @@ export function registerPaxSessionRoutes(
     const email = String(body.email || "").trim().toLowerCase();
     const password = String(body.password || "");
     if (!email || !password) return res.status(400).json({ ok: false, error: "missing_credentials" });
-    const tenantId = String(body.tenantId || body.tenant_id || "").trim() || ROUTE_SITE_DEFAULT_TENANT;
+    const tenantId = canonicalTenantId(body.tenantId || body.tenant_id) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
     if (!requireTenantAccess(req, res, tenantId)) return;
     const account = await accountStore.upsertAccount({
       email,

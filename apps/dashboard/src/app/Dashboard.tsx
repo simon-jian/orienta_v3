@@ -150,16 +150,25 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
 
       <div className="main" style={mainStyle}>
         {/* ── Dashboard tab ── */}
+        {/*
+          flexWrap + min()-clamped minWidth: on any viewport wide enough for
+          the original fixed minWidths (~900px+, true for every normal
+          desktop/tablet size), this renders pixel-identical to before —
+          min(220px, 100%) is just 220px once 100% >= 220px. Only on a
+          narrower viewport (previously: hard horizontal overflow, no way to
+          see the third column without scrolling sideways) do columns now
+          shrink-to-fit and wrap instead.
+        */}
         <div style={{
           display: tab === "dashboard" ? "flex" : "none",
-          flex: 1, minHeight: 0, overflow: "hidden", gap: 16, padding: 16, alignItems: "stretch",
+          flex: 1, minHeight: 0, overflow: "auto", flexWrap: "wrap", gap: 16, padding: 16, alignItems: "stretch",
         }}>
-          <div style={{ flex: 1, minWidth: 220, maxWidth: 380, height: "100%", minHeight: 400 }}>
+          <div style={{ flex: "1 1 260px", minWidth: "min(220px, 100%)", maxWidth: 380, height: "100%", minHeight: 400 }}>
             <SectionErrorBoundary label="出发航班板">
               <DeparturesFids airport={airport} />
             </SectionErrorBoundary>
           </div>
-          <div style={{ flex: 1.5, minWidth: 400, minHeight: 0, overflow: "auto", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: "1.5 1 320px", minWidth: "min(400px, 100%)", minHeight: 400, overflow: "auto", display: "flex", flexDirection: "column" }}>
             <DashboardTab
               passengers={passengersFilteredByGate}
               presence={presence}
@@ -173,7 +182,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
               flightsById={flightsById}
             />
           </div>
-          <div style={{ flex: 1, minWidth: 220, maxWidth: 380, height: "100%", minHeight: 400 }}>
+          <div style={{ flex: "1 1 260px", minWidth: "min(220px, 100%)", maxWidth: 380, height: "100%", minHeight: 400 }}>
             <SectionErrorBoundary label="到达航班板">
               <ArrivalsFids airport={airport} />
             </SectionErrorBoundary>
@@ -213,8 +222,11 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             title="Drag to resize"
           />
 
-          {/* Sidebar */}
-          <div className="sidebar" style={{ width: sidebarWidth, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", height: "100%" }}>
+          {/* Sidebar — clamped to the viewport so the drag-resizable width
+              (200-500px, desktop-oriented) can't force this row wider than
+              the screen on a narrow viewport; unchanged whenever the
+              viewport is wide enough to fit it anyway. */}
+          <div className="sidebar" style={{ width: `min(${sidebarWidth}px, 100%)`, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", height: "100%" }}>
             {selectedPax ? (
               <PassengerCard
                 passenger={selectedPax}
@@ -254,7 +266,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
 
           {/* Docked chat panel (desktop, map view) */}
           {dockChat && openConvPaxId && (
-            <div style={{ width: 320, flexShrink: 0, overflow: "hidden", height: "100%", minHeight: 0, padding: 10 }}>
+            <div style={{ width: "min(320px, 100%)", flexShrink: 0, overflow: "hidden", height: "100%", minHeight: 0, padding: 10 }}>
               <SectionErrorBoundary label="对话面板">
                 <ConversationPanel
                   mode="docked"

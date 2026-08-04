@@ -4,6 +4,39 @@
 > Updated: 2026-06-28 — **Multi-airport migration (Phase 0–5) landed**: most 🔴 items resolved via the airport/tenant registry, client/server config, and the route_site decomposition. Statuses below reflect the current code.  
 > Scope: `apps/dashboard` (server, `src/`, `public/`)  
 > Purpose: catalogue hardcoded config, demo data, and magic strings so follow-up refactors can be done incrementally.
+>
+> **⚠️ Partially stale as of 2026-08.** Everything below this notice predates a
+> full demo-data purge and a second production-readiness fix pass. In
+> particular: `src/data/airports/pek.ts`/`pek.demo.ts`, `pek.config.ts`,
+> `gateService.ts`, `PAX_LEGACY_AUTH`, `ORIENTA_ALLOW_DEMO`, `PEK_PREMIUM_IDS`,
+> and every static `public/pax*.html` page referenced below **no longer
+> exist** — airport/tenant config now loads from `config/airports/*.yaml` +
+> `config/tenants/*.yaml` at runtime (see `server/config/loadConfig.ts`), and
+> the only passenger-facing routes are the React `/pax` and `/pax/app`. Current
+> genuinely-still-hardcoded items (verified 2026-08):
+>
+> - `server/hub/wsHub.ts`'s pax-hello passenger creation, `server/routes/passengers.ts`'s
+>   POST body, and a few other write paths accept `flightId`/`gateId`/`tenantId`
+>   without case-normalizing — now fixed via `server/lib/canonicalize.ts`.
+> - `server/services/fidsService.ts`'s last-resort gate is now
+>   `airport.defaultGate` (config/airports/*.yaml), falling back to a generic
+>   `"UNKNOWN"` placeholder — no longer a bare hardcoded `"E19"`.
+> - `public/route_site/route-site-pek-engine.js` still has PEK-specific video
+>   segment basenames, CSV pacing, and gate-segment timing baked in — a second
+>   hub using `route_site` would need its own equivalent engine content, not
+>   just a config file. `paxAliases`/`paxRouteGates` (the TX1/TX2/TX3 demo
+>   mapping) were removed from every fallback default (2026-08) — they're now
+>   empty unless a deployment's own `config/<hub>.json` sets them.
+> - `server/routes/flight.ts`'s merged-video endpoint checks `!airport.video`
+>   (config-driven) rather than a hardcoded `"PEK"` string, but the merge
+>   pipeline itself (`server/services/videoMerge.ts`,
+>   `scripts/pek_video_worker.py`) still only reads PEK's specific CSV/clip
+>   paths — a second airport declaring `video:` config isn't fully wired yet.
+> - `server/hub/chat.ts`'s free-tier AI auto-reply no longer asserts a
+>   PEK-T3E-specific floor/level fact for the "security" keyword match.
+>
+> Everything else below (the 🔴/🟡/🟢 tables, Phase A–D checklist) reflects the
+> 2026-06-28 snapshot and should be read as history, not a current TODO list.
 
 ## 2026-06 status snapshot
 

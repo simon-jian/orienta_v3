@@ -6,6 +6,7 @@ import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "../lib/passwo
 import { PAX_ACCOUNT_CREDENTIALS, ROUTE_SITE_DEFAULT_TENANT } from "../config";
 import type { SqlDb } from "../db/sqlDb";
 import { logger } from "../lib/logger";
+import { canonicalTenantId } from "../lib/canonicalize";
 
 export type PaxAccountRecord = {
   email: string;
@@ -92,7 +93,7 @@ export class PaxAccountStore {
          updated_at = excluded.updated_at`,
       [
         email,
-        input.tenantId?.trim() || ROUTE_SITE_DEFAULT_TENANT,
+        canonicalTenantId(input.tenantId) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT),
         input.displayName?.trim() || email.split("@")[0] || "Premium Passenger",
         passwordHash,
         "premium",

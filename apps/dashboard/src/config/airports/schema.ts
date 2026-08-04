@@ -26,6 +26,7 @@ export const airportConfigSchema = z.object({
   name: z.string().min(1),
   terminals: z.array(z.object({ id: z.string(), label: z.string() })).default([]),
   defaultTerminal: z.string().default(""),
+  defaultGate: z.string().optional(),
   poi: z.object({
     mode: z.enum(["indoor_api", "static", "none"]),
     terminalQuery: z.string().optional(),

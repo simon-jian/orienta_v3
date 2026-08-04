@@ -4,12 +4,9 @@
   "terminal": "T3E",
   "poiTerminalQuery": "T3E",
   "defaultRouteGates": { "from": "E16", "to": "E19" },
-  "paxAliases": { "DA8X3": "TX1", "DB5K7": "TX3", "DC2N9": "TX2" },
-  "paxRouteGates": {
-    "TX1": { "from": "E16", "to": "E19" },
-    "TX2": { "from": "E18", "to": "E19" },
-    "TX3": { "from": "E17", "to": "E19" }
-  },
+  "_comment_paxAliases": "Optional: map a short, QR-friendly code to a real passenger id, and/or a fixed gate pair to a passenger id for testing — e.g. \"paxAliases\": { \"SHORTCODE\": \"realPassengerId\" }, \"paxRouteGates\": { \"realPassengerId\": { \"from\": \"E16\", \"to\": \"E19\" } }. Left empty here — no default alias mapping ships in production.",
+  "paxAliases": {},
+  "paxRouteGates": {},
   "video": {
     "gateCsv": "PEK_gate_timestamp_full_with_E24_E36.csv",
     "mergedFromCsvBasename": "PEK_gate_timestamp_merged.mp4",

@@ -19,7 +19,11 @@ function aiAgentReply(_passengerId: string, body: string, _history: ChatMessage[
     return "I can see your flight status. Please proceed directly to your gate now — do not stop. If you need staff assistance, contact the nearest Orienta counter.";
   }
   if (/security|安检|customs|海关/.test(lc)) {
-    return "For I→I transfers at T3E, you need to go through Transfer Security on Level 3 first, then proceed down to Level 2 for your departure gate.";
+    // Deliberately generic — this hub's specific transfer-security floor/level
+    // layout differs per airport and isn't config-driven yet (unlike the
+    // gate/POI/video config in config/airports/*.yaml), so this canned reply
+    // must not assert a floor-level fact that's only true for one terminal.
+    return "Follow the transfer signage to Transfer Security, then continue on to your departure gate. Your route has been updated on your map — reply if you need more help.";
   }
   if (/wheelchair|轮椅|accessible|无障碍/.test(lc)) {
     return "Accessibility assistance is available. Please proceed to the nearest staff counter or reply “help” to alert ground staff.";

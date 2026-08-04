@@ -22,6 +22,7 @@ import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import type { AuditLog } from "../lib/auditLog";
 import { PushSubscriptionStore, type PushSub } from "../passengers/PushSubscriptionStore";
 import { logger } from "../lib/logger";
+import { canonicalTenantId } from "../lib/canonicalize";
 
 // ─── VAPID helpers ────────────────────────────────────────────────────────────
 
@@ -196,7 +197,7 @@ export function registerPushRoutes(
 
   // ── Admin presence poll ───────────────────────────────────────────────────────
   router.get("/admin-presence", requireAdmin, async (req: Request, res: Response) => {
-    const tenantId = String(req.query.tenant || ROUTE_SITE_DEFAULT_TENANT).trim();
+    const tenantId = canonicalTenantId(req.query.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
     if (!requireTenantAccess(req, res, tenantId)) return;
     // listOnlineGlobal (not listOnline) so this matches WS hello / GET
     // /api/passengers — otherwise this endpoint under-reports whoever is

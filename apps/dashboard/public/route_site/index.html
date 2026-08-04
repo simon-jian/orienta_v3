@@ -5,7 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"/>
 <title>People & Luggage Visualizer</title>
 <script src="../orienta-base.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css"/>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css"
+  integrity="sha256-tGpYjsT520+CTqFasreL2dHfsXFyp4XGniP6iVPbQ38=" crossorigin="anonymous"/>
 <link rel="stylesheet" href="route-site.css"/>
 </head>
 <body>
@@ -95,7 +96,33 @@
 
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"></script>
+<!--
+  integrity/crossorigin (SRI): the browser verifies this file's hash before
+  executing it — a compromised/tampered CDN response is refused rather than
+  silently run. Pinned to the exact ol@v8.2.0 build; regenerate both the
+  version and hash together if this is ever bumped:
+    curl -s https://cdn.jsdelivr.net/npm/ol@vX.Y.Z/dist/ol.js | openssl dgst -sha256 -binary | openssl base64 -A
+-->
+<script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"
+  integrity="sha256-rl5IelK3/ccWfc6VPzo5aNMFBTBR44B1HYvbFU2bum0=" crossorigin="anonymous"></script>
+<script>
+  // Fallback: SRI mismatch, CDN outage, or a network/ad-blocker issue can all
+  // make the ol.js <script> tag execute nothing — every later script here
+  // assumes `ol` exists and would otherwise fail with a raw, user-invisible
+  // console error instead of a clear message.
+  if (typeof ol === "undefined") {
+    document.addEventListener("DOMContentLoaded", function () {
+      var banner = document.createElement("div");
+      banner.setAttribute("role", "alert");
+      banner.style.cssText =
+        "position:fixed;top:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fed7aa;" +
+        "font:13px system-ui,sans-serif;padding:8px 12px;text-align:center;";
+      banner.textContent =
+        "地图库加载失败，请检查网络后刷新页面。 Map library failed to load — check your network and reload.";
+      document.body.insertBefore(banner, document.body.firstChild);
+    });
+  }
+</script>
 <script src="../orienta-metrics.js"></script>
 <script src="orienta-metrics-route-site.js"></script>
 <script src="config-bootstrap.js"></script>

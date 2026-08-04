@@ -513,7 +513,7 @@ async function bootstrap(): Promise<void> {
 
   // Start background pruning only after tables exist. The disposer is
   // captured (not discarded) so `shutdown()` below can clear the interval.
-  stopMaintenanceJobs = startMaintenanceJobs({ registry, chatRepo, metricsRepo, auditLog });
+  stopMaintenanceJobs = startMaintenanceJobs({ registry, chatRepo, metricsRepo, auditLog, hubStore: store });
 
   await loadPoiCache();
   server.listen(PORT, "0.0.0.0", () => {

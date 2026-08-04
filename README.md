@@ -205,4 +205,49 @@ npm run build:server
 PORT=5174 npm start
 ```
 
+**This alone does not restart the process if it crashes or the host reboots.**
+Docker (above) already has this via `restart: unless-stopped` in
+`docker-compose.yml` — outside Docker, put a process supervisor in front of
+`npm start` (equivalently `node dist-server/server/server.js`). Two common
+options:
+
+<details>
+<summary>systemd (Linux)</summary>
+
+```ini
+# /etc/systemd/system/orienta-dashboard.service
+[Unit]
+Description=Orienta dashboard
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/orienta_v3/apps/dashboard
+EnvironmentFile=/opt/orienta_v3/apps/dashboard/.env
+ExecStart=/usr/bin/node dist-server/server/server.js
+Restart=always
+RestartSec=2
+User=orienta
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now orienta-dashboard
+```
+</details>
+
+<details>
+<summary>PM2 (Node-native, cross-platform)</summary>
+
+```bash
+npm install -g pm2
+cd apps/dashboard
+pm2 start dist-server/server/server.js --name orienta-dashboard
+pm2 save
+pm2 startup   # prints the command to auto-start pm2 itself on boot
+```
+</details>
+
 See `PASSENGER_PRODUCTION_WORKLOG.md` for production readiness checklist.

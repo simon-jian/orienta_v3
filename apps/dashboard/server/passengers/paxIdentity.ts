@@ -7,6 +7,7 @@ import {
   verifyPaxSessionToken,
   type PaxSessionClaims,
 } from "./paxSessionToken";
+import { canonicalTenantId } from "../lib/canonicalize";
 
 export type PaxResolvedIdentity = {
   tenantId: string;
@@ -28,7 +29,10 @@ type PaxIdentityInput = {
 };
 
 function readTenantId(input: PaxIdentityInput): string {
-  return String(input.tenantId || input.tenant_id || ROUTE_SITE_DEFAULT_TENANT).trim();
+  // Canonicalized so a body-supplied "AirChina" against a token's
+  // already-canonical "airchina" claim doesn't fail the mismatch check
+  // below purely over casing.
+  return canonicalTenantId(input.tenantId || input.tenant_id) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
 }
 
 function readPassengerId(input: PaxIdentityInput): string {
@@ -55,7 +59,7 @@ export async function resolvePaxIdentity(
     return { ok: false, failure: { status: 401, error: "session_invalid_or_expired" } };
   }
 
-  const tenantId = String(claims.tenantId || "");
+  const tenantId = canonicalTenantId(claims.tenantId);
   const passengerId = String(claims.sub || "").trim();
   if (!tenantId || !passengerId) {
     return { ok: false, failure: { status: 401, error: "session_invalid" } };

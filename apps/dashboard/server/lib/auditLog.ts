@@ -35,6 +35,9 @@ export class AuditLog {
     await this.db.exec(
       "CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log (created_at DESC);",
     );
+    await this.db.exec(
+      "CREATE INDEX IF NOT EXISTS idx_admin_audit_passenger ON admin_audit_log (tenant_id, passenger_id, created_at DESC);",
+    );
   }
 
   /** Removes audit rows older than maxAgeMs. Returns the number of rows deleted. */
@@ -42,6 +45,19 @@ export class AuditLog {
     const cutoff = Date.now() - maxAgeMs;
     const r = await this.db.run("DELETE FROM admin_audit_log WHERE created_at < ?", [cutoff]);
     return r.changes;
+  }
+
+  /** Audit entries recorded against one passenger (passenger_create/update/delete/session events). Used by the data-export endpoint. */
+  async listForPassenger(tenantId: string, passengerId: string, limit = 200): Promise<
+    { actorEmail: string; action: string; detail: string | null; createdAt: number }[]
+  > {
+    const rows = await this.db.all<{ actor_email: string; action: string; detail: string | null; created_at: number }>(
+      `SELECT actor_email, action, detail, created_at FROM admin_audit_log
+       WHERE tenant_id = ? AND passenger_id = ?
+       ORDER BY created_at DESC, id DESC LIMIT ?`,
+      [tenantId, passengerId, limit],
+    );
+    return rows.map((r) => ({ actorEmail: r.actor_email, action: r.action, detail: r.detail, createdAt: r.created_at }));
   }
 
   async record(event: AuditEvent): Promise<void> {

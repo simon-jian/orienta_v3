@@ -9,9 +9,9 @@
  * validates iss/aud when explicitly asked to, so `verifyAdminToken` MUST always
  * pass them. Do not remove the `issuer`/`audience` options below.
  */
-import { jwtVerify, type JWTPayload } from "jose";
-import { JWT_SECRET } from "../config";
+import type { JWTPayload } from "jose";
 import { isAdminTokenRevoked } from "./adminSessionRevocation";
+import { verifyWithRotatingSecret } from "./jwtRotation";
 
 export const ADMIN_COOKIE_NAME = "orienta_admin_token";
 export const ADMIN_JWT_TTL_S = 60 * 60 * 8;
@@ -57,8 +57,10 @@ export function adminAllowedForTenant(payload: JWTPayload, tenantId: string): bo
 export async function verifyAdminToken(token: string): Promise<JWTPayload | null> {
   if (!token) return null;
   try {
-    const secret = new TextEncoder().encode(JWT_SECRET);
-    const { payload } = await jwtVerify(token, secret, {
+    // Tries JWT_SECRET, then any JWT_SECRET_PREVIOUS values — lets an admin
+    // token signed before a JWT_SECRET rotation keep working until it
+    // naturally expires. See config.ts JWT_SECRET_PREVIOUS.
+    const payload = await verifyWithRotatingSecret(token, {
       issuer: ADMIN_TOKEN_AUDIENCE,
       audience: ADMIN_TOKEN_AUDIENCE,
     });

@@ -55,6 +55,13 @@ class SqliteDb implements SqlDb {
     this.db = new Database(dbPath);
     this.db.pragma("journal_mode = WAL");
     this.db.pragma("foreign_keys = ON");
+    // Without this, a write that can't immediately acquire SQLite's single
+    // writer lock (another concurrent write, or WAL checkpointing) throws
+    // SQLITE_BUSY immediately instead of waiting — under this app's own
+    // concurrent load (multiple in-flight requests hitting the same
+    // connection) that surfaces as a spurious 500 rather than the brief,
+    // self-resolving delay it actually is.
+    this.db.pragma("busy_timeout = 5000");
   }
 
   async exec(sql: string): Promise<void> {

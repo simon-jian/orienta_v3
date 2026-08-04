@@ -26,6 +26,7 @@ import type { PaxSessionClaims } from "../passengers/paxSessionToken";
 import { ADMIN_ROLES, adminAllowedForTenant, adminPayloadFromCookieHeader } from "../auth/adminAuth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import { logger } from "../lib/logger";
+import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 
 type Role = "admin" | "pax";
 
@@ -184,7 +185,7 @@ export function attachWsHub(
               return;
             }
 
-            tenantId = typeof msg.tenantId === "string" ? msg.tenantId : null;
+            tenantId = typeof msg.tenantId === "string" ? canonicalTenantId(msg.tenantId) : null;
             if (!tenantId) { ws.close(1008, "missing tenant"); return; }
             if (!adminAllowedForTenant(adminPayload, tenantId)) {
               ws.close(1008, "tenant_not_allowed");
@@ -232,7 +233,7 @@ export function attachWsHub(
             const key = HubStore.key(tenantId, passengerId);
             const wasOnline = store.online.has(key);
 
-            store.paxMeta.set(key, {
+            store.setPaxMeta(tenantId, passengerId, {
               displayName: typeof msg.displayName === "string" ? msg.displayName : undefined,
               plan,
             });
@@ -241,8 +242,8 @@ export function attachWsHub(
             // flightId / gateId come from URL params forwarded in the hello.
             // If missing, we still create a shell record; admin can fill in later.
             if (registry) {
-              const flightId = String(msg.flightId || msg.dep || msg.flight || "").trim();
-              const gateId   = String(msg.gateId   || msg.gateTo || "").trim();
+              const flightId = canonicalFlightId(msg.flightId || msg.dep || msg.flight);
+              const gateId   = canonicalGateId(msg.gateId || msg.gateTo);
               if (flightId && gateId) {
                 await registry.getOrCreate({
                   id: passengerId, tenantId,
@@ -252,7 +253,7 @@ export function attachWsHub(
                   needsWheelchair: !!msg.needsWheelchair,
                   plan:            plan === "premium" ? "premium" : "free",
                   flightId, gateId,
-                  inboundFlightId: String(msg.inboundFlightId || msg.arr || "").trim() || undefined,
+                  inboundFlightId: canonicalFlightId(msg.inboundFlightId || msg.arr) || undefined,
                   inboundFrom:     String(msg.inboundFrom     || "").trim() || undefined,
                   outboundTo:      String(msg.outboundTo      || "").trim() || undefined,
                   source: "qr_scan",

@@ -4,6 +4,20 @@
 > Updated: 2026-06-07 — **PEK-only scope** (SFO airport demo removed)  
 > Scope: `orienta_v3` standalone repo (`apps/dashboard` + `pdr_airchina`)  
 > Companion docs: [`HARDCODED_VALUES.md`](./HARDCODED_VALUES.md), [`PASSENGER_PRODUCTION_WORKLOG.md`](./PASSENGER_PRODUCTION_WORKLOG.md), [`README.md`](./README.md)
+>
+> **⚠️ Largely superseded as of 2026-08.** Multi-airport Phases 0–5 (Part 2
+> below) all shipped. Since this was last updated, a full demo-data purge
+> removed `PAX_LEGACY_AUTH`, `ORIENTA_ALLOW_DEMO`, `PEK_PREMIUM_IDS`, every
+> static `public/pax*.html` page, and the `src/data/airports/pek*.ts` /
+> `gateService.ts` files this doc references — airport/tenant config is now
+> runtime YAML (`config/airports/*.yaml`, loaded by
+> `server/config/loadConfig.ts`), not a TypeScript module. A subsequent
+> two-round security/reliability audit fixed essentially everything in the
+> "Critical gaps" table below (health/readiness split, SQLite migrations,
+> JWT/session revocation, RBAC + tenant scoping, CI, Postgres test coverage,
+> and more). Treat everything below this notice as a historical record of the
+> original plan, not a current gap list — `HARDCODED_VALUES.md`'s 2026-08
+> notice has the current, verified state of what's still hardcoded.
 
 ---
 

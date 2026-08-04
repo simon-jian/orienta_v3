@@ -6,6 +6,7 @@
  */
 import { FLIGHTAWARE_API_KEY } from "../config";
 import { logger } from "../lib/logger";
+import { canonicalFlightId } from "../lib/canonicalize";
 
 export interface FlightResult {
   flight_iata: string;
@@ -23,7 +24,7 @@ export interface FlightResult {
 }
 
 export function normalizeFlight(s: string): string {
-  return (s || "").trim().toUpperCase().replace(/\s+/g, "");
+  return canonicalFlightId(s);
 }
 
 /** Outbound HTTP timeout. FlightAware is a third party; never let it hang a request. */

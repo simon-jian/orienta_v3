@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, afterEach, vi } from "vitest";
 
 import { registerAirport } from "../../config/airports/registry";
 import type { AirportDefinition } from "../../config/airports/types";
@@ -62,5 +62,64 @@ describe("PoiService — PEK (indoor_api) dispatch", () => {
 
   it("gate coords are empty before any POI fetch", () => {
     expect(getGateCoords("PEK")).toEqual({});
+  });
+});
+
+// Regression coverage for the actual indoor_api ingestion pipeline
+// (pekPoiCoords.ts) — the tests above only ever exercise the "before any
+// fetch happened" fallback state, never what loadGates()/getGateCoords()
+// return once a real POI response has actually been parsed.
+describe("PoiService — PEK (indoor_api) after a successful POI fetch", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it("loadGates('PEK') parses real GeoJSON-shaped features into gate coordinates", async () => {
+    vi.resetModules();
+    const geoFeatures = [
+      {
+        properties: { category: "gate", name: "E32", floor: "F3" },
+        geometry: { coordinates: [116.61, 40.0751] }, // [lng, lat]
+      },
+      {
+        properties: { category: "gate", name: "Gate E25", floor: "F3" },
+        geometry: { coordinates: [116.605, 40.0745] },
+      },
+      // Not a gate — must be ignored, not crash the parse.
+      { properties: { category: "shop", name: "Duty Free" }, geometry: { coordinates: [116.606, 40.0746] } },
+    ];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: true, json: async () => ({ features: geoFeatures }) }),
+    );
+
+    const registryMod = await import("../../config/airports/registry");
+    const { loadGates: freshLoadGates, getGateCoords: freshGetGateCoords } = await import("./PoiService");
+    registryMod.registerAirport(PEK_AIRPORT);
+
+    const { gates, source } = await freshLoadGates("PEK");
+    expect(source).toBe("pek_t3e");
+    const byId = new Map(gates.map((g) => [g.id, g.coordinate]));
+    expect(byId.get("E32")).toEqual({ lat: 40.0751, lng: 116.61 });
+    expect(byId.get("E25")).toEqual({ lat: 40.0745, lng: 116.605 }); // "Gate E25" normalized to "E25"
+    expect(byId.has("Duty Free")).toBe(false); // non-gate categories excluded
+
+    expect(freshGetGateCoords("PEK")).toEqual({
+      E32: { lat: 40.0751, lng: 116.61 },
+      E25: { lat: 40.0745, lng: 116.605 },
+    });
+  });
+
+  it("a failed POI fetch leaves gates empty instead of throwing", async () => {
+    vi.resetModules();
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+
+    const registryMod = await import("../../config/airports/registry");
+    const { loadGates: freshLoadGates } = await import("./PoiService");
+    registryMod.registerAirport(PEK_AIRPORT);
+
+    const { gates } = await freshLoadGates("PEK");
+    expect(gates).toEqual([]);
   });
 });

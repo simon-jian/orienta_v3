@@ -444,17 +444,18 @@ function orientaApplyPekGateClipFromQuery_(rows) {
     var fromG = orientaNormalizeGate_(sp.get('from') || sp.get('origin') || sp.get('gateFrom') || '');
     var toG = orientaNormalizeGate_(sp.get('to') || sp.get('dest') || sp.get('destination') || sp.get('gateTo') || '');
     var rawPax = String(sp.get('pax') || sp.get('pid') || sp.get('pix') || '').trim();
-    var paxAlias = orientaRouteSiteCfg_().paxAliases || { DA8X3: "TX1", DB5K7: "TX3", DC2N9: "TX2" };
+    // paxAliases/paxRouteGates are deployment-specific (config/<hub>.json,
+    // loaded async by config-bootstrap.js) — no baked-in default mapping
+    // here. A hardcoded fallback would apply one tenant's specific
+    // passenger-alias→gate-pair mapping to every deployment that hasn't
+    // (yet) gotten its own config/<hub>.json fetched.
+    var paxAlias = orientaRouteSiteCfg_().paxAliases || {};
     var pax = paxAlias[(rawPax || '').toUpperCase()] || rawPax;
-    var demoGateByPax = orientaRouteSiteCfg_().paxRouteGates || {
-      TX1: { from: 'E16', to: 'E19' },
-      TX2: { from: 'E18', to: 'E19' },
-      TX3: { from: 'E17', to: 'E19' }
-    };
-    var demoPair = demoGateByPax[pax];
-    if (demoPair) {
-      fromG = orientaNormalizeGate_(demoPair.from);
-      toG = orientaNormalizeGate_(demoPair.to);
+    var gateByPax = orientaRouteSiteCfg_().paxRouteGates || {};
+    var pair = gateByPax[pax];
+    if (pair) {
+      fromG = orientaNormalizeGate_(pair.from);
+      toG = orientaNormalizeGate_(pair.to);
     }
     var iFrom, iTo;
     if (!fromG || !toG) {

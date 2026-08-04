@@ -6,6 +6,7 @@ import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import type { ChatRepository } from "../hub/ChatRepository";
 import type { MetricsRepository } from "../lib/MetricsRepository";
 import type { AuditLog } from "../lib/auditLog";
+import type { HubStore } from "../hub/HubStore";
 import { logger } from "../lib/logger";
 
 const CLEANUP_INTERVAL_MS = 60 * 60_000;
@@ -37,6 +38,7 @@ export function startMaintenanceJobs(input: {
   chatRepo: ChatRepository;
   metricsRepo?: MetricsRepository;
   auditLog?: AuditLog;
+  hubStore?: HubStore;
 }): () => void {
   const run = async () => {
     const removedPassengers = await runStep("temp_passengers", () =>
@@ -49,12 +51,24 @@ export function startMaintenanceJobs(input: {
     const removedAuditRows = input.auditLog
       ? await runStep("audit_log", () => input.auditLog!.pruneOlderThan(AUDIT_LOG_RETENTION_MS))
       : 0;
-    if (removedPassengers > 0 || removedChats > 0 || removedMetrics > 0 || removedAuditRows > 0) {
+    let evictedIdleCaches = 0;
+    if (input.hubStore) {
+      try {
+        evictedIdleCaches = input.hubStore.pruneIdleCaches();
+      } catch (err) {
+        logger.error("maintenance_step_failed", {
+          step: "idle_hub_caches",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    if (removedPassengers > 0 || removedChats > 0 || removedMetrics > 0 || removedAuditRows > 0 || evictedIdleCaches > 0) {
       logger.info("maintenance_pruned", {
         passengers: removedPassengers,
         chatRows: removedChats,
         metricsRows: removedMetrics,
         auditRows: removedAuditRows,
+        idleHubCacheEntries: evictedIdleCaches,
       });
     }
   };
