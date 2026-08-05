@@ -365,7 +365,13 @@
   }
 
   async function startPdr() {
-    if (st.active) return;
+    // Also bail out while a reconnect is pending (st.active is already false
+    // by then — onclose sets it before scheduling the reconnect timer) —
+    // otherwise a tap on "start" during that window created a brand-new
+    // backend session via a fresh POST /api/session while the old timer was
+    // still going to fire connectPdrSocket() for the previous session,
+    // leaving two overlapping sessions/sockets running at once.
+    if (st.active || st.reconnectTimer != null) return;
     var anchor = resolvePdrAnchor();
     if (!anchor) {
       setStatus(
@@ -481,15 +487,19 @@
       setPdrButtonState("off");
     };
     ws.onclose = function () {
+      // A stale/superseded socket firing close (e.g. a delayed close event
+      // for the OLD socket arriving after a reconnect already replaced
+      // st.socket with a new, already-open one) must not touch any state at
+      // all — checked first, before any side effect below, since a live
+      // connection's "active"/sensors/UI state must never be clobbered by a
+      // close event belonging to a socket that isn't current anymore.
+      if (st.socket !== ws) return;
       clearMotionWarnTimer();
       st.active = false;
       window.__ORIENTA_PDR__.active = false;
       st.motionEvents = 0;
       detachSensorListeners();
       setPdrButtonState("off");
-      // A stale/superseded socket firing close (e.g. after a fresh reconnect
-      // already replaced st.socket) must not stomp on the new connection.
-      if (st.socket !== ws) return;
       st.socket = null;
       if (st.stopping) {
         st.stopping = false;
@@ -588,7 +598,11 @@
   } catch (eVis) {}
 
   function togglePdr() {
-    if (st.active) stopPdr();
+    // Treat "reconnect pending" the same as "active" for the toggle: the
+    // button's only other option (startPdr) is now a deliberate no-op during
+    // that window (see its comment), so without this a tap would otherwise
+    // silently do nothing instead of letting the user cancel the retry.
+    if (st.active || st.reconnectTimer != null) stopPdr();
     else startPdr().catch(function (e) {
       setStatus("启动失败: " + (e && e.message ? e.message : String(e)));
     });
