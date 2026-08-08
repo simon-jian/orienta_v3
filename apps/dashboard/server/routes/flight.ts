@@ -7,7 +7,6 @@
 import type { Router, Request, Response, RequestHandler, NextFunction } from "express";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
 import { type FlightResult, normalizeFlight, fetchFlightAware } from "../services/flightAware";
-import { requestMerge, type MergeSpec } from "../services/videoMerge";
 import { getAirport } from "../../src/config/airports/registry";
 import { logger } from "../lib/logger";
 
@@ -175,72 +174,18 @@ export function registerLegacyFlightFallback(router: Router): void {
   router.get("/:mode", (_req, res) => res.json({ ok: true, data: [] }));
 }
 
-// ─── PEK route-site merged video ─────────────────────────────────────────────
-
-/** Gate tokens end up in a filesystem path (mergeOutName); only allow bare gate codes. */
-const GATE_TOKEN_RE = /^[A-Z0-9]{1,8}$/;
-
-/**
- * Normalize a user-supplied gate token, then whitelist it. Returns "" for
- * anything that isn't a plain gate code (e.g. path-traversal attempts like
- * "../../etc") so callers treat it as missing rather than passing it through.
- */
-function normalizeGateToken(raw: string): string {
-  const token = String(raw || "").trim().toUpperCase().replace(/\s+/g, "").replace(/^GATE_/, "");
-  return GATE_TOKEN_RE.test(token) ? token : "";
-}
-
-/**
- * Merged route-video handler, airport-aware (Multi-airport Phase 4).
- *
- * `airportId` is undefined for the legacy `/pek-merged-video` alias (→ PEK) and
- * set from the path param for the generalized `/:airportId/merged-video`.
- * Gated on the airport having `video` config at all (config/airports/*.yaml)
- * rather than a hardcoded "PEK" comparison — but note the merge pipeline
- * itself (server/services/videoMerge.ts, scripts/pek_video_worker.py) still
- * only actually reads PEK's specific CSV/source-clip paths today, so a
- * second airport declaring `video:` config isn't fully supported yet either;
- * this at least stops rejecting on a literal id string instead of the real,
- * config-driven signal for "does this airport have video merge configured".
- */
-async function handleMergedVideo(req: Request, res: Response, airportId?: string): Promise<Response> {
-  const requested = String(airportId || "PEK").toUpperCase();
-  const def = getAirport(requested);
-  if (!def) return res.status(404).json({ ok: false, error: "unknown_airport", airportId: requested });
-  if (!def.video) {
-    return res.status(501).json({ ok: false, error: "merge_not_supported_for_airport", airportId: def.id });
-  }
-
-  const from    = normalizeGateToken(String(req.query.from || req.query.gateFrom || req.query.origin || ""));
-  const to      = normalizeGateToken(String(req.query.to   || req.query.gateTo   || req.query.destination || req.query.dest || ""));
-  const fromIdx = parseInt(String(req.query.fromIdx ?? req.query.from_index ?? ""), 10);
-  const toIdx   = parseInt(String(req.query.toIdx   ?? req.query.to_index   ?? ""), 10);
-  const useIdx  = Number.isFinite(fromIdx) && Number.isFinite(toIdx) && fromIdx >= 0 && toIdx > fromIdx;
-  if (!useIdx && (!from || !to)) return res.status(400).json({ ok: false, error: "missing_from_or_to_gate_or_index" });
-
-  const spec: MergeSpec = useIdx
-    ? { mode: "index", fromIdx, toIdx }
-    : { mode: "gate", from, to };
-
-  try {
-    // CPU work runs in the worker (Redis) or a non-blocking child process.
-    const result = await requestMerge(spec);
-    return res.json({ ok: true, ...result });
-  } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    const error = message === "merge_timeout" ? "merge_timeout" : "merge_failed";
-    // Log the ffmpeg/python stderr server-side; never forward it to the client
-    // (it can contain internal filesystem paths).
-    logger.warn("merged_video_failed", { error, detail: message.slice(-1200) });
-    return res.status(message === "merge_timeout" ? 504 : 500).json({ ok: false, error });
-  }
-}
-
 export function registerOrientaRoutes(router: Router): void {
-  // Generalized, airport-scoped endpoint (Multi-airport Phase 4).
-  router.get("/:airportId/merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, req.params.airportId));
-  // Legacy PEK alias (kept for existing route_site links / QR codes).
-  router.get("/pek-merged-video", (req: Request, res: Response) => handleMergedVideo(req, res, "PEK"));
+  // Video route navigation was retired (2026-08) — map + PDR live elsewhere.
+  // Keep a clear 410 so old QR codes / bookmarks fail loudly instead of 404ing.
+  const gone = (_req: Request, res: Response) => {
+    res.status(410).json({
+      ok: false,
+      error: "video_navigation_retired",
+      message: "Merged route video is no longer served. Use /pax/app for map + PDR navigation.",
+    });
+  };
+  router.get("/:airportId/merged-video", gone);
+  router.get("/pek-merged-video", gone);
 
   router.get("/route-site-map-embed", (_req: Request, res: Response) => {
     const e = (k: string) => String(process.env[k] || "").trim();

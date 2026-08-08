@@ -162,3 +162,116 @@ async function fetchFlightAwareUncached(flightIdent: string): Promise<FlightResu
     status: str(f.status, "Scheduled"),
   };
 }
+
+/** One row on an airport departures/arrivals board. */
+export type AirportBoardFlight = {
+  flight: string;
+  origin: string;
+  destination: string;
+  scheduledTime: string;
+  status: string;
+  gate: string;
+};
+
+export type AirportBoardKind = "departures" | "arrivals";
+
+const BOARD_TIMEOUT_MS = 10_000;
+
+function strField(v: unknown, fallback = ""): string {
+  return typeof v === "string" && v ? v : fallback;
+}
+
+function iataOf(obj: unknown): string {
+  if (!obj || typeof obj !== "object") return "";
+  const o = obj as Record<string, unknown>;
+  if (typeof o.code_iata === "string" && o.code_iata) return o.code_iata;
+  return strField(o.code);
+}
+
+function localClock(iso: string | null, tz: unknown): string {
+  if (!iso) return "—";
+  try {
+    return new Date(iso).toLocaleTimeString("en-US", {
+      timeZone: typeof tz === "string" && tz ? tz : "UTC",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  } catch {
+    return iso.slice(11, 16) || "—";
+  }
+}
+
+function mapBoardFlight(raw: Record<string, unknown>, kind: AirportBoardKind): AirportBoardFlight {
+  const origin = (raw.origin as Record<string, unknown>) || {};
+  const dest = (raw.destination as Record<string, unknown>) || {};
+  const flight =
+    (typeof raw.operator_iata === "string" && raw.flight_number != null
+      ? `${raw.operator_iata}${raw.flight_number}`
+      : "") ||
+    strField(raw.ident_iata) ||
+    strField(raw.ident) ||
+    "—";
+
+  const depIso =
+    strField(raw.scheduled_out) || strField(raw.estimated_out) || strField(raw.scheduled_off) || null;
+  const arrIso =
+    strField(raw.scheduled_in) || strField(raw.estimated_in) || strField(raw.scheduled_on) || null;
+  const scheduledIso = kind === "departures" ? depIso : arrIso;
+  const tz = kind === "departures" ? origin.timezone : dest.timezone;
+  const gate =
+    kind === "departures"
+      ? strField(raw.gate_origin) || strField(raw.terminal_origin)
+      : strField(raw.gate_destination) || strField(raw.terminal_destination);
+
+  return {
+    flight,
+    origin: iataOf(origin),
+    destination: iataOf(dest),
+    scheduledTime: localClock(scheduledIso, tz),
+    status: strField(raw.status, "Scheduled"),
+    gate: gate || "—",
+  };
+}
+
+/**
+ * Airport FIDS board via AeroAPI scheduled_departures / scheduled_arrivals.
+ * `airportId` should be ICAO when possible (ZBAA); IATA (PEK) also works.
+ */
+export async function fetchAirportBoard(
+  airportId: string,
+  kind: AirportBoardKind,
+): Promise<AirportBoardFlight[]> {
+  if (!FLIGHTAWARE_API_KEY) throw new Error("FLIGHTAWARE_API_KEY not configured");
+  if (circuitIsOpen()) throw new Error("FlightAware circuit open: too many recent failures");
+
+  const path =
+    kind === "departures"
+      ? "scheduled_departures"
+      : "scheduled_arrivals";
+  const params = new URLSearchParams({ max_pages: "1", type: "Airline" });
+  const url =
+    `https://aeroapi.flightaware.com/aeroapi/airports/${encodeURIComponent(airportId)}/flights/${path}?${params}`;
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "x-apikey": FLIGHTAWARE_API_KEY, Accept: "application/json" },
+      signal: AbortSignal.timeout(BOARD_TIMEOUT_MS),
+    });
+  } catch (err) {
+    recordFailure();
+    throw err;
+  }
+  if (!res.ok) {
+    recordFailure();
+    const err = await res.text();
+    throw new Error(`FlightAware ${res.status}: ${err.slice(0, 200)}`);
+  }
+
+  const j = (await res.json()) as Record<string, unknown>;
+  const key = kind === "departures" ? "scheduled_departures" : "scheduled_arrivals";
+  const list = Array.isArray(j[key]) ? (j[key] as Record<string, unknown>[]) : [];
+  recordSuccess();
+  return list.map((f) => mapBoardFlight(f, kind));
+}

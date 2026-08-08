@@ -22,14 +22,10 @@ RUN npm prune --omit=dev
 FROM node:20-bookworm-slim AS run
 WORKDIR /app
 
-# ffmpeg + python3: needed for the single-machine (no REDIS_URL) video-merge
-# fallback, which spawns scripts/concat_pek_video_from_csv.py directly from
-# the web process (server/services/videoMerge.ts runLocal). Deployments that
-# run the `scale` Compose profile do the same work in a separate worker
-# container instead, but this image must still support the single-container
-# default described in the README.
+# sqlite3 CLI: used by the documented online `.backup` runbook (README).
+# wget: Docker HEALTHCHECK against /livez.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      wget ffmpeg python3 \
+      wget sqlite3 \
     && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
@@ -40,14 +36,11 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./package.json
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/dist-server ./dist-server
-# Server-side source of truth for route-site video/CSV assets (distinct from
-# dist/route_site, which is the browser-facing copy Vite already produced).
 COPY apps/dashboard/public ./public
 # Airport/tenant YAML (server/config/loadConfig.ts reads ./config by default
 # via AIRPORT_CONFIG_DIR) — without this the server boots with zero airports.
 COPY apps/dashboard/config ./config
-# server/paths.ts resolves this two levels above the app root (repo-root
-# scripts/), matching the layout outside Docker.
+# Ops helpers (e.g. scripts/backup-sqlite.sh).
 COPY scripts /scripts
 
 RUN mkdir -p /app/data \

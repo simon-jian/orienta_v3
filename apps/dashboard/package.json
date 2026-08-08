@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite",
     "dev:server": "npm run build:server && PORT=5175 node --env-file=.env dist-server/server/server.js",
-    "pdr:dev": "cd ../../pdr_airchina && PORT=10000 python3 run.py",
+    "pdr:dev": "cd ../../../pedestrian_dead_reckoning && uvicorn backend.app:app --reload --port 8000",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "start": "node --env-file=.env dist-server/server/server.js",

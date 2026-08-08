@@ -12,7 +12,13 @@
 > and every static `public/pax*.html` page referenced below **no longer
 > exist** — airport/tenant config now loads from `config/airports/*.yaml` +
 > `config/tenants/*.yaml` at runtime (see `server/config/loadConfig.ts`), and
-> the only passenger-facing routes are the React `/pax` and `/pax/app`. Current
+> the only passenger-facing routes are the React `/pax` and `/pax/app`.
+> `pdr_airchina/` was removed — PDR lives in sibling `pedestrian_dead_reckoning`.
+> Admin FIDS boards are live via `GET /api/fids/*` + FlightAware when
+> `FLIGHTAWARE_API_KEY` is set (client stub removed).
+> **Video route navigation was removed (2026-08):** mp4 assets, merge worker,
+> `/api/orienta/*merged-video`, and the old `route_site` player are gone;
+> `/route_site` is a retirement stub pointing at `/pax/app`. Current
 > genuinely-still-hardcoded items (verified 2026-08):
 >
 > - `server/hub/wsHub.ts`'s pax-hello passenger creation, `server/routes/passengers.ts`'s
@@ -21,17 +27,6 @@
 > - `server/services/fidsService.ts`'s last-resort gate is now
 >   `airport.defaultGate` (config/airports/*.yaml), falling back to a generic
 >   `"UNKNOWN"` placeholder — no longer a bare hardcoded `"E19"`.
-> - `public/route_site/route-site-pek-engine.js` still has PEK-specific video
->   segment basenames, CSV pacing, and gate-segment timing baked in — a second
->   hub using `route_site` would need its own equivalent engine content, not
->   just a config file. `paxAliases`/`paxRouteGates` (the TX1/TX2/TX3 demo
->   mapping) were removed from every fallback default (2026-08) — they're now
->   empty unless a deployment's own `config/<hub>.json` sets them.
-> - `server/routes/flight.ts`'s merged-video endpoint checks `!airport.video`
->   (config-driven) rather than a hardcoded `"PEK"` string, but the merge
->   pipeline itself (`server/services/videoMerge.ts`,
->   `scripts/pek_video_worker.py`) still only reads PEK's specific CSV/clip
->   paths — a second airport declaring `video:` config isn't fully wired yet.
 > - `server/hub/chat.ts`'s free-tier AI auto-reply no longer asserts a
 >   PEK-T3E-specific floor/level fact for the "security" keyword match.
 >

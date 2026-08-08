@@ -24,14 +24,6 @@ poi:
 # an airport with no sensible single "default" can omit this.
 defaultGate: E19
 
-routeSite:
-  hubKey: PEK
-  configUrl: /route_site/config/pek.json
-
 map:
   indoorMapEnabled: true
   gatePattern: "^E\\d{1,2}$"
-
-video:
-  csv: PEK_gate_timestamp_full_with_E24_E36.csv
-  mergeEndpoint: /api/orienta/pek-merged-video

@@ -1,135 +1,74 @@
 <!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
 <meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content"/>
-<title>People & Luggage Visualizer</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Orienta — video navigation retired</title>
 <script src="../orienta-base.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/ol@v8.2.0/ol.css"
-  integrity="sha256-tGpYjsT520+CTqFasreL2dHfsXFyp4XGniP6iVPbQ38=" crossorigin="anonymous"/>
-<link rel="stylesheet" href="route-site.css"/>
+<style>
+  :root {
+    --bg: #0f1410;
+    --fg: #e8efe9;
+    --muted: #9aab9e;
+    --accent: #c8e6c9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 2rem 1.25rem;
+    font-family: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 0%, #1a2e22 0%, transparent 55%),
+      radial-gradient(ellipse 70% 40% at 90% 100%, #152018 0%, transparent 50%),
+      var(--bg);
+    color: var(--fg);
+  }
+  main {
+    max-width: 28rem;
+    text-align: center;
+  }
+  h1 {
+    margin: 0 0 0.75rem;
+    font-size: 1.35rem;
+    font-weight: 650;
+    letter-spacing: 0.01em;
+  }
+  p {
+    margin: 0 0 0.85rem;
+    color: var(--muted);
+    line-height: 1.55;
+    font-size: 0.98rem;
+  }
+  a.cta {
+    display: inline-block;
+    margin-top: 0.5rem;
+    padding: 0.7rem 1.15rem;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #102016;
+    font-weight: 650;
+    text-decoration: none;
+  }
+  a.cta:hover { filter: brightness(1.05); }
+  .en { font-size: 0.9rem; opacity: 0.9; }
+</style>
 </head>
 <body>
-<div class="phone">
-
-  <div class="video-map-container" id="videoMapContainer">
-  <div class="video-row">
-    <div class="video-main">
-      <section class="card media" id="videoWrap">
-        <span class="badge tr" id="badgeVideo">旅客</span>
-        <video id="vid" src="" playsinline webkit-playsinline preload="auto" controls></video>
-        <section class="dash">
-          <div class="row" id="rowA">
-            <button class="yt-icon-btn" id="playPause" aria-label="播放/暂停">▶</button>
-            <span class="yt-time" id="timeLabel">0:00 / 0:00</span>
-            <select class="speed-select" id="speedSelect" aria-label="播放速度">
-              <option value="0.5">0.5x</option>
-              <option value="0.75">0.75x</option>
-              <option value="1" selected>1x</option>
-              <option value="1.25">1.25x</option>
-              <option value="1.5">1.5x</option>
-              <option value="1.75">1.75x</option>
-              <option value="2">2.0x</option>
-            </select>
-            <input class="timeline yt-progress" id="timeline" type="range" min="0" max="1000" value="0" step="1"/>
-            <button type="button" class="yt-icon-btn" id="btnPdrRelocate" title="选择路线 POI 并重定位旅客位置">重定位</button>
-            <button type="button" class="yt-icon-btn" id="btnPdrImu" title="PDR（HTTPS）：PEK 可从 gateFrom 取登机口坐标；或 ?pdrOriginLat=&amp;pdrOriginLng=">PDR</button>
-            <button type="button" class="yt-icon-btn" id="btnPdrRecord" title="开始记录 PDR 原始数据与导航位置（用于精度分析）">记录</button>
-            <span class="yt-time" id="pdrRecordStatus" aria-live="polite"></span>
-            <span class="yt-time" id="pdrImuStatus" style="max-width:min(52vw,220px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left"></span>
-          </div>
-        </section>
-        <div class="amenities-video-overlay" id="amenitiesVideoOverlay">
-          <div class="amenities-drawer-handle"></div>
-          <div class="amenities-drawer-title">推荐商店</div>
-          <div class="amenities-drawer-list" id="amenitiesVideoList"></div>
-        </div>
-      </section>
-    </div>
-  </div>
-
-  <section class="card pager pager-section" id="pager">
-    <div class="map-drag-handle" id="mapDragHandle"></div>
-    <div class="pages" id="pages">
-      <div class="page" id="pagePeople">
-        <div class="media" id="mediaPeople" style="position:relative;flex:1;min-height:0;display:flex;flex-direction:column">
-          <div id="mapPeople" style="width:100%;flex:1;min-height:300px;background:#1a1a1a"></div>
-        </div>
-      </div>
-    </div>
-  </section>
-  </div>
-
-  <div class="info" id="info">--</div>
-
-  <!-- Gate checkpoint modal: "Did you get to Gate X?" -->
-  <div class="gate-checkpoint-overlay" id="gateCheckpointOverlay" aria-hidden="true">
-    <div class="gate-checkpoint-modal card">
-      <p class="gate-checkpoint-question" id="gateCheckpointQuestion">Did you get to Gate <span id="gateCheckpointName">—</span>?</p>
-      <div class="gate-checkpoint-buttons">
-        <button type="button" class="btn btn-primary" id="gateCheckpointYes">Yes</button>
-        <button type="button" class="btn btn-secondary" id="gateCheckpointNo">No</button>
-      </div>
-    </div>
-  </div>
-  <!-- Manual relocate: pick POI from PEK_gate_timestamp_full_with_E24_E36.csv -->
-  <div class="relocate-poi-overlay" id="relocatePoiOverlay" aria-hidden="true">
-    <div class="relocate-poi-modal card">
-      <h2 class="relocate-poi-title">选择重定位 POI</h2>
-      <p class="relocate-poi-hint" id="relocatePoiHint">从当前路线视频的时间轴选点</p>
-      <p class="relocate-poi-selected" id="relocatePoiSelected">请先点选一项</p>
-      <div class="relocate-poi-list" id="relocatePoiList" role="listbox"></div>
-      <div class="relocate-poi-actions">
-        <button type="button" class="btn btn-secondary" id="relocatePoiCancel">取消</button>
-        <button type="button" class="btn btn-primary" id="relocatePoiConfirm" disabled>确定</button>
-      </div>
-    </div>
-  </div>
-  <!-- "Which gate are you closest to?" follow-up -->
-  <div class="gate-checkpoint-overlay" id="gateWhichGateOverlay" aria-hidden="true">
-    <div class="gate-checkpoint-modal card">
-      <p class="gate-checkpoint-question">Which gate are you closest to?</p>
-      <input type="text" class="gate-input" id="gateWhichGateInput" placeholder="e.g. F18" autocomplete="off"/>
-      <button type="button" class="btn btn-primary" id="gateWhichGateSubmit">Continue</button>
-    </div>
-  </div>
-
-</div>
-
-<!--
-  integrity/crossorigin (SRI): the browser verifies this file's hash before
-  executing it — a compromised/tampered CDN response is refused rather than
-  silently run. Pinned to the exact ol@v8.2.0 build; regenerate both the
-  version and hash together if this is ever bumped:
-    curl -s https://cdn.jsdelivr.net/npm/ol@vX.Y.Z/dist/ol.js | openssl dgst -sha256 -binary | openssl base64 -A
--->
-<script src="https://cdn.jsdelivr.net/npm/ol@v8.2.0/dist/ol.js"
-  integrity="sha256-rl5IelK3/ccWfc6VPzo5aNMFBTBR44B1HYvbFU2bum0=" crossorigin="anonymous"></script>
+<main>
+  <h1>视频导航已下线</h1>
+  <p>本页的视频路线导航已移除（体积大、加载慢）。室内导航改为地图图片 + PDR，请使用乘客端应用。</p>
+  <p class="en">Video route navigation has been retired. Use the passenger app for map + PDR navigation.</p>
+  <a class="cta" id="paxLink" href="/pax/app">打开乘客端 · Open /pax/app</a>
+</main>
 <script>
-  // Fallback: SRI mismatch, CDN outage, or a network/ad-blocker issue can all
-  // make the ol.js <script> tag execute nothing — every later script here
-  // assumes `ol` exists and would otherwise fail with a raw, user-invisible
-  // console error instead of a clear message.
-  if (typeof ol === "undefined") {
-    document.addEventListener("DOMContentLoaded", function () {
-      var banner = document.createElement("div");
-      banner.setAttribute("role", "alert");
-      banner.style.cssText =
-        "position:fixed;top:0;left:0;right:0;z-index:99999;background:#7c2d12;color:#fed7aa;" +
-        "font:13px system-ui,sans-serif;padding:8px 12px;text-align:center;";
-      banner.textContent =
-        "地图库加载失败，请检查网络后刷新页面。 Map library failed to load — check your network and reload.";
-      document.body.insertBefore(banner, document.body.firstChild);
-    });
-  }
+  (function () {
+    var b = typeof window.__ORIENTA_BASE__ === "string" ? window.__ORIENTA_BASE__.replace(/\/+$/, "") : "";
+    var a = document.getElementById("paxLink");
+    if (a && b) a.setAttribute("href", b + "/pax/app");
+  })();
 </script>
-<script src="../orienta-metrics.js"></script>
-<script src="orienta-metrics-route-site.js"></script>
-<script src="config-bootstrap.js"></script>
-<script src="route-site-pek-engine.js"></script>
-<script src="route-site-map-geometry.js"></script>
-<script src="route-site-main.js"></script>
-<script src="/orienta-pdr-client.js"></script>
-<script src="/route_site/orienta-pdr-recorder.js"></script>
 </body>
 </html>

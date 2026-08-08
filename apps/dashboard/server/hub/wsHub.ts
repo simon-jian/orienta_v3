@@ -409,7 +409,7 @@ export function attachWsHub(
         let fromGate = "—";
         let toGate = "—";
         if (kind === "transfer") {
-          // Flight→gate mapping requires a live FIDS feed (not yet wired);
+          // Flight→gate mapping uses resolveOutbound / FlightAware when available;
           // gates stay unknown ("—") for flight-id based transfer requests.
         } else {
           const q = String(msg.query || "");

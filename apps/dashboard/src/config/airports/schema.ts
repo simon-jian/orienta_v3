@@ -37,13 +37,9 @@ export const airportConfigSchema = z.object({
     gatePattern: z.string().optional(),
     spawnRadiusM: z.number().optional(),
   }),
-  routeSite: z
-    .object({ hubKey: z.string(), configUrl: z.string().optional() })
-    .optional(),
   map: z
     .object({ indoorMapEnabled: z.boolean().default(false), gatePattern: z.string().optional() })
     .default({ indoorMapEnabled: false }),
-  video: z.object({ csv: z.string(), mergeEndpoint: z.string() }).optional(),
 });
 
 /** Serializable airport config (regex as strings) — YAML / JSON / API form. */

@@ -50,20 +50,6 @@ export type AirportPoiConfig = {
   spawnRadiusM?: number;
 };
 
-export type AirportRouteSiteConfig = {
-  /** route_site hub key (e.g. "PEK"). */
-  hubKey: string;
-  /** Optional URL for the externalized route_site config JSON (Phase 4). */
-  configUrl?: string;
-};
-
-export type AirportVideoConfig = {
-  /** Source CSV used by the merge worker. */
-  csv: string;
-  /** HTTP endpoint that triggers a merge (PEK alias retained for now). */
-  mergeEndpoint: string;
-};
-
 export type AirportDefinition = {
   /** Canonical id, conventionally the IATA code (e.g. "PEK"). */
   id: AirportId;
@@ -75,10 +61,8 @@ export type AirportDefinition = {
   /** Last-resort gate for a passenger session with no live data and no caller hint. Optional. */
   defaultGate?: string;
   poi: AirportPoiConfig;
-  routeSite?: AirportRouteSiteConfig;
   map: {
     indoorMapEnabled: boolean;
     gatePattern?: RegExp;
   };
-  video?: AirportVideoConfig;
 };

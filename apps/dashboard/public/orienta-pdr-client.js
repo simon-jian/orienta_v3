@@ -1,31 +1,85 @@
 /**
- * Video page: phone IMU → PDR Python backend → map trajectory.
- * Anchor WGS84: optional ?pdrOriginLat/Lng. If omitted on PEK, origin = gateFrom via orientaPdrResolveAnchor (地图 POI API).
- * Parent /pax forwards pdrOrigin* into the iframe. Same-origin: /pdr-api. ?pdrBackend= override.
- * Optional: ?pdrMapMatch=1 — corridor map-matching on backend.
+ * Video page / Pax app: phone IMU → PDR Python backend (pedestrian_dead_reckoning,
+ * a separate service — see that repo's backend/README.md for the wire protocol) →
+ * map trajectory. Thin client only: no step-detection/heading/route logic lives here.
+ *
+ * The backend has no free-walk mode — every session must follow a pre-planned
+ * route (local x/y meters, ≥2 points), so this client refuses to start without
+ * one. That route comes from the embedded indoor map's own gate-to-gate routing
+ * (`gateFrom`/`gateTo` → map posts `orienta-nav-path-lonlat`, which route_site
+ * already listens for and stores as `window.__ORIENTA_PATH_LONLAT_FROM_MAP__`
+ * independently of PDR) — see resolvePlannedPathLngLat() below. A caller that
+ * has its own route (e.g. PaxAppPage.tsx) can instead set
+ * `window.__ORIENTA_PDR_PLANNED_PATH__` (array of [lng,lat] or {lat,lng}
+ * pairs) before calling start.
+ *
+ * Same-origin: /pdr-api. ?pdrBackend= overrides the backend root for testing.
  */
 (function () {
   var R_EARTH = 6378137;
 
-  /** WGS84 [lng, lat]: explicit hook, query, then window.orientaPdrResolveAnchor. */
-  function resolvePdrAnchor() {
-    try {
-      var hook = window.__ORIENTA_PDR_ANCHOR__;
-      if (hook && isFinite(hook[0]) && isFinite(hook[1])) return [Number(hook[0]), Number(hook[1])];
-    } catch (eHook) {}
-    try {
-      var sp = new URLSearchParams(location.search);
-      var lat = parseFloat(sp.get("pdrOriginLat") || sp.get("pdrLat") || "");
-      var lng = parseFloat(sp.get("pdrOriginLng") || sp.get("pdrLng") || "");
-      if (isFinite(lat) && isFinite(lng)) return [lng, lat];
-    } catch (e) {}
-    if (typeof window.orientaPdrResolveAnchor === "function") {
-      try {
-        var o = window.orientaPdrResolveAnchor();
-        if (o && isFinite(o[0]) && isFinite(o[1])) return o;
-      } catch (e2) {}
+  /** [lng, lat][], ≥2 points, or null. Explicit override first, then the map's own last-computed route. */
+  function resolvePlannedPathLngLat() {
+    var explicit = normalizeLngLatPairs(window.__ORIENTA_PDR_PLANNED_PATH__);
+    if (explicit) return explicit;
+    return normalizeLngLatPairs(window.__ORIENTA_PATH_LONLAT_FROM_MAP__);
+  }
+
+  function normalizeLngLatPairs(raw) {
+    if (!Array.isArray(raw) || raw.length < 2) return null;
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      var p = raw[i];
+      var lng, lat;
+      if (Array.isArray(p) && p.length >= 2) {
+        lng = Number(p[0]);
+        lat = Number(p[1]);
+      } else if (p && typeof p === "object") {
+        lng = Number(p.lng);
+        lat = Number(p.lat);
+      } else continue;
+      if (!isFinite(lng) || !isFinite(lat)) continue;
+      out.push([lng, lat]);
     }
-    return null;
+    return out.length >= 2 ? out : null;
+  }
+
+  /** True once a planned route is available — callers (e.g. React UI) can use
+   *  this to enable/disable a "Start PDR" control without duplicating the
+   *  resolution logic above. */
+  function hasPlannedRoute() {
+    return !!resolvePlannedPathLngLat();
+  }
+
+  /** Exact algebraic inverse of metersToLngLat() below, so converting a
+   *  point through both directions round-trips exactly (critical for the
+   *  path's own first point, which becomes the local (0, 0) origin). */
+  function lngLatToMeters(anchor, lng, lat) {
+    var lat1 = (anchor[1] * Math.PI) / 180;
+    var y = (((lat - anchor[1]) * Math.PI) / 180) * R_EARTH;
+    var x = (((lng - anchor[0]) * Math.PI) / 180) * R_EARTH * Math.cos(lat1);
+    return { x: x, y: y };
+  }
+
+  function metersToLngLat(anchor, x, y) {
+    var lng0 = anchor[0];
+    var lat0 = anchor[1];
+    var lat1 = (lat0 * Math.PI) / 180;
+    var dLat = (y / R_EARTH) * (180 / Math.PI);
+    var dLng = (x / (R_EARTH * Math.cos(lat1))) * (180 / Math.PI);
+    return [lng0 + dLng, lat0 + dLat];
+  }
+
+  /** anchor = the route's own first point, so the backend's local (0,0) lines
+   *  up with where the map says the route actually starts. */
+  function buildPlannedPath(pathLngLat) {
+    var anchor = pathLngLat[0];
+    var points = [];
+    for (var i = 0; i < pathLngLat.length; i++) {
+      var m = lngLatToMeters(anchor, pathLngLat[i][0], pathLngLat[i][1]);
+      points.push({ x: m.x, y: m.y });
+    }
+    return { anchor: anchor, points: points };
   }
 
   /** Absolute PDR base must be service root (https://host), not …/api — session URL is root + "/api/session". */
@@ -52,17 +106,8 @@
     return proto + "//" + location.host + root;
   }
 
-  function metersToLngLat(anchor, x, y) {
-    var lng0 = anchor[0];
-    var lat0 = anchor[1];
-    var lat1 = (lat0 * Math.PI) / 180;
-    var dLat = (y / R_EARTH) * (180 / Math.PI);
-    var dLng = (x / (R_EARTH * Math.cos(lat1))) * (180 / Math.PI);
-    return [lng0 + dLng, lat0 + dLat];
-  }
-
   /** Cap outbound sensor-frame rate — devicemotion can fire far faster than the
-   *  PDR step-detection algorithm needs (min step period is 250ms server-side),
+   *  PDR step-detection algorithm needs (min step period is 350ms server-side),
    *  so sending every event wastes battery/bandwidth for no accuracy gain. */
   var MIN_FRAME_INTERVAL_MS = 50; // 20 Hz
   var RECONNECT_BASE_MS = 1000;
@@ -75,14 +120,11 @@
     sessionId: null,
     socket: null,
     lastTrailMs: 0,
-    lastOrientation: {},
     anchorLngLat: null,
     markerLngLat: null,
     trail: [],
     headingRad: null,
-    mapMatch: false,
     motionHandler: null,
-    orientHandler: null,
     motionEvents: 0,
     motionWarnTimer: null,
     lastStatusMs: 0,
@@ -181,53 +223,16 @@
     } catch (e) {}
   }
 
-  /** Map overlay: only PDR trail + marker (no planned polyline). */
-  function buildMapSplit() {
-    if (!st.active || !st.markerLngLat) return null;
-    var coord = st.markerLngLat;
-    var past = st.trail.length >= 2 ? st.trail.slice() : [[coord[0], coord[1]]];
-    var last = past[past.length - 1];
-    if (last[0] !== coord[0] || last[1] !== coord[1]) past.push(coord.slice());
-    return {
-      coord: coord,
-      pastCoords: past,
-      futureCoords: [coord, coord],
-      si: 0,
-      tt: 0,
-      b: coord,
-      n: 1,
-      _pdrHeadingRad: st.headingRad,
-    };
-  }
-
   window.__ORIENTA_PDR__ = {
     active: false,
-    buildMapSplit: buildMapSplit,
-    /**
-     * Snap anchor/marker to a known POI and reset backend state.
-     * @param {number} lng
-     * @param {number} lat
-     * @param {number=} initialHeadingDeg - optional heading seed toward next POI.
-     */
-    snapReset: function (lng, lat, initialHeadingDeg) {
+    hasPlannedRoute: hasPlannedRoute,
+    /** Restarts progress from the beginning of the *same* planned route
+     *  (does not change routes or re-anchor) — mirrors the backend's
+     *  `reset` message; see backend/pdr/session.py's `PdrSession.reset()`. */
+    reset: function () {
+      if (!st.active || !st.socket || st.socket.readyState !== WebSocket.OPEN) return false;
       try {
-        if (!isFinite(lng) || !isFinite(lat)) return false;
-        if (!st.active) return false;
-        if (!st.anchorLngLat) st.anchorLngLat = [lng, lat];
-        st.anchorLngLat = [lng, lat];
-        st.markerLngLat = [lng, lat];
-        st.trail = [[lng, lat]];
-        st.lastTrailMs = Date.now();
-        // Immediately publish the snapped position so parent/backoffice updates too.
-        postTrajectoryToParent(lng, lat);
-        postPdrToIndoorMap(lng, lat);
-        if (st.socket && st.socket.readyState === WebSocket.OPEN) {
-          var payload = { type: "reset", t_ms: Date.now() };
-          if (typeof initialHeadingDeg === "number" && isFinite(initialHeadingDeg)) {
-            payload.initial_heading_deg = initialHeadingDeg;
-          }
-          st.socket.send(JSON.stringify(payload));
-        }
+        st.socket.send(JSON.stringify({ type: "reset", t_ms: Date.now() }));
         return true;
       } catch (e) {
         return false;
@@ -239,40 +244,24 @@
   };
 
   async function requestSensorPermissions() {
+    // Orientation/compass is never sent to this backend (see module docstring)
+    // and isn't read locally either, so only motion needs a permission prompt.
     if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
       var a = await DeviceMotionEvent.requestPermission();
       if (a !== "granted") return false;
     }
-    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-      var b = await DeviceOrientationEvent.requestPermission();
-      if (b !== "granted") return false;
-    }
     return true;
   }
 
-  function onOrientation(e) {
-    st.lastOrientation = {
-      alpha: e.alpha,
-      beta: e.beta,
-      gamma: e.gamma,
-      absolute: e.absolute,
-      webkitCompassHeading: e.webkitCompassHeading,
-    };
-  }
-
   function attachSensorListeners() {
-    if (st.motionHandler || st.orientHandler) return; // already attached
+    if (st.motionHandler) return; // already attached
     st.motionHandler = onMotion;
-    st.orientHandler = onOrientation;
     window.addEventListener("devicemotion", onMotion, { passive: true });
-    window.addEventListener("deviceorientation", onOrientation, { passive: true });
   }
 
   function detachSensorListeners() {
     if (st.motionHandler) window.removeEventListener("devicemotion", st.motionHandler);
-    if (st.orientHandler) window.removeEventListener("deviceorientation", st.orientHandler);
     st.motionHandler = null;
-    st.orientHandler = null;
   }
 
   function onMotion(e) {
@@ -286,26 +275,21 @@
       setPdrButtonState("imu");
       setStatus("IMU 正常 · 传感器数据已进入");
     }
-    var rot = e.rotationRate;
-    var accLin = e.acceleration;
+    var acc = e.acceleration;
     var accG = e.accelerationIncludingGravity;
+    var rot = e.rotationRate;
     try {
       var frame = {
-        type: "sensor_frame",
+        type: "sensor_motion",
         t_ms: Date.now(),
-        acc_linear:
-          accLin && accLin.x != null
-            ? { x: accLin.x, y: accLin.y, z: accLin.z }
-            : null,
-        acc_including_g: accG || { x: 0, y: 0, z: 0 },
+        acceleration: acc && acc.x != null ? { x: acc.x, y: acc.y, z: acc.z } : null,
+        acceleration_including_gravity: accG && accG.x != null ? { x: accG.x, y: accG.y, z: accG.z } : null,
         rotation_rate: rot
           ? { alpha: rot.alpha, beta: rot.beta, gamma: rot.gamma }
           : { alpha: null, beta: null, gamma: null },
-        orientation: st.lastOrientation || {},
-        map_match_enabled: st.mapMatch,
       };
       if (typeof window.orientaPdrRecorderHook === "function") {
-        window.orientaPdrRecorderHook("sensor_frame", frame);
+        window.orientaPdrRecorderHook("sensor_motion", frame);
       }
       st.socket.send(JSON.stringify(frame));
     } catch (err) {}
@@ -338,6 +322,7 @@
       var steps = Number(msg.step_count);
       var dist = Number(msg.distance_m);
       var stepped = msg.stepped === true;
+      var deviating = msg.deviation_warning === true;
       if (isFinite(steps) && isFinite(dist)) {
         st.lastPose = {
           steps: steps,
@@ -347,8 +332,9 @@
           x: x,
           y: y,
           headingDeg: Number(msg.heading_deg),
-          stepSignal: Number(msg.step_signal),
           stepLengthM: Number(msg.step_length_m),
+          deviationWarning: deviating,
+          deviationTurnDirection: msg.deviation_turn_direction || null,
           at: now,
         };
         try {
@@ -356,7 +342,8 @@
         } catch (ePose) {}
         if (stepped || now - st.lastStatusMs > 600) {
           st.lastStatusMs = now;
-          setStatus(dist.toFixed(1) + "m · " + steps + "步");
+          var suffix = deviating ? " · 可能已偏离路线" : "";
+          setStatus(dist.toFixed(1) + "m · " + steps + "步" + suffix);
         }
       }
       postTrajectoryToParent(ll[0], ll[1]);
@@ -372,26 +359,22 @@
     // still going to fire connectPdrSocket() for the previous session,
     // leaving two overlapping sessions/sockets running at once.
     if (st.active || st.reconnectTimer != null) return;
-    var anchor = resolvePdrAnchor();
-    if (!anchor) {
+
+    var pathLngLat = resolvePlannedPathLngLat();
+    if (!pathLngLat) {
       setStatus(
-        "无 PDR 起点：① PEK 请在 URL 带 gateFrom（及 gateTo），如 gateFrom=E32&gateTo=E25。② 或写明 ?pdrOriginLat=纬度&pdrOriginLng=经度。③ 确认 route_site 地址栏含 airport=PEK（或 hub=PEK）。"
+        "无可用路线：PDR 需要地图先算出一条路径。请确认 URL 带 gateFrom（及 gateTo），如 gateFrom=E32&gateTo=E25，且地图已加载完成。"
       );
       return;
     }
-    try {
-      var sp = new URLSearchParams(location.search);
-      st.mapMatch = sp.get("pdrMapMatch") === "1" || sp.get("pdrMapMatch") === "true";
-    } catch (e) {
-      st.mapMatch = false;
-    }
+    var planned = buildPlannedPath(pathLngLat);
 
     setStatus("正在请求传感器权限…");
     var ok = false;
     try {
       ok = await requestSensorPermissions();
     } catch (permErr) {
-      setStatus("传感器权限请求失败 · 请确认页面/iframe 允许运动与方向传感器");
+      setStatus("传感器权限请求失败 · 请确认页面/iframe 允许运动传感器");
       return;
     }
     if (!ok) {
@@ -406,7 +389,11 @@
     setStatus("连接 PDR…");
     var res;
     try {
-      res = await fetch(sessionUrl, { method: "POST", headers: { Accept: "application/json" } });
+      res = await fetch(sessionUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ planned_path: planned.points }),
+      });
     } catch (err) {
       setStatus("无法连接 PDR 服务 · 检查网络或后端是否已启动");
       return;
@@ -417,15 +404,14 @@
         var ct = (res.headers.get("content-type") || "").toLowerCase();
         if (ct.indexOf("application/json") !== -1) {
           var ej = await res.json();
-          if (ej && ej.message) hint = " · " + String(ej.message);
-          else if (ej && ej.error) hint = " · " + String(ej.error);
+          if (ej && ej.detail) hint = " · " + String(ej.detail);
+          else if (ej && ej.message) hint = " · " + String(ej.message);
         }
       } catch (e1) {}
-      if (!hint && res.status === 502)
-        hint = " · 上游 PDR 无响应（本地请启动 Python PDR 并监听 10000）";
+      if (!hint && res.status === 502) hint = " · 上游 PDR 无响应（请确认 PDR 后端已启动）";
       if (!hint && res.status === 404)
         hint =
-          " · 常见原因：① 生产环境未设置 PDR_API_ORIGIN 或需重新部署 orienta；② PDR_API_ORIGIN / ?pdrBackend= 写成了 …/api（应写服务根 URL，如 https://orienta-pdr.onrender.com）；③ orienta-pdr 服务未启动";
+          " · 常见原因：① 未设置 PDR_API_ORIGIN 或需重新部署 orienta；② PDR_API_ORIGIN / ?pdrBackend= 写成了 …/api（应写服务根 URL）；③ PDR 服务未启动";
       setStatus("创建会话失败 " + res.status + hint);
       return;
     }
@@ -433,7 +419,7 @@
     try {
       data = await res.json();
     } catch (e2) {
-      setStatus("PDR 返回非 JSON（请确认 /pdr-api 已指向 orienta-pdr，而非站点首页）");
+      setStatus("PDR 返回非 JSON（请确认 /pdr-api 已指向 PDR 服务，而非站点首页）");
       return;
     }
     var sid = data.session_id;
@@ -442,7 +428,7 @@
       return;
     }
     st.sessionId = sid;
-    st.anchorLngLat = anchor.slice();
+    st.anchorLngLat = planned.anchor.slice();
     st.trail = [];
     st.lastTrailMs = 0;
     st.markerLngLat = st.anchorLngLat.slice();
@@ -457,8 +443,8 @@
    * Opens the PDR WebSocket for an existing session id. Split out from
    * startPdr() so a dropped connection can reconnect to the *same* session
    * (the backend keeps a disconnected session's PDR state — step count,
-   * position — alive for a while; see pdr_airchina/backend/app.py
-   * SESSION_TTL_S) instead of the user having to restart from zero.
+   * position — alive for a while; see the PDR backend's SESSION_TTL_SECONDS
+   * in backend/app.py) instead of the user having to restart from zero.
    */
   function connectPdrSocket(sid) {
     var wsUrl = wsBaseUrl() + "/ws/pdr/" + encodeURIComponent(sid);
@@ -558,12 +544,12 @@
   /**
    * Pauses/resumes sensor listeners (not the WebSocket/session) when the page
    * is hidden — a locked screen or backgrounded app stops producing useful
-   * devicemotion/deviceorientation events on most platforms anyway, so this
-   * mainly avoids sending stale/garbage frames and gives the user an accurate
-   * status instead of a silently stalled "connected" state. The session/
-   * socket are left alone: if the OS itself kills the connection while
-   * hidden, the existing onclose → scheduleReconnect() path handles that
-   * independently, using the same still-known sessionId.
+   * devicemotion events on most platforms anyway, so this mainly avoids
+   * sending stale/garbage frames and gives the user an accurate status
+   * instead of a silently stalled "connected" state. The session/socket are
+   * left alone: if the OS itself kills the connection while hidden, the
+   * existing onclose → scheduleReconnect() path handles that independently,
+   * using the same still-known sessionId.
    */
   function onVisibilityChange() {
     if (typeof document === "undefined") return;
@@ -614,6 +600,7 @@
   window.__ORIENTA_PDR_IS_ACTIVE__ = function () {
     return !!st.active;
   };
+  window.__ORIENTA_PDR_HAS_ROUTE__ = hasPlannedRoute;
 
   function bindUi() {
     var btn = document.getElementById("btnPdrImu");

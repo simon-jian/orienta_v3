@@ -44,7 +44,8 @@ function optionalInt(name: string, defaultValue: number): number {
  * Previously this was done ad-hoc in server.ts with a console.warn.
  * Now it's handled centrally and documented.
  */
-function normalizePdrOrigin(raw: string): string {
+/** Strip trailing /api from PDR_API_ORIGIN (common copy-paste mistake). Exported for tests. */
+export function normalizePdrOrigin(raw: string): string {
   let u = raw.trim().replace(/\/+$/, "");
   if (/\/api$/i.test(u)) {
     u = u.replace(/\/api$/i, "").replace(/\/+$/, "");
@@ -163,14 +164,6 @@ export const SENTRY_TRACES_SAMPLE_RATE = (() => {
   const n = parseFloat(raw);
   return Number.isFinite(n) ? Math.min(Math.max(n, 0), 1) : 0;
 })();
-
-// ─── Video merge job service (P2-4) ───────────────────────────────────────────
-// When DATABASE_URL/REDIS_URL drive multi-instance, the CPU-heavy PEK video merge
-// is offloaded to a separate worker (scripts/pek_video_worker.py) via a Redis
-// queue. These let the web + worker agree on the shared output/source dirs.
-// Empty → use the in-repo route_site paths (single-machine default).
-export const VIDEO_OUTPUT_DIR = optional("VIDEO_OUTPUT_DIR");
-export const VIDEO_SOURCE_DIR = optional("VIDEO_SOURCE_DIR");
 
 // ─── Derived helpers ──────────────────────────────────────────────────────────
 

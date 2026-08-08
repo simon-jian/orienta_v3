@@ -34,6 +34,7 @@ import { HubStore, attachWsHub } from "./hub/wsHub";
 import { ChatRepository } from "./hub/ChatRepository";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerFlightRoutes, registerLegacyFlightFallback, registerOrientaRoutes } from "./routes/flight";
+import { registerFidsRoutes } from "./routes/fids";
 import { registerPushRoutes } from "./routes/push";
 import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
@@ -45,6 +46,7 @@ import { startMaintenanceJobs } from "./jobs/maintenance";
 import { createRateLimiter } from "./middleware/rateLimit";
 import { requestLog } from "./middleware/requestLog";
 import { logger } from "./lib/logger";
+import { indoorMapHealthStatus, pdrProxyHealthStatus } from "./lib/dependencyHealth";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
 import { registerConfigRoutes } from "./routes/config";
@@ -55,7 +57,7 @@ import { runMigrations } from "./db/migrations";
 import { migrations } from "./db/migrationList";
 import { getRedisCmd, createRedisConnection } from "./redis/redisClient";
 import { MemoryHubBus, RedisHubBus, type HubBus } from "./hub/HubBus";
-import { REDIS_ENABLED, INSTANCE_ID, VIDEO_OUTPUT_DIR } from "./config";
+import { REDIS_ENABLED, INSTANCE_ID } from "./config";
 import {
   applyAirportMapNoCacheHeaders,
   applyIframeSafeHtmlHeaders,
@@ -104,8 +106,6 @@ const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxReque
 // GET /api/flight/closest and POST /api/transfer call FlightAware directly on
 // every request (no FIDS cache) — cap per IP to protect the AeroAPI quota.
 const aeroApiRateLimit = createRateLimiter({ name: "aeroapi", windowMs: 60_000, maxRequests: 30, redis: redisCmd });
-// P0-5: the merged-video route spawns ffmpeg/python on cache-miss — strict cap per IP.
-const mergedVideoRateLimit = createRateLimiter({ name: "video", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
 const metricsRateLimit = createRateLimiter({ name: "metrics", windowMs: 60_000, maxRequests: 120, redis: redisCmd });
 
 // ─── Express app ─────────────────────────────────────────────────────────────
@@ -119,17 +119,13 @@ app.set("trust proxy", 1);
 // same-origin, so this only blocks cross-origin framing/embedding, not the
 // app's own documented usage.
 //
-// contentSecurityPolicy stays off deliberately, not by oversight: route_site
-// loads OpenLayers from cdn.jsdelivr.net and has inline `style="..."`
-// attributes, the dashboard's Leaflet map pulls tiles from
-// {s}.tile.openstreetmap.org, FIDS renders airline logos from images.kiwi.com,
-// and Sentry (when SENTRY_DSN/VITE_SENTRY_DSN is set) needs a connect-src to
-// its ingest endpoint. A correct policy needs all of those enumerated and
-// verified against a running browser (map, route_site video, FIDS, chat, PDR)
-// before shipping — an unverified policy here would silently break features
-// rather than add safety. crossOriginEmbedderPolicy stays off for the same
-// reason: it would require every cross-origin resource above to opt in via
-// CORP/CORS, which those third parties don't control.
+// contentSecurityPolicy stays off deliberately, not by oversight: the
+// dashboard's Leaflet map pulls tiles from {s}.tile.openstreetmap.org, FIDS
+// renders airline logos from images.kiwi.com, and Sentry (when configured)
+// needs a connect-src to its ingest endpoint. A correct policy needs those
+// enumerated and verified in a running browser before shipping — an
+// unverified policy here would silently break features rather than add
+// safety. crossOriginEmbedderPolicy stays off for the same reason.
 app.use(helmet({
   contentSecurityPolicy: false,
   crossOriginEmbedderPolicy: false,
@@ -164,6 +160,7 @@ app.use("/api/auth", authRateLimit, authRouter);
 // GET /api/passengers.
 const flightRouter = express.Router();
 registerFlightRoutes(flightRouter, aeroApiRateLimit);
+registerFidsRoutes(flightRouter, aeroApiRateLimit);
 app.use("/api", flightRouter);
 
 const legacyFlightRouter = express.Router();
@@ -172,9 +169,6 @@ registerLegacyFlightFallback(legacyFlightRouter);
 app.use("/flight", legacyFlightRouter);
 
 // ─── Orienta-specific routes ──────────────────────────────────────────────────
-// Strict limiter on the expensive video-merge endpoint (must precede the router mount).
-app.use("/api/orienta/pek-merged-video", mergedVideoRateLimit);
-app.use("/api/orienta/:airportId/merged-video", mergedVideoRateLimit);
 const orientaRouter = express.Router();
 registerOrientaRoutes(orientaRouter);
 app.use("/api/orienta", orientaRouter);
@@ -401,8 +395,14 @@ async function readinessBody(): Promise<{ overallOk: boolean; body: Record<strin
         db: dbOk ? "ok" : "fail",
         db_dialect: sqlDb.dialect,
         redis: redisStatus,
-        pdr_proxy: !PDR_API_ORIGIN ? "disabled" : pdrReachable ? "ok" : "unreachable",
-        indoor_map: !INDOOR_MAP_UPSTREAM ? "bundled" : indoorMapReachable ? "ok" : "unreachable",
+        pdr_proxy: pdrProxyHealthStatus({ origin: PDR_API_ORIGIN, reachable: pdrReachable }),
+        // Mode A "bundled" only when tile assets actually exist on disk — empty
+        // Mode A used to report "bundled" and look healthy with no map at all.
+        indoor_map: indoorMapHealthStatus({
+          upstream: INDOOR_MAP_UPSTREAM,
+          upstreamReachable: indoorMapReachable,
+          bundledTilesPresent: existsSync(LOCAL_INDOOR_MAP_TILES_DIR),
+        }),
       },
       ts: new Date().toISOString(),
     },
@@ -427,24 +427,11 @@ app.get("/health", async (_req, res) => {
 });
 
 // ─── Static assets + SPA fallback ─────────────────────────────────────────────
-// When the video worker writes to a shared volume (P2-4), serve it here so the
-// generated mp4s are reachable at the same /route_site/dynamic URL.
-if (VIDEO_OUTPUT_DIR) {
-  app.use("/route_site/dynamic", express.static(VIDEO_OUTPUT_DIR, {
-    setHeaders(res, filePath) {
-      if (/\.mp4$/i.test(filePath)) res.setHeader("Content-Type", "video/mp4");
-    },
-  }));
-}
-app.use(express.static(DIST_DIR, {
-  setHeaders(res, filePath) {
-    if (/\.mp4$/i.test(filePath)) res.setHeader("Content-Type", "video/mp4");
-  },
-}));
+app.use(express.static(DIST_DIR));
 
 app.get("*", (req, res) => {
   if (req.path.startsWith("/api")) return res.status(404).json({ error: "not_found", path: req.path });
-  if (/\.(mp4|webm|m4v|mov|csv|png|jpg|jpeg|gif|svg|ico|woff2?)$/i.test(req.path)) return res.status(404).type("text/plain").send("Not found");
+  if (/\.(png|jpg|jpeg|gif|svg|ico|woff2?)$/i.test(req.path)) return res.status(404).type("text/plain").send("Not found");
   res.sendFile(`${DIST_DIR}/index.html`);
 });
 

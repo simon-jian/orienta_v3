@@ -1,8 +1,8 @@
 /**
  * Public tenant/airport config API (Multi-airport Phase 5).
  *
- * `GET /api/config/tenant/:tenantId` lets clients (pax pages, route_site, future
- * SPAs) resolve which hub a tenant operates and its UI defaults without baking
+ * `GET /api/config/tenant/:tenantId` lets clients (pax pages, future SPAs)
+ * resolve which hub a tenant operates and its UI defaults without baking
  * PEK/airchina assumptions into the frontend. Demo/seed data (flights, premium
  * ids) is intentionally NOT exposed here.
  */
@@ -36,7 +36,6 @@ function publicAirport(def: AirportDefinition) {
       bbox: def.poi.bbox,
     },
     map: { indoorMapEnabled: def.map.indoorMapEnabled },
-    routeSite: def.routeSite,
   };
 }
 

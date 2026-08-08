@@ -200,9 +200,15 @@ function FidsBoard({
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600 }}>Loading…</div>
         ) : status === "unconfigured" ? (
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12, lineHeight: 1.5 }}>
-            未接入实时航班数据源。
+            未接入实时航班数据源（设置 FLIGHTAWARE_API_KEY）。
             <br />
-            No live flight data source configured.
+            No live flight data source configured (set FLIGHTAWARE_API_KEY).
+          </div>
+        ) : status === "unavailable" ? (
+          <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12, lineHeight: 1.5 }}>
+            航班数据源暂时不可用。
+            <br />
+            Live flight data temporarily unavailable.
           </div>
         ) : flights.length === 0 ? (
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12 }}>暂无航班 · No flights right now</div>
@@ -249,7 +255,7 @@ function FidsBoard({
         )}
       </div>
       <div style={{ fontSize: 10, color: "rgba(255,255,255,0.38)", marginTop: 8, fontWeight: 500 }}>
-        {airport} · refresh 1h
+        {airport} · refresh 5m
       </div>
     </div>
   );

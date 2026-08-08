@@ -6,10 +6,16 @@ export type PdrTrajectoryUpdate = {
   headingRad?: number | null;
 };
 
+/** A pre-planned route (≥2 points) for the PDR backend to follow — see that
+ * repo's backend/README.md. No free-walk mode: a session can't start without
+ * one. Typically sourced from the embedded indoor map's own gate-to-gate
+ * routing (`orienta-nav-path-lonlat`) — see PaxAppPage.tsx. */
+export type PdrPlannedPath = { lat: number; lng: number }[];
+
 declare global {
   interface Window {
-    __ORIENTA_PDR__?: { active?: boolean };
-    __ORIENTA_PDR_ANCHOR__?: [number, number];
+    __ORIENTA_PDR__?: { active?: boolean; hasPlannedRoute?: () => boolean; reset?: () => boolean };
+    __ORIENTA_PDR_PLANNED_PATH__?: PdrPlannedPath;
     __ORIENTA_PDR_PASSENGER_ID__?: string;
     __ORIENTA_PDR_ON_TRAJECTORY__?: (
       lng: number,
@@ -28,6 +34,7 @@ declare global {
     __ORIENTA_PDR_STOP__?: () => void;
     __ORIENTA_PDR_TOGGLE__?: () => void;
     __ORIENTA_PDR_IS_ACTIVE__?: () => boolean;
+    __ORIENTA_PDR_HAS_ROUTE__?: () => boolean;
   }
 }
 
@@ -68,14 +75,12 @@ export async function checkPdrBackendAvailable(): Promise<boolean> {
 }
 
 export async function configurePdrSession(opts: {
-  anchor: { lat: number; lng: number };
   passengerId: string;
   onTrajectory: (update: PdrTrajectoryUpdate) => void;
   onStatus?: (msg: string) => void;
   postToMap?: (update: PdrTrajectoryUpdate) => void;
 }): Promise<void> {
   await loadPdrClientScript();
-  window.__ORIENTA_PDR_ANCHOR__ = [opts.anchor.lng, opts.anchor.lat];
   window.__ORIENTA_PDR_PASSENGER_ID__ = opts.passengerId;
   window.__ORIENTA_PDR_ON_TRAJECTORY__ = (lng, lat, path, headingRad) => {
     opts.onTrajectory({ position: { lat, lng }, path, headingRad });
@@ -104,4 +109,20 @@ export function stopPdrSession(): void {
 
 export function isPdrSessionActive(): boolean {
   return !!window.__ORIENTA_PDR_IS_ACTIVE__?.() || !!window.__ORIENTA_PDR__?.active;
+}
+
+/** Feeds the client a route to follow (≥2 points) before starting — see
+ * `PdrPlannedPath`. Pass `null` to clear it (e.g. once the map's own
+ * gateFrom/gateTo route becomes stale). */
+export function setPdrPlannedPath(path: PdrPlannedPath | null): void {
+  if (path && path.length >= 2) window.__ORIENTA_PDR_PLANNED_PATH__ = path;
+  else delete window.__ORIENTA_PDR_PLANNED_PATH__;
+}
+
+/** Whether a planned route is currently available to start a session with —
+ * either fed via setPdrPlannedPath() or already resolved by the client
+ * itself (e.g. the passenger map's gate-to-gate route). Requires the client script
+ * to be loaded first (see loadPdrClientScript/configurePdrSession). */
+export function hasPdrPlannedRoute(): boolean {
+  return !!window.__ORIENTA_PDR_HAS_ROUTE__?.();
 }

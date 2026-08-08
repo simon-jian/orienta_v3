@@ -6,11 +6,11 @@ import {
   checkPdrBackendAvailable,
   configurePdrSession,
   isPdrSessionActive,
+  setPdrPlannedPath,
   startPdrSession,
   stopPdrSession,
   type PdrTrajectoryUpdate,
 } from "../../services/pdrClient";
-import { getGateCoord as getPoiGateCoord, preloadPoi, getCenter as getPoiCenter } from "../../services/poi/PoiService";
 import {
   clearPaxSession,
   fetchPaxSession,
@@ -70,6 +70,16 @@ function isLatLng(value: unknown): value is { lat: number; lng: number } {
   return !!v && typeof v.lat === "number" && typeof v.lng === "number";
 }
 
+/** Shape of `orienta-nav-path-lonlat`'s `path` field — see airport-map.html's
+ * `orientaPostNavPathLonLatToParent_` (GeoJSON-style [lng, lat] pairs). */
+function isLngLatPath(value: unknown): value is [number, number][] {
+  return (
+    Array.isArray(value) &&
+    value.length >= 2 &&
+    value.every((p) => Array.isArray(p) && p.length >= 2 && typeof p[0] === "number" && typeof p[1] === "number")
+  );
+}
+
 function postPaxFallback(session: PaxSession, path: string, body: Record<string, unknown>): void {
   void fetch(apiUrl(path), {
     method: "POST",
@@ -99,7 +109,7 @@ export default function PaxAppPage() {
   const [pdrStatus, setPdrStatus] = useState("");
   const [pdrActive, setPdrActive] = useState(false);
   const [pdrBackendOk, setPdrBackendOk] = useState<boolean | null>(null);
-  const [poiReady, setPoiReady] = useState(false);
+  const [pdrHasRoute, setPdrHasRoute] = useState(false);
   const realtimeRef = useRef<PaxRealtime | null>(null);
   const mapFrameRef = useRef<HTMLIFrameElement | null>(null);
   const lastTrajectoryAtRef = useRef(0);
@@ -168,9 +178,6 @@ export default function PaxAppPage() {
 
   useEffect(() => {
     let cancelled = false;
-    preloadPoi()
-      .then(() => { if (!cancelled) setPoiReady(true); })
-      .catch(() => { if (!cancelled) setPoiReady(true); });
     checkPdrBackendAvailable()
       .then((ok) => { if (!cancelled) setPdrBackendOk(ok); })
       .catch(() => { if (!cancelled) setPdrBackendOk(false); });
@@ -195,12 +202,9 @@ export default function PaxAppPage() {
   }
 
   useEffect(() => {
-    if (!session || !poiReady) return;
-    const gateCoord = getPoiGateCoord(session.passenger.gateId);
-    const anchor = gateCoord ?? getPoiCenter();
+    if (!session) return;
 
     void configurePdrSession({
-      anchor,
       passengerId: session.passenger.id,
       onStatus: setPdrStatus,
       onTrajectory: (update) => relayTrajectory(session, update),
@@ -225,7 +229,7 @@ export default function PaxAppPage() {
       stopPdrSession();
       setPdrActive(false);
     };
-  }, [session, poiReady]);
+  }, [session]);
 
   async function togglePdr() {
     if (isPdrSessionActive()) {
@@ -235,7 +239,11 @@ export default function PaxAppPage() {
       return;
     }
     if (pdrBackendOk === false) {
-      setPdrStatus("PDR backend unavailable — set PDR_API_ORIGIN and start PDR_AIRCHINA on port 10000");
+      setPdrStatus("PDR backend unavailable — set PDR_API_ORIGIN (see README)");
+      return;
+    }
+    if (!pdrHasRoute) {
+      setPdrStatus("No route yet — waiting for the map to compute a gate-to-gate path to follow");
       return;
     }
     try {
@@ -263,20 +271,15 @@ export default function PaxAppPage() {
     u.searchParams.set("dep", session.passenger.flightId);
     u.searchParams.set("pax", session.passenger.id);
     u.searchParams.set("parentOrigin", window.location.origin);
-    const anchor = getPoiGateCoord(session.passenger.gateId);
-    if (anchor) {
-      u.searchParams.set("pdrOriginLat", String(anchor.lat));
-      u.searchParams.set("pdrOriginLng", String(anchor.lng));
-    }
     return u.toString();
-    // poiReady doesn't appear in the body directly, but getPoiGateCoord reads
-    // a module-level cache that PoiService populates asynchronously — poiReady
-    // is the React-visible signal to recompute once that cache is filled.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, poiReady]);
+  }, [session]);
 
   useEffect(() => {
     if (!session) return;
+    // A route belongs to whichever gateFrom/gateTo the map last computed for
+    // — never carry a stale one across a session change.
+    setPdrPlannedPath(null);
+    setPdrHasRoute(false);
     const activeSession = session;
     function handleMapMessage(ev: MessageEvent) {
       if (ev.source !== mapFrameRef.current?.contentWindow) return;
@@ -285,6 +288,17 @@ export default function PaxAppPage() {
       if (data.type === "orienta-nav-path-debug") {
         const steps = Array.isArray(data.pathSteps) ? data.pathSteps.length : 0;
         setNavDebug(`${steps} route steps loaded`);
+        return;
+      }
+      if (data.type === "orienta-nav-path-lonlat") {
+        // PDR has no free-walk mode — it can only start once the map has a
+        // real gate-to-gate route to follow (see pdrClient.ts). Ignored
+        // while a session is already running: the route it started with
+        // stays fixed for that session's lifetime.
+        if (isLngLatPath(data.path) && !pdrActiveRef.current && !isPdrSessionActive()) {
+          setPdrPlannedPath(data.path.map(([lng, lat]) => ({ lat, lng })));
+          setPdrHasRoute(true);
+        }
         return;
       }
       if (data.type !== "orienta-pax-trajectory" || !isLatLng(data.position)) return;
@@ -414,13 +428,17 @@ export default function PaxAppPage() {
             <button
               className={"btn" + (pdrActive ? " primary" : "")}
               onClick={() => void togglePdr()}
-              disabled={!canShareLocation}
+              disabled={!canShareLocation || (!pdrActive && !pdrHasRoute)}
             >
               {pdrActive ? "Stop PDR" : "Start PDR (IMU)"}
             </button>
             {pdrBackendOk === false ? (
               <span className="small" style={{ color: "#b45309" }}>
-                PDR service offline — run PDR_AIRCHINA and set PDR_API_ORIGIN
+                PDR service offline — see README for how to run it and set PDR_API_ORIGIN
+              </span>
+            ) : pdrBackendOk === true && !pdrActive && !pdrHasRoute ? (
+              <span className="small" style={{ color: "#b45309" }}>
+                Waiting for the map to compute a route to follow
               </span>
             ) : null}
             {pdrStatus ? <span className="small">{pdrStatus}</span> : null}

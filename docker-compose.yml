@@ -1,11 +1,15 @@
-# Orienta v3 — local / offline stack (mirrors orienta_v2_step2 layout).
+# Orienta v3 — dashboard stack.
 #
-# PDR only (dashboard via npm on host):
-#   docker compose up -d orienta-pdr
-#   cd apps/dashboard && PDR_API_ORIGIN=http://127.0.0.1:10000 npm run dev:server
+# PDR (pedestrian_dead_reckoning) is a separate service/repo, not built by
+# this compose file — see README.md's "PDR" section. Run it yourself (locally
+# via `npm run pdr:dev`, or wherever it's deployed) and point PDR_API_ORIGIN
+# at it. Indoor map is Mode B external by default (7801 / 3001) — also not
+# started here.
 #
-# Full stack in Docker (dashboard + PDR):
-#   docker compose up -d
+# Production-style boot (copy deploy.example.env → .env, fill secrets first):
+#   docker compose --env-file deploy.example.env up -d --build
+# The --env-file feeds Compose variable substitution; the service `environment`
+# block below is what actually injects those values into the container.
 
 services:
   orienta:
@@ -17,29 +21,47 @@ services:
       - "${HOST_PORT:-5174}:5174"
     environment:
       PORT: "5174"
-      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in .env}"
+      NODE_ENV: production
+      # ── Auth (required for production boot) ──
+      JWT_SECRET: "${JWT_SECRET:?set JWT_SECRET in deploy env}"
+      JWT_SECRET_PREVIOUS: "${JWT_SECRET_PREVIOUS:-}"
       ADMIN_CREDENTIALS: "${ADMIN_CREDENTIALS:?set ADMIN_CREDENTIALS}"
       PAX_ACCOUNT_CREDENTIALS: "${PAX_ACCOUNT_CREDENTIALS:-}"
-      PDR_API_ORIGIN: "${PDR_API_ORIGIN:-http://orienta-pdr:10000}"
+      KIOSK_SCAN_SECRET: "${KIOSK_SCAN_SECRET:?set KIOSK_SCAN_SECRET}"
+      ADMIN_ROLES: "${ADMIN_ROLES:-}"
+      ADMIN_TENANT_SCOPES: "${ADMIN_TENANT_SCOPES:-}"
+      TOURIST_ALLOWED_ORIGINS: "${TOURIST_ALLOWED_ORIGINS:-}"
+      # ── Upstream services ──
+      # PDR is deployed separately (see README.md) — empty disables /pdr-api.
+      PDR_API_ORIGIN: "${PDR_API_ORIGIN:-}"
+      # Mode B (required for a navigable deploy today): map UI + POI API.
+      # Leave empty only if you vendor Mode A assets into the image paths.
       INDOOR_MAP_UPSTREAM: "${INDOOR_MAP_UPSTREAM:-}"
       INDOOR_MAP_API_UPSTREAM: "${INDOOR_MAP_API_UPSTREAM:-}"
       VITE_LOCAL_AIRPORT_MAP: "${VITE_LOCAL_AIRPORT_MAP:-0}"
+      FLIGHTAWARE_API_KEY: "${FLIGHTAWARE_API_KEY:-}"
+      # ── Push / observability ──
+      VAPID_PUBLIC_KEY: "${VAPID_PUBLIC_KEY:-}"
+      VAPID_PRIVATE_KEY: "${VAPID_PRIVATE_KEY:-}"
+      VAPID_SUBJECT: "${VAPID_SUBJECT:-mailto:ops@orienta.ai}"
+      SENTRY_DSN: "${SENTRY_DSN:-}"
+      SENTRY_ENVIRONMENT: "${SENTRY_ENVIRONMENT:-}"
+      SENTRY_RELEASE: "${SENTRY_RELEASE:-}"
+      SENTRY_TRACES_SAMPLE_RATE: "${SENTRY_TRACES_SAMPLE_RATE:-}"
+      LOG_LEVEL: "${LOG_LEVEL:-info}"
+      # ── App defaults ──
       ROUTE_SITE_DEFAULT_TENANT: "${ROUTE_SITE_DEFAULT_TENANT:-airchina}"
+      DEFAULT_AIRPORT: "${DEFAULT_AIRPORT:-PEK}"
+      DEFAULT_TERMINAL: "${DEFAULT_TERMINAL:-T3E}"
+      AIRPORT_CONFIG_DIR: "${AIRPORT_CONFIG_DIR:-}"
+      INSTANCE_ID: "${INSTANCE_ID:-}"
       DB_PATH: /app/data/passengers.db
       # Multi-instance backends (P2-1/P2-3). Empty → single-machine SQLite + in-memory.
       # Enable with: docker compose --profile scale up -d
       DATABASE_URL: "${DATABASE_URL:-}"
       REDIS_URL: "${REDIS_URL:-}"
-      # P2-4: when set (e.g. /shared/video), video merges are served from the
-      # shared volume produced by the orienta-video-worker.
-      VIDEO_OUTPUT_DIR: "${VIDEO_OUTPUT_DIR:-}"
     volumes:
       - orienta-data:/app/data
-      - orienta-video:/shared/video
-    depends_on:
-      orienta-pdr:
-        # Wait for the PDR /health probe (baked into pdr_airchina/Dockerfile) to pass.
-        condition: service_healthy
     restart: unless-stopped
     deploy:
       resources:
@@ -69,8 +91,9 @@ services:
       # password (see server/config.ts validateProductionSecurity).
       POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-orienta}"
       POSTGRES_DB: "${POSTGRES_DB:-orienta}"
+    # Bind to loopback only — do not expose Postgres on the LAN/public interface.
     ports:
-      - "${POSTGRES_HOST_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
       - orienta-pg:/var/lib/postgresql/data
     healthcheck:
@@ -88,57 +111,34 @@ services:
   redis:
     image: redis:7-alpine
     profiles: ["scale"]
-    command: ["redis-server", "--appendonly", "yes"]
+    environment:
+      REDIS_PASSWORD: "${REDIS_PASSWORD:-}"
+    # Set REDIS_PASSWORD in deploy env for anything beyond local play. Empty
+    # keeps the old open-local behaviour (still loopback-bound below).
+    # When set, point REDIS_URL at redis://:PASSWORD@redis:6379
+    command:
+      - /bin/sh
+      - -c
+      - |
+        if [ -n "$$REDIS_PASSWORD" ]; then
+          exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+        else
+          exec redis-server --appendonly yes
+        fi
+    # Bind to loopback only.
     ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - orienta-redis:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test:
+        [
+          "CMD-SHELL",
+          'if [ -n "$$REDIS_PASSWORD" ]; then redis-cli -a "$$REDIS_PASSWORD" ping; else redis-cli ping; fi | grep -q PONG',
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "1"
-          memory: 512m
-
-  # Video-merge worker (P2-4): runs the CPU-heavy ffmpeg concat off the web process.
-  orienta-video-worker:
-    image: orienta-video-worker:latest
-    profiles: ["scale"]
-    build:
-      context: .
-      dockerfile: apps/dashboard/worker/Dockerfile
-    environment:
-      REDIS_URL: "${REDIS_URL:-redis://redis:6379}"
-      VIDEO_OUTPUT_DIR: /shared/video
-      VIDEO_SOURCE_DIR: /src/route_site
-      VIDEO_CSV_NAME: "${VIDEO_CSV_NAME:-PEK_gate_timestamp_full_with_E24_E36.csv}"
-    volumes:
-      - orienta-video:/shared/video
-      - ./apps/dashboard/public/route_site:/src/route_site:ro
-    depends_on:
-      redis:
-        condition: service_healthy
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 1g
-
-  orienta-pdr:
-    image: orienta-pdr:latest
-    build:
-      context: .
-      dockerfile: pdr_airchina/Dockerfile
-    ports:
-      - "${PDR_HOST_PORT:-10000}:10000"
-    environment:
-      PORT: "10000"
     restart: unless-stopped
     deploy:
       resources:
@@ -150,4 +150,3 @@ volumes:
   orienta-data:
   orienta-pg:
   orienta-redis:
-  orienta-video:
