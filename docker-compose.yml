@@ -17,8 +17,14 @@ services:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
+    # Bind to loopback by default — put Caddy/nginx (TLS) in front for public access.
+    # Override with HOST_BIND=0.0.0.0 only when something else already terminates TLS.
     ports:
-      - "${HOST_PORT:-5174}:5174"
+      - "${HOST_BIND:-127.0.0.1}:${HOST_PORT:-5174}:5174"
+    # Lets INDOOR_MAP_* / PDR_API_ORIGIN use host.docker.internal to reach
+    # services on the Docker host (Linux needs host-gateway).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       PORT: "5174"
       NODE_ENV: production

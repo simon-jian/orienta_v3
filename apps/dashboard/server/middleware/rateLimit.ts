@@ -22,6 +22,11 @@ export function createRateLimiter(options: {
   name?: string;
   /** Shared Redis client; when omitted the limiter is in-memory only. */
   redis?: Redis | null;
+  /**
+   * When Redis is configured but errors, default is fail-open (allow traffic).
+   * Set true for auth-sensitive routes so an outage cannot remove brute-force caps.
+   */
+  failClosed?: boolean;
 }) {
   const buckets = new Map<string, Bucket>();
   const keyFn = options.keyFn ?? ((req) => req.ip || "unknown");
@@ -72,10 +77,15 @@ export function createRateLimiter(options: {
       }
       next();
     })().catch((err: unknown) => {
-      // Fail open: never block traffic because the limiter backend is down.
       logger.error("rate_limit_redis_failed", {
         error: err instanceof Error ? err.message : String(err),
+        failClosed: !!options.failClosed,
       });
+      if (options.failClosed) {
+        res.status(503).json({ ok: false, error: "rate_limit_unavailable" });
+        return;
+      }
+      // Fail open for non-auth routes: prefer availability over a hard outage.
       next();
     });
   };

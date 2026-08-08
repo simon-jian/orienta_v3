@@ -42,6 +42,9 @@ const MAX_BCBP_PAYLOAD_LEN = 512;
  * configured value. When KIOSK_SCAN_SECRET is unset, scanning stays open
  * (dev convenience) — validateProductionSecurity() refuses to boot with it
  * unset in production, so this only "fails open" in non-production.
+ *
+ * The browser /pax entry UI does NOT call this endpoint — kiosks must send
+ * X-Kiosk-Secret from a trusted device. Never embed the secret in frontend code.
  */
 function isKioskAuthorized(req: Request): boolean {
   if (!KIOSK_SCAN_SECRET) return true;

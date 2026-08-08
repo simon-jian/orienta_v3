@@ -105,12 +105,19 @@ Admin: http://localhost:5174
 
 | Service | Env on dashboard | Notes |
 |---------|------------------|-------|
-| Indoor map UI | `INDOOR_MAP_UPSTREAM` | Required for nav + PDR routes (Mode B). Default local `:7801`. |
-| Indoor map API | `INDOOR_MAP_API_UPSTREAM` | POI / zones. Default local `:3001`. |
-| PDR | `PDR_API_ORIGIN` | Sibling repo service root (e.g. `:8000`). Also set that service's `PDR_ALLOWED_ORIGINS` to this app's public origin so proxied WS `/pdr-api` is accepted. |
+| Indoor map UI | `INDOOR_MAP_UPSTREAM` | Mode B required today. From Compose use `http://host.docker.internal:7801` (not `127.0.0.1` — that is the container). |
+| Indoor map API | `INDOOR_MAP_API_UPSTREAM` | POI / zones — same host-gateway rule (`:3001`). |
+| PDR | `PDR_API_ORIGIN` | Sibling repo service root. Proxy only allowlists `/health`, `/api/session`, `/ws/pdr/*` (blocks `/api/recompute`). Set PDR's `PDR_ALLOWED_ORIGINS` to this app's public origin. |
+
+Production boot refuses loopback upstreams unless `ALLOW_LOOPBACK_UPSTREAMS=1`
+(for bare-metal same-host deploys). Compose publishes the dashboard on
+`127.0.0.1` by default — put a TLS terminator in front.
 
 Dashboard `/health` can be `ok` while `indoor_map` / `pdr_proxy` report
 `unavailable` / `unreachable` / `disabled` — those are soft checks.
+
+Boarding-pass Premium mint (`POST /api/pax/scan`) is **kiosk-only** (`X-Kiosk-Secret`);
+the browser `/pax` page does not expose a scan form.
 
 ## Health check
 

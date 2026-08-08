@@ -22,6 +22,7 @@ import helmet from "helmet";
 import { createProxyMiddleware } from "http-proxy-middleware";
 
 import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP, validateProductionSecurity } from "./config";
+import { pdrProxyAllowlist, isAllowedPdrUpgradePath } from "./middleware/pdrProxyGuard";
 
 // Fail fast, before anything else initializes, if production config is insecure
 // (weak/placeholder JWT_SECRET, plaintext admin passwords, kiosk scan wide open).
@@ -101,12 +102,20 @@ const pushSubStore = new PushSubscriptionStore(sqlDb);
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(sqlDb);
 
-const authRateLimit = createRateLimiter({ name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
+const authRateLimit = createRateLimiter({
+  name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd, failClosed: true,
+});
 const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
+const paxBasicRateLimit = createRateLimiter({ name: "pax-basic", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
+const paxScanRateLimit = createRateLimiter({ name: "pax-scan", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
+const paxLoginRateLimit = createRateLimiter({
+  name: "pax-login", windowMs: 60_000, maxRequests: 10, redis: redisCmd, failClosed: true,
+});
 // GET /api/flight/closest and POST /api/transfer call FlightAware directly on
 // every request (no FIDS cache) — cap per IP to protect the AeroAPI quota.
 const aeroApiRateLimit = createRateLimiter({ name: "aeroapi", windowMs: 60_000, maxRequests: 30, redis: redisCmd });
 const metricsRateLimit = createRateLimiter({ name: "metrics", windowMs: 60_000, maxRequests: 120, redis: redisCmd });
+const pdrProxyRateLimit = createRateLimiter({ name: "pdr-proxy", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
 
 // ─── Express app ─────────────────────────────────────────────────────────────
 const app = express();
@@ -115,9 +124,8 @@ app.set("trust proxy", 1);
 // Security headers.
 //
 // frameguard/COOP/CORP are enabled with same-origin settings: every iframe use
-// in this app (route_site inside the dashboard, the indoor-map proxy) is
-// same-origin, so this only blocks cross-origin framing/embedding, not the
-// app's own documented usage.
+// in this app (the indoor-map proxy) is same-origin, so this only blocks
+// cross-origin framing/embedding, not the app's own documented usage.
 //
 // contentSecurityPolicy stays off deliberately, not by oversight: the
 // dashboard's Leaflet map pulls tiles from {s}.tile.openstreetmap.org, FIDS
@@ -134,75 +142,30 @@ app.use(helmet({
   frameguard: { action: "sameorigin" },
 }));
 app.use(requestLog);
-app.use(express.json());
-app.use(express.text({ type: () => true, limit: "4kb" }));
 app.use(cookieParser());
 
-// ─── Client metrics ingestion (P1-5) ──────────────────────────────────────────
-const metricsRouter = express.Router();
-registerMetricsRoutes(metricsRouter, metricsRepo);
-app.use("/api/metrics", metricsRateLimit, metricsRouter);
-
-// ─── Public tenant/airport config (P5 multi-airport) ──────────────────────────
-const configRouter = express.Router();
-registerConfigRoutes(configRouter);
-app.use("/api/config", configRouter);
-
-// ─── Auth routes ──────────────────────────────────────────────────────────────
-const authRouter = express.Router();
-registerAuthRoutes(authRouter, auditLog);
-app.use("/api/auth", authRateLimit, authRouter);
-
-// ─── Flight / airport routes ──────────────────────────────────────────────────
-// Two separate router instances: the "/api" mount must NOT carry the legacy
-// catch-all (see registerLegacyFlightFallback doc comment) because it would
-// shadow other single-segment /api/* routes registered afterwards, such as
-// GET /api/passengers.
-const flightRouter = express.Router();
-registerFlightRoutes(flightRouter, aeroApiRateLimit);
-registerFidsRoutes(flightRouter, aeroApiRateLimit);
-app.use("/api", flightRouter);
-
-const legacyFlightRouter = express.Router();
-registerFlightRoutes(legacyFlightRouter, aeroApiRateLimit);
-registerLegacyFlightFallback(legacyFlightRouter);
-app.use("/flight", legacyFlightRouter);
-
-// ─── Orienta-specific routes ──────────────────────────────────────────────────
-const orientaRouter = express.Router();
-registerOrientaRoutes(orientaRouter);
-app.use("/api/orienta", orientaRouter);
-
-// ─── Push / presence / tourist routes ─────────────────────────────────────────
-// paxRateLimit is attached to the routers themselves (not via app.use(prefix, ...))
-// because pushRouter is mounted at five different prefixes below. A limiter
-// attached only to one app-level prefix would not apply when the same router's
-// routes are reached through another prefix (e.g. /api/push/chat-send bypassing
-// a limiter that was only wired on /api/pax).
-const paxSessionRouter = express.Router();
-paxSessionRouter.use(paxRateLimit);
-registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
-app.use("/api/pax", paxSessionRouter);
-
-const pushRouter = express.Router();
-pushRouter.use(paxRateLimit);
-registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
-app.use("/api/push",               pushRouter);
-app.use("/api/pax",                pushRouter);
-app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tourist-*
-app.use("/api/tourist-position",   pushRouter);
-app.use("/api/tourist-deactivate", pushRouter);
-
-// ─── Passenger management routes ──────────────────────────────────────────────
-const passengerRouter = express.Router();
-registerPassengerRoutes(passengerRouter, store, registry, auditLog, pushSubStore);
-app.use("/api/passengers", passengerRouter);
-
-// ─── Indoor map proxy / bundled tiles ────────────────────────────────────────
+// ─── Upstream proxies BEFORE body parsers ─────────────────────────────────────
+// express.json / express.text consume the request stream. If they run first,
+// http-proxy-middleware forwards an empty body to PDR (POST /api/session loses
+// planned_path). Keep all reverse-proxy mounts above the parsers.
 const transparentPng = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l7m9JwAAAABJRU5ErkJggg==",
   "base64"
 );
+
+let pdrProxy: ReturnType<typeof createProxyMiddleware> | null = null;
+if (PDR_API_ORIGIN) {
+  pdrProxy = createProxyMiddleware({
+    target: PDR_API_ORIGIN,
+    changeOrigin: true,
+    ws: true,
+    pathRewrite: { "^/pdr-api": "" },
+  });
+  app.use("/pdr-api", pdrProxyRateLimit, pdrProxyAllowlist(), pdrProxy);
+  logger.info("pdr_api_proxy", { target: PDR_API_ORIGIN, allowlist: true });
+} else {
+  app.use("/pdr-api", (_req, res) => res.status(503).json({ error: "pdr_proxy_disabled", message: "Set PDR_API_ORIGIN env var to enable." }));
+}
 
 if (INDOOR_MAP_UPSTREAM || VITE_LOCAL_AIRPORT_MAP) {
   app.head("/indoor-map/airport-map.html", async (req, res, next) => {
@@ -321,16 +284,73 @@ if (INDOOR_MAP_API_UPSTREAM) {
   logger.info("indoor_map_api_bundled", { dir: LOCAL_INDOOR_MAP_API_DIR });
 }
 
-// ─── PDR proxy ────────────────────────────────────────────────────────────────
-// PDR uses WebSocket (/pdr-api/ws/pdr/{session_id}); upgrade must be wired on the HTTP server (see below).
-let pdrProxy: ReturnType<typeof createProxyMiddleware> | null = null;
-if (PDR_API_ORIGIN) {
-  pdrProxy = createProxyMiddleware({ target: PDR_API_ORIGIN, changeOrigin: true, ws: true, pathRewrite: { "^/pdr-api": "" } });
-  app.use("/pdr-api", pdrProxy);
-  logger.info("pdr_api_proxy", { target: PDR_API_ORIGIN });
-} else {
-  app.use("/pdr-api", (_req, res) => res.status(503).json({ error: "pdr_proxy_disabled", message: "Set PDR_API_ORIGIN env var to enable." }));
-}
+// Body parsers AFTER proxies. Scope text parsing to metrics (sendBeacon).
+app.use(express.json({ limit: "1mb" }));
+app.use("/api/metrics", express.text({ type: ["text/plain", "text/*"], limit: "4kb" }));
+
+// ─── Client metrics ingestion (P1-5) ──────────────────────────────────────────
+const metricsRouter = express.Router();
+registerMetricsRoutes(metricsRouter, metricsRepo);
+app.use("/api/metrics", metricsRateLimit, metricsRouter);
+
+// ─── Public tenant/airport config (P5 multi-airport) ──────────────────────────
+const configRouter = express.Router();
+registerConfigRoutes(configRouter);
+app.use("/api/config", configRouter);
+
+// ─── Auth routes ──────────────────────────────────────────────────────────────
+const authRouter = express.Router();
+registerAuthRoutes(authRouter, auditLog);
+app.use("/api/auth", authRateLimit, authRouter);
+
+// ─── Flight / airport routes ──────────────────────────────────────────────────
+// Two separate router instances: the "/api" mount must NOT carry the legacy
+// catch-all (see registerLegacyFlightFallback doc comment) because it would
+// shadow other single-segment /api/* routes registered afterwards, such as
+// GET /api/passengers.
+const flightRouter = express.Router();
+registerFlightRoutes(flightRouter, aeroApiRateLimit);
+registerFidsRoutes(flightRouter, aeroApiRateLimit);
+app.use("/api", flightRouter);
+
+const legacyFlightRouter = express.Router();
+registerFlightRoutes(legacyFlightRouter, aeroApiRateLimit);
+registerLegacyFlightFallback(legacyFlightRouter);
+app.use("/flight", legacyFlightRouter);
+
+// ─── Orienta-specific routes ──────────────────────────────────────────────────
+const orientaRouter = express.Router();
+registerOrientaRoutes(orientaRouter);
+app.use("/api/orienta", orientaRouter);
+
+// ─── Push / presence / tourist routes ─────────────────────────────────────────
+// paxRateLimit is attached to the routers themselves (not via app.use(prefix, ...))
+// because pushRouter is mounted at five different prefixes below. A limiter
+// attached only to one app-level prefix would not apply when the same router's
+// routes are reached through another prefix (e.g. /api/push/chat-send bypassing
+// a limiter that was only wired on /api/pax).
+const paxSessionRouter = express.Router();
+paxSessionRouter.use(paxRateLimit);
+// Tighter caps on public mint / login paths (in addition to the router-wide limit).
+paxSessionRouter.post("/basic-session", paxBasicRateLimit);
+paxSessionRouter.post("/scan", paxScanRateLimit);
+paxSessionRouter.post("/account-login", paxLoginRateLimit);
+registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
+app.use("/api/pax", paxSessionRouter);
+
+const pushRouter = express.Router();
+pushRouter.use(paxRateLimit);
+registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
+app.use("/api/push",               pushRouter);
+app.use("/api/pax",                pushRouter);
+app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tourist-*
+app.use("/api/tourist-position",   pushRouter);
+app.use("/api/tourist-deactivate", pushRouter);
+
+// ─── Passenger management routes ──────────────────────────────────────────────
+const passengerRouter = express.Router();
+registerPassengerRoutes(passengerRouter, store, registry, auditLog, pushSubStore);
+app.use("/api/passengers", passengerRouter);
 
 // ─── Health probe (P0-8) ──────────────────────────────────────────────────────
 // Process alive + DB ping are the only checks that flip the HTTP status: without
@@ -448,6 +468,11 @@ if (pdrProxy) {
     try {
       const pathname = new URL(req.url || "", "http://localhost").pathname;
       if (!pathname.startsWith("/pdr-api")) return;
+      if (!isAllowedPdrUpgradePath(pathname)) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
       req.url = (req.url || "").replace(/^\/pdr-api(?=\/|$)/, "") || "/";
       (pdrProxy as unknown as { upgrade?: (r: typeof req, s: typeof socket, h: typeof head) => void }).upgrade?.(
         req,

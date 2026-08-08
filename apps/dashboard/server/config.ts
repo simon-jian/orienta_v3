@@ -7,6 +7,7 @@
  * Fixes issue L3: chaotic env variable naming — canonical names are VITE_*.
  * Legacy aliases are read as fallbacks with deprecation warnings.
  */
+import { isLoopbackHttpUrl } from "./lib/upstreamUrl";
 
 function required(name: string, ...aliases: string[]): string {
   const value = [name, ...aliases].map((k) => process.env[k]?.trim()).find(Boolean);
@@ -290,6 +291,41 @@ export function validateProductionSecurity(): void {
   // deploys that don't use --profile scale at all). Catch it here instead.
   if (DATABASE_URL && /:\/\/[^:]+:orienta@/.test(DATABASE_URL)) {
     problems.push('DATABASE_URL uses the docker-compose.yml example password ("orienta") — set POSTGRES_PASSWORD to a strong value and update DATABASE_URL to match.');
+  }
+
+  if (REDIS_URL) {
+    try {
+      const u = new URL(REDIS_URL);
+      if (!u.password) {
+        problems.push(
+          "REDIS_URL has no password — set REDIS_PASSWORD and use redis://:PASSWORD@host:6379 (or rediss://…) before go-live.",
+        );
+      }
+    } catch {
+      problems.push("REDIS_URL is not a valid URL.");
+    }
+  }
+
+  // Inside Docker, 127.0.0.1 is the container itself — map/PDR on the host are
+  // unreachable. Allow an explicit override for bare-metal production on the
+  // same host (ALLOW_LOOPBACK_UPSTREAMS=1).
+  const allowLoopback = optional("ALLOW_LOOPBACK_UPSTREAMS") === "1";
+  if (!allowLoopback) {
+    if (isLoopbackHttpUrl(INDOOR_MAP_UPSTREAM)) {
+      problems.push(
+        `INDOOR_MAP_UPSTREAM points at loopback (${INDOOR_MAP_UPSTREAM}) — inside Docker that is the container, not the host. Use host.docker.internal / a compose network hostname / a public URL, or set ALLOW_LOOPBACK_UPSTREAMS=1 for same-host bare-metal.`,
+      );
+    }
+    if (isLoopbackHttpUrl(INDOOR_MAP_API_UPSTREAM)) {
+      problems.push(
+        `INDOOR_MAP_API_UPSTREAM points at loopback (${INDOOR_MAP_API_UPSTREAM}) — use a reachable hostname (see INDOOR_MAP_UPSTREAM note).`,
+      );
+    }
+    if (isLoopbackHttpUrl(PDR_API_ORIGIN)) {
+      problems.push(
+        `PDR_API_ORIGIN points at loopback (${PDR_API_ORIGIN}) — use a reachable hostname or ALLOW_LOOPBACK_UPSTREAMS=1.`,
+      );
+    }
   }
 
   if (problems.length > 0) {

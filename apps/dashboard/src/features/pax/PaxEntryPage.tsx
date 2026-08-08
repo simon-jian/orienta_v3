@@ -38,7 +38,6 @@ function Field(props: {
 }
 
 export default function PaxEntryPage() {
-  const [scanPayload, setScanPayload] = useState("");
   const [basicArr, setBasicArr] = useState("");
   const [basicDep, setBasicDep] = useState("");
   const [basicName, setBasicName] = useState("");
@@ -75,22 +74,16 @@ export default function PaxEntryPage() {
 
         <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 16 }}>
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <h2 style={{ margin: 0, fontSize: 18 }}>机票二维码</h2>
-            <p className="small">临时 Premium。粘贴扫描到的 IATA BCBP 内容。</p>
-            <textarea
-              className="input"
-              style={{ minHeight: 96, resize: "vertical" }}
-              value={scanPayload}
-              onChange={(e) => setScanPayload(e.target.value)}
-              placeholder="M1ZHANG/WEI..."
-            />
-            <button
-              className="btn primary"
-              disabled={busy === "scan"}
-              onClick={() => submit("scan", () => postPaxSession("/api/pax/scan", { payload: scanPayload }))}
-            >
-              创建 Premium 临时会话
-            </button>
+            <h2 style={{ margin: 0, fontSize: 18 }}>登机牌扫描（Kiosk）</h2>
+            <p className="small">
+              Premium 临时会话仅由机场 kiosk / 受信任终端创建：调用{" "}
+              <code>POST /api/pax/scan</code> 并携带 <code>X-Kiosk-Secret</code>。
+              浏览器页面故意不提供扫码入口，避免把 kiosk 密钥放进前端。
+            </p>
+            <p className="small" style={{ color: "#636366", margin: 0 }}>
+              Boarding-pass mint is kiosk-only (shared secret header). Use Basic
+              transfer or Premium account login below in the browser.
+            </p>
           </div>
 
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
@@ -114,7 +107,7 @@ export default function PaxEntryPage() {
 
           <div className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             <h2 style={{ margin: 0, fontSize: 18 }}>Premium 账号登录</h2>
-            <p className="small">永久付费账号。第一版使用本地开发账号，后续替换为正式账号数据库。</p>
+            <p className="small">付费账号登录。使用运营侧发放的邮箱与密码。</p>
             <Field label="Email" value={accountEmail} onChange={setAccountEmail} placeholder="premium@orienta.ai" />
             <Field label="Password" value={accountPassword} onChange={setAccountPassword} type="password" />
             <Field label="出发航班" value={accountDep} onChange={setAccountDep} placeholder="CA837" />
