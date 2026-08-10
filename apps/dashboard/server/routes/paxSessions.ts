@@ -43,8 +43,8 @@ const MAX_BCBP_PAYLOAD_LEN = 512;
  * (dev convenience) — validateProductionSecurity() refuses to boot with it
  * unset in production, so this only "fails open" in non-production.
  *
- * The browser /pax entry UI does NOT call this endpoint — kiosks must send
- * X-Kiosk-Secret from a trusted device. Never embed the secret in frontend code.
+ * Kiosk-only for POST /scan. Phone browsers use POST /boarding-pass instead
+ * (no secret). Never embed KIOSK_SCAN_SECRET in frontend code.
  */
 function isKioskAuthorized(req: Request): boolean {
   if (!KIOSK_SCAN_SECRET) return true;
@@ -53,6 +53,58 @@ function isKioskAuthorized(req: Request): boolean {
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
   return a.length === b.length && timingSafeEqual(a, b);
+}
+
+type BcbpSource = "qr_scan" | "phone_bcbp";
+
+async function mintSessionFromBcbp(
+  registry: PassengerRegistry,
+  body: Record<string, unknown>,
+  source: BcbpSource,
+): Promise<{ parsed: ReturnType<typeof parseBcbp>; session: PaxSessionResponse }> {
+  const tenantId = tenantFromBody(body);
+  const payload = String(body.payload || body.bcbp || "").trim();
+  if (!payload) throw new Error("missing_bcbp_payload");
+  if (payload.length > MAX_BCBP_PAYLOAD_LEN) throw new Error("bcbp_payload_too_large");
+
+  const parsed = parseBcbp(payload);
+  const firstLeg = parsed.legs[0]!;
+  const outboundLeg = parsed.legs[parsed.legs.length - 1]!;
+  const outbound = await resolveOutboundFlight(
+    canonicalFlightId(body.departureFlight || outboundLeg.flightId),
+    canonicalGateId(body.gateId) || undefined,
+    outboundLeg.toAirport,
+    airportForTenant(tenantId),
+  );
+  const idPrefix = source === "phone_bcbp" ? "PHONE" : "TMP";
+  const passengerId = passengerIdFromStableParts(idPrefix, [
+    tenantId,
+    parsed.passengerName,
+    outboundLeg.flightId,
+    outboundLeg.julianDate,
+    outboundLeg.sequenceNumber,
+  ]);
+  const passenger = await registry.getOrCreate({
+    id: passengerId,
+    tenantId,
+    name: parsed.passengerName || String(body.name || "").trim() || "Unknown",
+    plan: "premium",
+    flightId: outbound.flightId,
+    gateId: outbound.gateId,
+    inboundFlightId: firstLeg === outboundLeg ? undefined : firstLeg.flightId,
+    inboundFrom: firstLeg.fromAirport || undefined,
+    outboundTo: outbound.outboundTo || outboundLeg.toAirport || undefined,
+    source,
+  });
+
+  const session = await createSessionResponse({
+    passenger,
+    tenantId,
+    accountType: "temporary",
+    plan: "premium",
+    expiresAt: temporaryExpiryFromDeparture(outbound.scheduledDepMs),
+  });
+  return { parsed, session };
 }
 
 /**
@@ -162,72 +214,84 @@ export function registerPaxSessionRoutes(
     }
     try {
       const body = (req.body || {}) as Record<string, unknown>;
-      const tenantId = tenantFromBody(body);
-      const payload = String(body.payload || body.bcbp || "").trim();
-      if (!payload) return res.status(400).json({ ok: false, error: "missing_bcbp_payload" });
-      if (payload.length > MAX_BCBP_PAYLOAD_LEN) {
-        return res.status(400).json({ ok: false, error: "bcbp_payload_too_large" });
-      }
-
-      const parsed = parseBcbp(payload);
-      const firstLeg = parsed.legs[0]!;
-      const outboundLeg = parsed.legs[parsed.legs.length - 1]!;
-      const outbound = await resolveOutboundFlight(
-        canonicalFlightId(body.departureFlight || outboundLeg.flightId),
-        canonicalGateId(body.gateId) || undefined,
-        outboundLeg.toAirport,
-        airportForTenant(tenantId),
-      );
-      const passengerId = passengerIdFromStableParts("TMP", [
-        tenantId,
-        parsed.passengerName,
-        outboundLeg.flightId,
-        outboundLeg.julianDate,
-        outboundLeg.sequenceNumber,
-      ]);
-      const passenger = await registry.getOrCreate({
-        id: passengerId,
-        tenantId,
-        name: parsed.passengerName || String(body.name || "").trim() || "Unknown",
-        plan: "premium",
-        flightId: outbound.flightId,
-        gateId: outbound.gateId,
-        inboundFlightId: firstLeg === outboundLeg ? undefined : firstLeg.flightId,
-        inboundFrom: firstLeg.fromAirport || undefined,
-        outboundTo: outbound.outboundTo || outboundLeg.toAirport || undefined,
-        source: "qr_scan",
-      });
-
-      const session = await createSessionResponse({
-        passenger,
-        tenantId,
-        accountType: "temporary",
-        plan: "premium",
-        expiresAt: temporaryExpiryFromDeparture(outbound.scheduledDepMs),
-      });
-      auditSession(tenantId, passenger.id, "temporary", "premium");
+      const { parsed, session } = await mintSessionFromBcbp(registry, body, "qr_scan");
+      auditSession(session.passenger.tenantId, session.passenger.id, "temporary", "premium");
       return res.status(201).json({ ok: true, bcbp: parsed, session });
     } catch (err) {
       return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : "scan_failed" });
     }
   });
 
+  /**
+   * Phone / PWA boarding-pass claim. Same BCBP parse + premium mint as kiosk
+   * /scan, but no kiosk secret (browsers must never hold KIOSK_SCAN_SECRET).
+   * Protect with a stricter rate limit at mount time.
+   */
+  router.post("/boarding-pass", async (req: Request, res: Response) => {
+    try {
+      const body = (req.body || {}) as Record<string, unknown>;
+      const { parsed, session } = await mintSessionFromBcbp(registry, body, "phone_bcbp");
+      auditSession(session.passenger.tenantId, session.passenger.id, "temporary", "premium");
+      return res.status(201).json({ ok: true, bcbp: parsed, session });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "boarding_pass_failed";
+      const status =
+        message === "missing_bcbp_payload" || message === "bcbp_payload_too_large" ? 400 : 400;
+      return res.status(status).json({ ok: false, error: message });
+    }
+  });
+
   router.post("/basic-session", async (req: Request, res: Response) => {
     const body = (req.body || {}) as Record<string, unknown>;
     const tenantId = tenantFromBody(body);
-    // Canonicalized so "ca123" and "CA123" hash to the same passenger id
-    // below (passengerIdFromStableParts) instead of silently creating two
-    // separate registry rows for what's the same self-reported flight.
-    const departureFlight = canonicalFlightId(body.departureFlight || body.dep);
-    const arrivalFlight = canonicalFlightId(body.arrivalFlight || body.arr);
-    if (!departureFlight) return res.status(400).json({ ok: false, error: "missing_departure_flight" });
-    if (!arrivalFlight) return res.status(400).json({ ok: false, error: "missing_arrival_flight" });
+    const rawIntent = String(body.intent || "").trim().toLowerCase();
+    const singleFlight = canonicalFlightId(
+      body.flight || body.departureFlight || body.dep || body.arrivalFlight || body.arr,
+    );
+    let departureFlight = canonicalFlightId(body.departureFlight || body.dep);
+    let arrivalFlight = canonicalFlightId(body.arrivalFlight || body.arr);
 
-    const outbound = await resolveOutboundFlight(departureFlight, canonicalGateId(body.gateId) || undefined, undefined, airportForTenant(tenantId));
+    // Infer intent when omitted: two distinct flights → transfer; else depart.
+    let intent: "depart" | "arrive" | "transfer" =
+      rawIntent === "arrive" || rawIntent === "transfer" || rawIntent === "depart"
+        ? rawIntent
+        : departureFlight && arrivalFlight && departureFlight !== arrivalFlight
+          ? "transfer"
+          : "depart";
+
+    if (intent === "transfer") {
+      if (!arrivalFlight || !departureFlight) {
+        return res.status(400).json({ ok: false, error: "missing_transfer_flights" });
+      }
+      if (arrivalFlight === departureFlight) {
+        return res.status(400).json({ ok: false, error: "transfer_flights_must_differ" });
+      }
+    } else {
+      const flight = singleFlight || departureFlight || arrivalFlight;
+      if (!flight) return res.status(400).json({ ok: false, error: "missing_flight" });
+      departureFlight = flight;
+      arrivalFlight = flight;
+    }
+
+    const normalizeDate = (value: unknown): string | null => {
+      const raw = String(value || "").trim();
+      return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw : null;
+    };
+    const date = normalizeDate(body.date);
+    const arrivalDate = normalizeDate(body.arrivalDate) || date;
+    const departureDate = normalizeDate(body.departureDate) || date;
+
+    const outbound = await resolveOutboundFlight(
+      departureFlight!,
+      canonicalGateId(body.gateId) || undefined,
+      undefined,
+      airportForTenant(tenantId),
+    );
     const passengerId = passengerIdFromStableParts("BASIC", [
       tenantId,
-      arrivalFlight,
-      departureFlight,
+      intent,
+      arrivalFlight || "",
+      departureFlight || "",
       String(body.name || "").trim(),
     ]);
     const passenger = await registry.getOrCreate({
@@ -237,7 +301,7 @@ export function registerPaxSessionRoutes(
       plan: "free",
       flightId: outbound.flightId,
       gateId: outbound.gateId,
-      inboundFlightId: arrivalFlight,
+      inboundFlightId: intent === "depart" ? undefined : arrivalFlight || undefined,
       outboundTo: outbound.outboundTo || undefined,
       source: "manual",
     });
@@ -250,7 +314,19 @@ export function registerPaxSessionRoutes(
       expiresAt: temporaryExpiryFromDeparture(outbound.scheduledDepMs),
     });
     auditSession(tenantId, passenger.id, "temporary", "free");
-    return res.status(201).json({ ok: true, session });
+    return res.status(201).json({
+      ok: true,
+      session,
+      trip: {
+        intent,
+        flight: intent === "transfer" ? undefined : departureFlight,
+        date: intent === "transfer" ? undefined : departureDate || arrivalDate,
+        arrivalFlight: intent === "transfer" || intent === "arrive" ? arrivalFlight : undefined,
+        departureFlight: intent === "transfer" || intent === "depart" ? departureFlight : undefined,
+        arrivalDate: intent === "transfer" ? arrivalDate : undefined,
+        departureDate: intent === "transfer" ? departureDate : undefined,
+      },
+    });
   });
 
   router.post("/account-login", async (req: Request, res: Response) => {

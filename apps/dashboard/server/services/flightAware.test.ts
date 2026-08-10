@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { pickBestFlightAwareFlight } from "./flightAware";
 
 // FLIGHTAWARE_API_KEY is read from process.env at module-load time (server/config.ts),
 // so each test gets a fresh module instance via resetModules() + dynamic import
@@ -9,6 +10,57 @@ async function importFreshWithApiKey() {
   vi.stubEnv("FLIGHTAWARE_API_KEY", "test-key");
   return import("./flightAware");
 }
+
+function flight(overrides: Record<string, unknown>) {
+  return {
+    status: "Scheduled",
+    origin: { timezone: "America/New_York" },
+    destination: { timezone: "America/Los_Angeles" },
+    ...overrides,
+  };
+}
+
+describe("pickBestFlightAwareFlight", () => {
+  it("selects the requested local departure date instead of the first provider result", () => {
+    const selected = pickBestFlightAwareFlight(
+      [
+        flight({
+          fa_flight_id: "UA2400-aug5",
+          scheduled_out: "2026-08-05T22:10:00Z",
+          gate_origin: null,
+        }),
+        flight({
+          fa_flight_id: "UA2400-aug4",
+          scheduled_out: "2026-08-04T22:10:00Z",
+          gate_origin: "B23",
+          baggage_claim: "6",
+        }),
+      ],
+      { date: "2026-08-04", intent: "depart", now: Date.parse("2026-08-04T17:40:00Z") },
+    );
+    expect(selected?.fa_flight_id).toBe("UA2400-aug4");
+    expect(selected?.gate_origin).toBe("B23");
+  });
+
+  it("uses destination-local arrival date for arrival searches", () => {
+    const selected = pickBestFlightAwareFlight(
+      [
+        flight({ fa_flight_id: "previous-local-day", scheduled_in: "2026-08-04T06:30:00Z" }),
+        flight({ fa_flight_id: "late", scheduled_in: "2026-08-05T06:30:00Z" }),
+      ],
+      { date: "2026-08-04", intent: "arrive", now: Date.parse("2026-08-04T17:40:00Z") },
+    );
+    expect(selected?.fa_flight_id).toBe("late");
+  });
+
+  it("returns null rather than silently choosing another date", () => {
+    const selected = pickBestFlightAwareFlight(
+      [flight({ scheduled_out: "2026-08-05T22:10:00Z" })],
+      { date: "2026-08-04", intent: "depart" },
+    );
+    expect(selected).toBeNull();
+  });
+});
 
 describe("fetchFlightAware circuit breaker", () => {
   const originalFetch = global.fetch;

@@ -116,8 +116,14 @@ Production boot refuses loopback upstreams unless `ALLOW_LOOPBACK_UPSTREAMS=1`
 Dashboard `/health` can be `ok` while `indoor_map` / `pdr_proxy` report
 `unavailable` / `unreachable` / `disabled` — those are soft checks.
 
-Boarding-pass Premium mint (`POST /api/pax/scan`) is **kiosk-only** (`X-Kiosk-Secret`);
-the browser `/pax` page does not expose a scan form.
+Boarding-pass Premium mint:
+
+- Kiosk: `POST /api/pax/scan` with `X-Kiosk-Secret` (never put the secret in the browser).
+- Phone / PWA: `POST /api/pax/boarding-pass` (stricter rate limit, no kiosk secret).
+
+Passenger funnel: `/pax` → `/pax/login` → `/pax/flight` → `/pax/app` (nav + assist tabs).
+Public arrival share: `/arrival/:shareId?token=…`. Indoor map URL comes from
+`INDOOR_MAP_*` / `VITE_INDOOR_MAP_*` only.
 
 ## Health check
 

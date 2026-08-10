@@ -55,7 +55,7 @@ import type {
 /** Full passenger record as stored in the database + online state. */
 export type PassengerRecord = Passenger & {
   tenantId: string;
-  source: "qr_scan" | "manual" | "api_import" | "account_login";
+  source: "qr_scan" | "phone_bcbp" | "manual" | "api_import" | "account_login";
   createdAt: number;
   lastSeenAt?: number;
   isOnline: boolean;

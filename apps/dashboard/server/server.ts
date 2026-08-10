@@ -35,13 +35,16 @@ import { HubStore, attachWsHub } from "./hub/wsHub";
 import { ChatRepository } from "./hub/ChatRepository";
 import { registerAuthRoutes } from "./routes/auth";
 import { registerFlightRoutes, registerLegacyFlightFallback, registerOrientaRoutes } from "./routes/flight";
+import { registerWeatherRoutes } from "./routes/weather";
 import { registerFidsRoutes } from "./routes/fids";
 import { registerPushRoutes } from "./routes/push";
 import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
+import { registerJourneyRoutes } from "./routes/journey";
 import { PassengerRegistry } from "./passengers/PassengerRegistry";
 import { PaxAccountStore } from "./passengers/PaxAccountStore";
 import { PushSubscriptionStore } from "./passengers/PushSubscriptionStore";
+import { JourneyStore } from "./journey/JourneyStore";
 import { AuditLog } from "./lib/auditLog";
 import { startMaintenanceJobs } from "./jobs/maintenance";
 import { createRateLimiter } from "./middleware/rateLimit";
@@ -101,6 +104,7 @@ const pushSubStore = new PushSubscriptionStore(sqlDb);
 
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(sqlDb);
+const journeyStore = new JourneyStore(sqlDb);
 
 const authRateLimit = createRateLimiter({
   name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd, failClosed: true,
@@ -108,6 +112,9 @@ const authRateLimit = createRateLimiter({
 const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
 const paxBasicRateLimit = createRateLimiter({ name: "pax-basic", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
 const paxScanRateLimit = createRateLimiter({ name: "pax-scan", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
+const paxBoardingPassRateLimit = createRateLimiter({
+  name: "pax-boarding-pass", windowMs: 60_000, maxRequests: 8, redis: redisCmd, failClosed: true,
+});
 const paxLoginRateLimit = createRateLimiter({
   name: "pax-login", windowMs: 60_000, maxRequests: 10, redis: redisCmd, failClosed: true,
 });
@@ -310,6 +317,7 @@ app.use("/api/auth", authRateLimit, authRouter);
 // GET /api/passengers.
 const flightRouter = express.Router();
 registerFlightRoutes(flightRouter, aeroApiRateLimit);
+registerWeatherRoutes(flightRouter);
 registerFidsRoutes(flightRouter, aeroApiRateLimit);
 app.use("/api", flightRouter);
 
@@ -334,9 +342,15 @@ paxSessionRouter.use(paxRateLimit);
 // Tighter caps on public mint / login paths (in addition to the router-wide limit).
 paxSessionRouter.post("/basic-session", paxBasicRateLimit);
 paxSessionRouter.post("/scan", paxScanRateLimit);
+paxSessionRouter.post("/boarding-pass", paxBoardingPassRateLimit);
 paxSessionRouter.post("/account-login", paxLoginRateLimit);
 registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
 app.use("/api/pax", paxSessionRouter);
+
+const journeyRouter = express.Router();
+journeyRouter.use(paxRateLimit);
+registerJourneyRoutes(journeyRouter, journeyStore, registry);
+app.use("/api", journeyRouter);
 
 const pushRouter = express.Router();
 pushRouter.use(paxRateLimit);
@@ -516,6 +530,7 @@ async function bootstrap(): Promise<void> {
     pushSubStore.init(),
     auditLog.init(),
     accountStore.init(),
+    journeyStore.init(),
   ]);
   // Then apply versioned migrations — anything a bare CREATE TABLE IF NOT
   // EXISTS can't express on a database that already has data (see

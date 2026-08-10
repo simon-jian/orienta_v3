@@ -6,7 +6,13 @@
  */
 import type { Router, Request, Response, RequestHandler, NextFunction } from "express";
 import { getGateCoord, getAllGateCoords, getPekCenter } from "../lib/poiCache";
-import { type FlightResult, normalizeFlight, fetchFlightAware } from "../services/flightAware";
+import {
+  type FlightLookupIntent,
+  type FlightResult,
+  normalizeFlight,
+  normalizeFlightDate,
+  fetchFlightAware,
+} from "../services/flightAware";
 import { getAirport } from "../../src/config/airports/registry";
 import { logger } from "../lib/logger";
 
@@ -38,24 +44,12 @@ function getAirportGateCoord(airport: string, gate: string): [number, number] | 
 
 // ─── FlightAware (client extracted to ../services/flightAware) ─────────────────
 
-type FlightInstanceDict = Pick<
-  FlightResult,
-  | "flight_iata" | "dep_iata" | "arr_iata" | "dep_time_local" | "arr_time_local"
-  | "dep_terminal" | "dep_gate" | "arr_terminal" | "arr_gate"
->;
+function toInstanceDict(inst: FlightResult): FlightResult {
+  return { ...inst };
+}
 
-function toInstanceDict(inst: FlightResult): FlightInstanceDict {
-  return {
-    flight_iata: inst.flight_iata,
-    dep_iata: inst.dep_iata,
-    arr_iata: inst.arr_iata,
-    dep_time_local: inst.dep_time_local,
-    arr_time_local: inst.arr_time_local,
-    dep_terminal: inst.dep_terminal,
-    dep_gate: inst.dep_gate,
-    arr_terminal: inst.arr_terminal,
-    arr_gate: inst.arr_gate,
-  };
+function parseLookupIntent(raw: unknown): FlightLookupIntent {
+  return String(raw || "").trim().toLowerCase() === "arrive" ? "arrive" : "depart";
 }
 
 import { estimateWalkingTime } from "../../src/utils/geo";
@@ -111,8 +105,10 @@ export function registerFlightRoutes(router: Router, aeroApiRateLimit?: RequestH
     const raw = (req.query.q as string || req.query.flight as string || "").trim();
     const flightIdent = normalizeFlight(raw);
     if (!flightIdent) return res.status(400).json({ ok: false, error: "missing_flight" });
+    const date = normalizeFlightDate(req.query.date);
+    const intent = parseLookupIntent(req.query.intent);
     try {
-      const inst = await fetchFlightAware(flightIdent);
+      const inst = await fetchFlightAware(flightIdent, { date, intent });
       const badgeLabel = (inst.status || "").toUpperCase().trim() || "SCHEDULED";
       const badgeClass = /en route|depart|arriv|land/i.test(badgeLabel) ? "ok" : "neutral";
       res.json({
@@ -134,8 +130,13 @@ export function registerFlightRoutes(router: Router, aeroApiRateLimit?: RequestH
     const arrIdent = normalizeFlight(String(body.arrFlight || body.arrivalFlight || body.arr || ""));
     const depIdent = normalizeFlight(String(body.depFlight || body.departureFlight || body.dep || ""));
     if (!arrIdent || !depIdent) return res.status(400).json({ ok: false, error: "missing_flights" });
+    const arrDate = normalizeFlightDate(body.arrDate || body.arrivalDate);
+    const depDate = normalizeFlightDate(body.depDate || body.departureDate);
     try {
-      const [arrInst, depInst] = await Promise.all([fetchFlightAware(arrIdent), fetchFlightAware(depIdent)]);
+      const [arrInst, depInst] = await Promise.all([
+        fetchFlightAware(arrIdent, { date: arrDate, intent: "arrive" }),
+        fetchFlightAware(depIdent, { date: depDate, intent: "depart" }),
+      ]);
       const hub      = (arrInst.arr_iata || depInst.dep_iata || "").toUpperCase();
       const fromGate = arrInst.arr_gate || "—";
       const toGate   = depInst.dep_gate || "—";

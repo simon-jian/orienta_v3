@@ -30,6 +30,9 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // Cloudflare quick tunnels present Host: *.trycloudflare.com; Vite blocks
+    // unknown hosts by default (dev-only phone HTTPS testing).
+    allowedHosts: [".trycloudflare.com", "localhost", ".localhost"],
     proxy: {
       // Dev server proxies all API/WS calls to the Express backend
       "/api":                  "http://localhost:5175",

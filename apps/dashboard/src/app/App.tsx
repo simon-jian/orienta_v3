@@ -5,6 +5,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LoginScreen from "../components/LoginScreen";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
+import PaxLoginPage from "../features/pax/PaxLoginPage";
 import { fetchSession, logout as authLogout, cacheSession } from "../services/auth";
 import { apiUrl } from "../config/api";
 import type { AdminSession } from "../types/types";
@@ -14,6 +15,8 @@ import type { AdminSession } from "../types/types";
 // a passenger's browser never needs the admin console's code and vice versa.
 const Dashboard = lazy(() => import("./Dashboard"));
 const PaxAppPage = lazy(() => import("../features/pax/PaxAppPage"));
+const PaxFlightPage = lazy(() => import("../features/pax/PaxFlightPage"));
+const ArrivalPlanPage = lazy(() => import("../features/pax/ArrivalPlanPage"));
 
 function RouteLoading() {
   return (
@@ -66,7 +69,10 @@ export default function App({ configDegraded = false }: { configDegraded?: boole
         <Routes>
           <Route path="/pax"  element={<PaxEntryPage />} />
           <Route path="/pax/" element={<PaxEntryPage />} />
+          <Route path="/pax/login" element={<PaxLoginPage />} />
+          <Route path="/pax/flight" element={<PaxFlightPage />} />
           <Route path="/pax/app" element={<PaxAppPage />} />
+          <Route path="/arrival/:shareId" element={<ArrivalPlanPage />} />
 
           <Route
             path="*"

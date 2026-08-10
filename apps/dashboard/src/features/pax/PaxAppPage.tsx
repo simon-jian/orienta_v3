@@ -15,54 +15,91 @@ import {
   clearPaxSession,
   fetchPaxSession,
   getStoredPaxSession,
+  getStoredPaxTrip,
   type PaxSession,
+  type PaxTripContext,
 } from "./session";
 import { apiUrl } from "../../config/api";
 import { clientDefaultAirport } from "../../config/client";
+import { usePaxPush } from "./hooks/usePaxPush";
+import "./styles/pax.css";
+
+type RobotServiceType = "follow" | "um" | "wheelchair" | "lost_delivery";
+type RobotPhase = "idle" | "submitted" | "assigned" | "en_route" | "serving";
+
+const ROBOT_SERVICES: { id: RobotServiceType; title: string; blurb: string }[] = [
+  { id: "follow", title: "跟随服务", blurb: "旅客站到机器人前方，识别锁定后自动跟随" },
+  { id: "um", title: "UM 无人陪", blurb: "儿童资料、证件核验、交接责任链" },
+  { id: "wheelchair", title: "特殊协助", blurb: "轮椅、急客、老人、语言或医疗协助" },
+  { id: "lost_delivery", title: "楼内递送", blurb: "证件、药品、失物、小件物品递送" },
+];
 
 function fmtTime(ts: number): string {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function MessageList({ messages }: { messages: ChatMessage[] }) {
+function resolveTrip(session: PaxSession): PaxTripContext {
+  return session.trip || getStoredPaxTrip() || {
+    intent: "depart",
+    flight: session.passenger.flightId,
+  };
+}
+
+function infoStripFor(session: PaxSession, trip: PaxTripContext) {
+  if (trip.intent === "transfer") {
+    return {
+      inbound: trip.arrivalFlight ? `${trip.arrivalFlight}` : "—",
+      outbound: trip.departureFlight || session.passenger.flightId || "—",
+    };
+  }
+  if (trip.intent === "arrive") {
+    return {
+      inbound: trip.flight || session.passenger.flightId || "—",
+      outbound: "—",
+    };
+  }
+  return {
+    inbound: "—",
+    outbound: trip.flight || session.passenger.flightId || "—",
+  };
+}
+
+function MessageList({
+  messages,
+  plan,
+}: {
+  messages: ChatMessage[];
+  plan: "free" | "premium";
+}) {
   if (!messages.length) {
-    return <div className="small" style={{ opacity: 0.55, textAlign: "center", padding: 16 }}>No conversation yet.</div>;
+    return (
+      <div className="pax-assist-watermark">
+        Air China 智能中转 · Orienta Transfer Assist
+        <span>
+          {plan === "premium"
+            ? "Premium：可与运营助手对话。"
+            : "Free：由 AI agent 协助。可收通知并分享位置。"}
+        </span>
+      </div>
+    );
   }
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+    <>
       {messages.map((m) => {
         const own = m.from === "pax";
+        const role =
+          m.from === "pax" ? "pax" : m.from === "system" ? "system" : m.from === "agent" ? "agent" : "admin";
         return (
-          <div key={m.id} style={{ alignSelf: own ? "flex-end" : "flex-start", maxWidth: "82%" }}>
-            <div className="small" style={{ opacity: 0.55, marginBottom: 2 }}>
+          <div key={m.id} className={`pax-assist-msg ${own ? "right" : "left"}`}>
+            <div className="pax-assist-msg-meta">
               {own ? "You" : m.from} · {fmtTime(m.createdAt)}
             </div>
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: 12,
-              background: own ? "#c8102e" : m.from === "system" ? "#fff7ed" : "#fff",
-              color: own ? "#fff" : "#111827",
-              border: own ? undefined : "1px solid rgba(0,0,0,0.08)",
-              fontSize: 13,
-              lineHeight: 1.45,
-            }}>
-              {m.body}
-            </div>
+            <div className={`pax-assist-bubble ${role}`}>{m.body}</div>
           </div>
         );
       })}
-    </div>
+    </>
   );
-}
-
-function capabilityLabel(capability: string): string {
-  const labels: Record<string, string> = {
-    navigate: "Navigation",
-    receive_notifications: "Notifications",
-    share_location: "Location sharing",
-    operator_chat: "Operator chat",
-  };
-  return labels[capability] || capability;
 }
 
 function isLatLng(value: unknown): value is { lat: number; lng: number } {
@@ -70,8 +107,6 @@ function isLatLng(value: unknown): value is { lat: number; lng: number } {
   return !!v && typeof v.lat === "number" && typeof v.lng === "number";
 }
 
-/** Shape of `orienta-nav-path-lonlat`'s `path` field — see airport-map.html's
- * `orientaPostNavPathLonLatToParent_` (GeoJSON-style [lng, lat] pairs). */
 function isLngLatPath(value: unknown): value is [number, number][] {
   return (
     Array.isArray(value) &&
@@ -103,20 +138,37 @@ export default function PaxAppPage() {
   const [rtUp, setRtUp] = useState(false);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [notifications, setNotifications] = useState<MsgRecord[]>([]);
+  const [dismissedNotify, setDismissedNotify] = useState<Set<string>>(() => new Set());
   const [input, setInput] = useState("");
-  const [locationStatus, setLocationStatus] = useState("");
+  const [locationStatus, setLocationStatus] = useState("Location: —");
   const [navDebug, setNavDebug] = useState("");
   const [pdrStatus, setPdrStatus] = useState("");
   const [pdrActive, setPdrActive] = useState(false);
   const [pdrBackendOk, setPdrBackendOk] = useState<boolean | null>(null);
   const [pdrHasRoute, setPdrHasRoute] = useState(false);
+  const [tab, setTab] = useState<"assist" | "nav">("assist");
+  const [robotOpen, setRobotOpen] = useState(false);
+  const [robotService, setRobotService] = useState<RobotServiceType>("follow");
+  const [robotParty, setRobotParty] = useState(1);
+  const [robotOrigin, setRobotOrigin] = useState("旅客当前位置");
+  const [robotDestination, setRobotDestination] = useState("出发登机口");
+  const [robotNote, setRobotNote] = useState("");
+  const [robotPhase, setRobotPhase] = useState<RobotPhase>("idle");
+  const [unreadChat, setUnreadChat] = useState(false);
+  const msgsRef = useRef<HTMLDivElement | null>(null);
   const realtimeRef = useRef<PaxRealtime | null>(null);
   const mapFrameRef = useRef<HTMLIFrameElement | null>(null);
   const lastTrajectoryAtRef = useRef(0);
   const pdrActiveRef = useRef(false);
+  const push = usePaxPush(session);
 
   const canChat = !!session?.capabilities.includes("operator_chat");
   const canShareLocation = !!session?.capabilities.includes("share_location");
+  const trip = useMemo(() => (session ? resolveTrip(session) : null), [session]);
+  const strip = useMemo(
+    () => (session && trip ? infoStripFor(session, trip) : { inbound: "—", outbound: "—" }),
+    [session, trip],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -127,10 +179,22 @@ export default function PaxAppPage() {
       return;
     }
     fetchPaxSession(stored.token)
-      .then((s) => { if (!cancelled) setSession(s); })
-      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : "session_invalid"); })
-      .finally(() => { if (!cancelled) setChecking(false); });
-    return () => { cancelled = true; };
+      .then((s) => {
+        if (cancelled) return;
+        setSession(s);
+        if (s.passenger.gateId) {
+          setRobotDestination(`Gate ${s.passenger.gateId}`);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : "session_invalid");
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -148,7 +212,10 @@ export default function PaxAppPage() {
         setNotifications((prev) => [msg, ...prev].slice(0, 20));
         rt.ack(msg.messageId);
       },
-      onChatMsg: (msg) => setChat((prev) => [...prev, msg]),
+      onChatMsg: (msg) => {
+        setChat((prev) => [...prev, msg]);
+        if (msg.from !== "pax") setUnreadChat(true);
+      },
       onChatHistory: (messages) => setChat(messages),
       onLocRequest: () => setLocationStatus("Operator requested your current location."),
     });
@@ -179,14 +246,26 @@ export default function PaxAppPage() {
   useEffect(() => {
     let cancelled = false;
     checkPdrBackendAvailable()
-      .then((ok) => { if (!cancelled) setPdrBackendOk(ok); })
-      .catch(() => { if (!cancelled) setPdrBackendOk(false); });
-    return () => { cancelled = true; };
+      .then((ok) => {
+        if (!cancelled) setPdrBackendOk(ok);
+      })
+      .catch(() => {
+        if (!cancelled) setPdrBackendOk(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
     pdrActiveRef.current = pdrActive;
   }, [pdrActive]);
+
+  useEffect(() => {
+    const el = msgsRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [chat]);
 
   function relayTrajectory(activeSession: PaxSession, update: PdrTrajectoryUpdate) {
     const path = update.path.length ? update.path : [update.position];
@@ -214,14 +293,19 @@ export default function PaxAppPage() {
         let origin = window.location.origin;
         try {
           origin = new URL(mapFrameRef.current?.src || INDOOR_MAP_URL, window.location.href).origin;
-        } catch { /* ignore */ }
-        win.postMessage({
-          type: "orienta-pax-map-position",
-          source: "pdr",
-          position: update.position,
-          path: update.path,
-          headingRad: update.headingRad,
-        }, origin);
+        } catch {
+          /* ignore */
+        }
+        win.postMessage(
+          {
+            type: "orienta-pax-map-position",
+            source: "pdr",
+            position: update.position,
+            path: update.path,
+            headingRad: update.headingRad,
+          },
+          origin,
+        );
       },
     });
 
@@ -254,11 +338,6 @@ export default function PaxAppPage() {
     }
   }
 
-  const sortedNotifications = useMemo(
-    () => [...notifications].sort((a, b) => b.createdAt - a.createdAt),
-    [notifications],
-  );
-
   const mapSrc = useMemo(() => {
     if (!session) return "";
     const u = new URL(INDOOR_MAP_URL, window.location.href);
@@ -276,8 +355,6 @@ export default function PaxAppPage() {
 
   useEffect(() => {
     if (!session) return;
-    // A route belongs to whichever gateFrom/gateTo the map last computed for
-    // — never carry a stale one across a session change.
     setPdrPlannedPath(null);
     setPdrHasRoute(false);
     const activeSession = session;
@@ -291,10 +368,6 @@ export default function PaxAppPage() {
         return;
       }
       if (data.type === "orienta-nav-path-lonlat") {
-        // PDR has no free-walk mode — it can only start once the map has a
-        // real gate-to-gate route to follow (see pdrClient.ts). Ignored
-        // while a session is already running: the route it started with
-        // stays fixed for that session's lifetime.
         if (isLngLatPath(data.path) && !pdrActiveRef.current && !isPdrSessionActive()) {
           setPdrPlannedPath(data.path.map(([lng, lat]) => ({ lat, lng })));
           setPdrHasRoute(true);
@@ -329,9 +402,10 @@ export default function PaxAppPage() {
       try {
         const position = w.orientaDumpTouristPosition();
         if (!isLatLng(position)) return;
-        const history = typeof w.orientaGetTouristPositionHistory === "function"
-          ? w.orientaGetTouristPositionHistory()
-          : null;
+        const history =
+          typeof w.orientaGetTouristPositionHistory === "function"
+            ? w.orientaGetTouristPositionHistory()
+            : null;
         const path = Array.isArray(history) ? history.filter(isLatLng).slice(-40) : [];
         realtimeRef.current?.sendTrajectory(path.length ? path : [position], position);
         postPaxFallback(activeSession, "/api/pax/tourist-position", {
@@ -341,7 +415,7 @@ export default function PaxAppPage() {
         });
         lastTrajectoryAtRef.current = Date.now();
       } catch {
-        /* ignore cross-frame timing errors */
+        /* ignore */
       }
     }, 1000);
 
@@ -363,7 +437,55 @@ export default function PaxAppPage() {
     if (!session || !canShareLocation) return;
     const body = `Passenger reports current target gate: ${session.passenger.gateId}`;
     realtimeRef.current?.chatSend(body, "location", session.passenger.gateId);
-    setLocationStatus(`Location share requested near ${session.passenger.gateId}. Live map position will update automatically when available.`);
+    setLocationStatus(
+      `Location share requested near ${session.passenger.gateId}. Live map position will update automatically when available.`,
+    );
+  }
+
+  function submitRobotRequest() {
+    if (!session || robotPhase !== "idle") return;
+    const service = ROBOT_SERVICES.find((s) => s.id === robotService);
+    const summary = [
+      `[Robot request] ${service?.title || robotService}`,
+      `Party: ${robotParty}`,
+      `From: ${robotOrigin}`,
+      `To: ${robotDestination}`,
+      robotNote.trim() ? `Note: ${robotNote.trim()}` : "",
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    // Notify ops over chat when allowed; free sessions still get local tracking UX.
+    if (canChat) realtimeRef.current?.chatSend(summary);
+    postPaxFallback(session, "/api/pax/presence", {
+      online: true,
+      robotRequest: {
+        serviceType: robotService,
+        partySize: robotParty,
+        origin: robotOrigin,
+        destination: robotDestination,
+        note: robotNote.trim(),
+        at: Date.now(),
+      },
+    });
+    setRobotPhase("submitted");
+    setRobotOpen(true);
+    setChat((prev) => [
+      ...prev,
+      {
+        id: `local-robot-${Date.now()}`,
+        passengerId: session.passenger.id,
+        tenantId: session.passenger.tenantId,
+        from: "system",
+        body: `已提交机器人服务请求：${service?.title || robotService}。调度员确认后将通过本页与你沟通。`,
+        createdAt: Date.now(),
+        kind: "text",
+      },
+    ]);
+  }
+
+  function resetRobotRequest() {
+    setRobotPhase("idle");
+    setRobotNote("");
   }
 
   function logout() {
@@ -373,132 +495,328 @@ export default function PaxAppPage() {
     window.location.href = "/pax";
   }
 
+  function focusChat() {
+    setUnreadChat(false);
+    msgsRef.current?.scrollTo({ top: msgsRef.current.scrollHeight, behavior: "smooth" });
+  }
+
+  const visibleBanners = notifications.filter((n) => !dismissedNotify.has(n.messageId)).slice(0, 3);
+  const statusLabel = !rtUp ? "Offline" : session?.plan === "free" ? "Assisted" : "Connected";
+  const robotPill =
+    robotPhase === "idle"
+      ? "未预约"
+      : robotPhase === "submitted"
+        ? "已提交"
+        : robotPhase === "assigned"
+          ? "已分配"
+          : robotPhase === "en_route"
+            ? "前往中"
+            : "服务中";
+
   if (checking) {
-    return <div style={{ minHeight: "100vh", display: "grid", placeItems: "center" }}>Loading passenger session...</div>;
+    return (
+      <div className="pax-shell pax-shell--assist" style={{ display: "grid", placeItems: "center" }}>
+        Loading passenger session…
+      </div>
+    );
   }
 
   if (!session || error) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", background: "#f5f6fa", padding: 24 }}>
-        <div className="card" style={{ maxWidth: 460, width: "100%", display: "flex", flexDirection: "column", gap: 10 }}>
-          <h1 style={{ margin: 0, fontSize: 22 }}>Session required</h1>
-          <p className="small">Please start from the passenger entry page. Error: {error || "missing_session"}</p>
-          <a className="btn primary" href="/pax" style={{ textAlign: "center", textDecoration: "none" }}>Go to /pax</a>
+      <div className="pax-shell pax-shell--assist" style={{ display: "grid", placeItems: "center", padding: 24 }}>
+        <div className="pax-card" style={{ maxWidth: 460, width: "100%" }}>
+          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Session required</h1>
+          <p className="pax-lead">Please start from the passenger entry page. Error: {error || "missing_session"}</p>
+          <a className="pax-btn" href="/pax" style={{ textAlign: "center", textDecoration: "none", display: "inline-block" }}>
+            Go to /pax
+          </a>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#f5f6fa", color: "#111827" }}>
-      <header style={{ background: "#c8102e", color: "#fff", padding: "14px 18px", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-        <div>
-          <div style={{ fontWeight: 800 }}>Orienta Passenger</div>
-          <div style={{ fontSize: 12, opacity: 0.85 }}>
-            {session.passenger.name} · {session.passenger.flightId} · Gate {session.passenger.gateId}
-          </div>
+    <div className={`pax-shell pax-shell--assist${robotOpen ? " robot-service-mode" : ""}`}>
+      <div className="pax-assist-brand">
+        <img className="pax-assist-logo" src="/airchina-logo.png" alt="Air China" />
+        <div className="pax-assist-brand-actions">
+          <a className="pax-btn secondary" href="/pax/flight" style={{ textDecoration: "none" }}>
+            航班
+          </a>
+          <button type="button" className="pax-btn secondary" onClick={logout}>
+            退出
+          </button>
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <span className="pill" style={{ color: "#111827", background: "#fff" }}>{session.accountType}</span>
-          <span className="pill" style={{ color: "#111827", background: "#fff" }}>{session.plan}</span>
-          <span className="pill" style={{ color: "#111827", background: "#fff" }}>{rtUp ? "WS online" : "WS offline"}</span>
-          <button className="btn" onClick={logout}>Exit</button>
-        </div>
-      </header>
+      </div>
 
-      <main style={{ maxWidth: 1120, margin: "0 auto", padding: 18, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 16 }}>
-        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10, gridColumn: "1 / -1" }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Navigation</h2>
-          <div className="small">All passenger sessions include navigation.</div>
-          <div style={{ padding: 12, borderRadius: 12, background: "#fff", border: "1px solid rgba(0,0,0,0.08)" }}>
-            <div className="small">Current trip</div>
-            <div style={{ fontSize: 24, fontWeight: 800 }}>{session.passenger.flightId}</div>
-            <div>Proceed to Gate <b>{session.passenger.gateId}</b></div>
+      <div className="pax-assist-tabs" role="tablist" aria-label="主视图">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "assist"}
+          className={`pax-assist-tab${tab === "assist" ? " active" : ""}`}
+          onClick={() => setTab("assist")}
+        >
+          智能服务助手
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "nav"}
+          className={`pax-assist-tab${tab === "nav" ? " active" : ""}`}
+          onClick={() => setTab("nav")}
+        >
+          室内导航
+        </button>
+      </div>
+
+      {!push.standalone ? (
+        <div className="pax-assist-mode-warn">
+          当前是浏览器标签页（有地址栏），不是独立 PWA App。请添加到主屏幕后从图标打开，手机通知与离开 30s 提醒才可用。
+        </div>
+      ) : null}
+
+      <div className="pax-assist-push">
+        <button
+          type="button"
+          className="pax-assist-push-btn"
+          onClick={() => void push.enablePush()}
+          disabled={push.enabled}
+        >
+          {push.enabled ? "通知已开启" : "开启手机通知"}
+        </button>
+        {push.hint ? <div className="pax-assist-push-hint">{push.hint}</div> : null}
+      </div>
+
+      {tab === "nav" ? (
+        <section className="pax-assist-nav-panel">
+          <div className="pax-assist-nav-hint">
+            室内地图导航（非视频）。有路径后可启动 PDR。
+            {navDebug ? ` · ${navDebug}` : ""}
+            {pdrStatus ? ` · ${pdrStatus}` : ""}
           </div>
-          <div style={{ height: 460, borderRadius: 14, overflow: "hidden", border: "1px solid rgba(0,0,0,0.10)", background: "#111" }}>
+          <div className="pax-assist-nav-frame">
             <iframe
               ref={mapFrameRef}
               title="Passenger indoor navigation"
               src={mapSrc}
-              style={{ width: "100%", height: "100%", border: 0, display: "block" }}
               allow="accelerometer; gyroscope; magnetometer; clipboard-read; clipboard-write"
             />
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <div className="pax-assist-status-row">
             <button
-              className={"btn" + (pdrActive ? " primary" : "")}
+              type="button"
+              className="pax-assist-loc-btn"
               onClick={() => void togglePdr()}
               disabled={!canShareLocation || (!pdrActive && !pdrHasRoute)}
             >
               {pdrActive ? "Stop PDR" : "Start PDR (IMU)"}
             </button>
-            {pdrBackendOk === false ? (
-              <span className="small" style={{ color: "#b45309" }}>
-                PDR service offline — see README for how to run it and set PDR_API_ORIGIN
-              </span>
-            ) : pdrBackendOk === true && !pdrActive && !pdrHasRoute ? (
-              <span className="small" style={{ color: "#b45309" }}>
-                Waiting for the map to compute a route to follow
-              </span>
-            ) : null}
-            {pdrStatus ? <span className="small">{pdrStatus}</span> : null}
-            {navDebug ? <span className="small" style={{ alignSelf: "center" }}>{navDebug}</span> : null}
+            {pdrBackendOk === false ? <span>PDR offline</span> : null}
           </div>
         </section>
-
-        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Capabilities</h2>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {session.capabilities.map((cap) => (
-              <div key={cap} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: 6 }}>
-                <span>{capabilityLabel(cap)}</span>
-                <b>Enabled</b>
+      ) : (
+        <section className="pax-assist-panel">
+          <div className="pax-assist-hdr">
+            <span className={`pax-assist-dot${rtUp ? " online" : ""}`} />
+            <div>
+              <div className="pax-assist-hdr-title">{session.passenger.name || "Guest"}</div>
+              <div className="pax-assist-hdr-sub">
+                ({session.passenger.id}) · {session.plan === "premium" ? "Premium" : "Free"}
               </div>
-            ))}
+            </div>
           </div>
-          <button className="btn" disabled={!canShareLocation} onClick={shareLocation}>
-            Share current location
-          </button>
-          {locationStatus ? <div className="small">{locationStatus}</div> : null}
-        </section>
 
-        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Notifications</h2>
-          {sortedNotifications.length === 0 ? (
-            <div className="small" style={{ opacity: 0.55 }}>No operator notifications yet.</div>
-          ) : sortedNotifications.map((n) => (
-            <div key={n.messageId} style={{ padding: 10, borderRadius: 10, background: "#fff", border: "1px solid rgba(0,0,0,0.08)" }}>
+          <div className="pax-assist-info-strip">
+            <div className="pax-assist-info-item">
+              <div className="pax-assist-info-label">Inbound</div>
+              <div className="pax-assist-info-val">{strip.inbound}</div>
+            </div>
+            <div className="pax-assist-info-item">
+              <div className="pax-assist-info-label">Outbound</div>
+              <div className="pax-assist-info-val">{strip.outbound}</div>
+            </div>
+            <div className="pax-assist-info-item">
+              <div className="pax-assist-info-label">Gate</div>
+              <div className="pax-assist-gate">{session.passenger.gateId || "—"}</div>
+            </div>
+            <div className="pax-assist-info-item">
+              <div className="pax-assist-info-label">Status</div>
+              <div className="pax-assist-info-val">{statusLabel}</div>
+            </div>
+          </div>
+
+          <div className="pax-assist-chat-head">
+            <span>与 Orienta Agent 交互</span>
+            {unreadChat ? <span className="pax-assist-unread-dot" aria-label="unread" /> : null}
+          </div>
+
+          {visibleBanners.map((n) => (
+            <div key={n.messageId} className="pax-assist-notify-banner">
+              <button
+                type="button"
+                className="dismiss"
+                aria-label="Dismiss"
+                onClick={() => setDismissedNotify((prev) => new Set(prev).add(n.messageId))}
+              >
+                ×
+              </button>
               <b>{n.title}</b>
-              <div className="small">{fmtTime(n.createdAt)} · {n.status}</div>
-              <div style={{ marginTop: 4 }}>{n.body}</div>
+              <div>{n.body}</div>
             </div>
           ))}
-        </section>
 
-        <section className="card" style={{ display: "flex", flexDirection: "column", gap: 10, minHeight: 420 }}>
-          <h2 style={{ margin: 0, fontSize: 18 }}>Operator Communication</h2>
-          {!canChat ? (
-            <div className="small">Basic sessions can receive messages and share location, but cannot start free-text operator chat.</div>
+          {unreadChat ? (
+            <button type="button" className="pax-assist-chat-alert" onClick={focusChat}>
+              <span className="pax-assist-chat-alert-dot" />
+              <span>客服新消息</span>
+              <span className="pax-assist-chat-alert-action">查看消息</span>
+            </button>
+          ) : null}
+
+          <div className="pax-assist-msgs" ref={msgsRef} onScroll={() => setUnreadChat(false)}>
+            <MessageList messages={chat} plan={session.plan} />
+          </div>
+
+          <section className={`pax-robot-booking${robotOpen ? " is-open" : ""}${robotPhase !== "idle" ? " is-tracking" : ""}`}>
+            <div className="pax-robot-booking-head">
+              <div>
+                <div className="pax-robot-booking-title">预约机器人服务</div>
+                {robotOpen ? (
+                  <div className="pax-robot-booking-sub">
+                    提交后后台调度员会确认请求、分配机器人，并继续通过本页与你沟通。
+                  </div>
+                ) : null}
+              </div>
+              <div className="pax-robot-booking-head-actions">
+                {unreadChat ? (
+                  <button type="button" className="pax-robot-chat-alert" onClick={focusChat}>
+                    客服消息
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className="pax-robot-booking-toggle"
+                  onClick={() => setRobotOpen((v) => !v)}
+                >
+                  {robotOpen ? "收起" : "展开"}
+                </button>
+                <span className="pax-robot-state-pill">{robotPill}</span>
+              </div>
+            </div>
+
+            {!robotOpen && robotPhase !== "idle" ? (
+              <div className="pax-robot-tracking-compact">请求已提交 · 等待调度确认</div>
+            ) : null}
+
+            {robotOpen && robotPhase === "idle" ? (
+              <div className="pax-robot-form">
+                <div className="pax-robot-service-cards" role="radiogroup" aria-label="机器人服务类型">
+                  {ROBOT_SERVICES.map((s) => (
+                    <button
+                      key={s.id}
+                      type="button"
+                      className={`pax-robot-service-card${robotService === s.id ? " active" : ""}`}
+                      onClick={() => setRobotService(s.id)}
+                    >
+                      <b>{s.title}</b>
+                      <span>{s.blurb}</span>
+                    </button>
+                  ))}
+                </div>
+                <div className="pax-robot-route-row">
+                  <label>
+                    人数
+                    <input
+                      type="number"
+                      min={1}
+                      max={6}
+                      value={robotParty}
+                      onChange={(e) => setRobotParty(Math.max(1, Math.min(6, Number(e.target.value) || 1)))}
+                    />
+                  </label>
+                  <label>
+                    当前位置 / 接应点
+                    <input value={robotOrigin} onChange={(e) => setRobotOrigin(e.target.value)} />
+                  </label>
+                  <label>
+                    目的地
+                    <input value={robotDestination} onChange={(e) => setRobotDestination(e.target.value)} />
+                  </label>
+                </div>
+                <label>
+                  补充说明
+                  <textarea
+                    value={robotNote}
+                    onChange={(e) => setRobotNote(e.target.value)}
+                    placeholder="例如：需要轮椅、行动不便、随身行李较多等"
+                  />
+                </label>
+                <button type="button" className="pax-btn" onClick={submitRobotRequest}>
+                  提交预约
+                </button>
+              </div>
+            ) : null}
+
+            {robotOpen && robotPhase !== "idle" ? (
+              <div className="pax-robot-tracking-card">
+                <div className="pax-robot-track-steps">
+                  {(["submitted", "assigned", "en_route", "serving"] as const).map((step, i) => {
+                    const order = ["submitted", "assigned", "en_route", "serving"] as const;
+                    const activeIdx = order.indexOf(robotPhase === "idle" ? "submitted" : robotPhase);
+                    const done = i <= activeIdx;
+                    return (
+                      <div key={step} className={`pax-robot-track-step${done ? " done" : ""}`}>
+                        {step === "submitted"
+                          ? "已提交"
+                          : step === "assigned"
+                            ? "已分配"
+                            : step === "en_route"
+                              ? "前往中"
+                              : "服务中"}
+                      </div>
+                    );
+                  })}
+                </div>
+                <p className="pax-robot-booking-sub">调度确认后状态会更新；也可继续通过上方对话沟通。</p>
+                <button type="button" className="pax-btn secondary" onClick={resetRobotRequest}>
+                  取消 / 重新预约
+                </button>
+              </div>
+            ) : null}
+          </section>
+
+          <div className="pax-assist-status-row">
+            <span>{locationStatus}</span>
+            <button type="button" className="pax-assist-loc-btn" disabled={!canShareLocation} onClick={shareLocation}>
+              Share Location
+            </button>
+          </div>
+
+          {canChat ? (
+            <div className="pax-assist-input-area">
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    sendChat();
+                  }
+                }}
+                placeholder="Message operator…"
+              />
+              <button type="button" className="pax-assist-send" disabled={!input.trim()} onClick={sendChat}>
+                Send
+              </button>
+            </div>
           ) : (
-            <div className="small">Premium sessions can chat directly with an operator.</div>
+            <div className="pax-assist-input-area pax-assist-input-area--disabled">
+              <div className="pax-assist-free-note">Basic 会话不能主动发起助手对话；可开启通知、分享位置并预约机器人。</div>
+            </div>
           )}
-          <div style={{ flex: 1, overflow: "auto", minHeight: 220, padding: 10, background: "#f9fafb", borderRadius: 12 }}>
-            <MessageList messages={chat} />
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <textarea
-              className="input"
-              value={input}
-              disabled={!canChat}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
-              placeholder={canChat ? "Message operator..." : "Chat disabled for Basic sessions"}
-              style={{ flex: 1, minHeight: 54, resize: "vertical" }}
-            />
-            <button className="btn primary" disabled={!canChat || !input.trim()} onClick={sendChat}>Send</button>
-          </div>
         </section>
-      </main>
+      )}
     </div>
   );
 }
