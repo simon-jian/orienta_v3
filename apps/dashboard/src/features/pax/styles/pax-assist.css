@@ -1,0 +1,789 @@
+/* Smart service assistant */
+/* ── Smart service assistant (robots pax.html light portal) ───────────────── */
+
+.pax-shell--assist {
+  --ac-red: #c8102e;
+  --ac-red-dark: #a30d25;
+  --pax-text: #1a1a1a;
+  --pax-muted: #6b7280;
+  --pax-card: #ffffff;
+  --pax-border: #dce0e6;
+  --page: linear-gradient(180deg, #f7f8fb 0%, #eceff4 50%, #e2e6ed 100%);
+  color: var(--pax-text);
+  background: var(--page);
+  border-top: 4px solid var(--ac-red);
+  min-height: 100vh;
+  min-height: 100dvh;
+  max-height: 100dvh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.pax-shell--assist .pax-btn.secondary {
+  background: #fff;
+  border-color: var(--pax-border);
+  color: #1a1a1a;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.pax-shell--assist .pax-card {
+  background: #fff;
+  border-color: var(--pax-border);
+  color: #1a1a1a;
+}
+
+.pax-assist-brand {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px 10px;
+  background: #fff;
+  border-bottom: 1px solid var(--pax-border);
+  flex-shrink: 0;
+}
+
+.pax-assist-logo {
+  height: 56px;
+  width: auto;
+  max-width: min(280px, 70vw);
+  object-fit: contain;
+  display: block;
+}
+
+.pax-assist-brand-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.pax-assist-tabs {
+  display: flex;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(255, 255, 255, 0.65);
+  border-bottom: 1px solid var(--pax-border);
+  flex-shrink: 0;
+}
+
+.pax-assist-tab {
+  flex: 1;
+  border: 1px solid var(--pax-border);
+  background: #fff;
+  color: var(--pax-muted);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pax-assist-tab.active {
+  background: var(--ac-red);
+  color: #fff;
+  border-color: var(--ac-red-dark);
+}
+
+.pax-assist-mode-warn {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff2f2;
+  color: #8a1024;
+  border: 1px solid rgba(200, 16, 46, 0.35);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+  flex-shrink: 0;
+}
+
+.pax-assist-push {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid var(--pax-border);
+  flex-shrink: 0;
+}
+
+.pax-assist-push-btn {
+  appearance: none;
+  border: 1px solid rgba(200, 16, 46, 0.35);
+  background: #fff;
+  color: #8a1024;
+  border-radius: 10px;
+  padding: 8px 12px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pax-assist-push-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pax-assist-push-hint {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--pax-muted);
+}
+
+.pax-assist-panel,
+.pax-assist-nav-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pax-assist-hdr {
+  padding: 12px 16px 10px;
+  background: #fff;
+  border-bottom: 1px solid var(--pax-border);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.pax-assist-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c4c8ce;
+  flex-shrink: 0;
+}
+
+.pax-assist-dot.online {
+  background: #2e9d4f;
+}
+
+.pax-assist-hdr-title {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.pax-assist-hdr-sub {
+  font-size: 12px;
+  color: var(--pax-muted);
+}
+
+.pax-assist-info-strip {
+  padding: 10px 16px;
+  background: #fff;
+  border-bottom: 1px solid var(--pax-border);
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.pax-assist-info-item {
+  font-size: 12px;
+}
+
+.pax-assist-info-label {
+  color: var(--pax-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.pax-assist-info-val {
+  font-weight: 600;
+  margin-top: 1px;
+}
+
+.pax-assist-gate {
+  color: var(--ac-red);
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.pax-assist-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+.pax-assist-chat-head {
+  padding: 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid var(--pax-border);
+  flex-shrink: 0;
+}
+
+.pax-assist-unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ac-red);
+}
+
+.pax-assist-notify-banner {
+  margin: 8px 16px 0;
+  padding: 10px 14px;
+  background: #fff5f5;
+  border: 1px solid rgba(200, 16, 46, 0.22);
+  border-radius: 10px;
+  font-size: 13px;
+  color: #4a1518;
+  flex-shrink: 0;
+}
+
+.pax-assist-notify-banner .dismiss {
+  float: right;
+  cursor: pointer;
+  opacity: 0.6;
+  font-size: 16px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+
+.pax-assist-chat-alert {
+  margin: 8px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(200, 16, 46, 0.28);
+  background: #fff;
+  color: #8a1024;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.pax-assist-chat-alert-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ac-red);
+}
+
+.pax-assist-chat-alert-action {
+  margin-left: auto;
+  color: var(--ac-red);
+}
+
+.pax-assist-msgs {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pax-assist-watermark {
+  text-align: center;
+  color: #6b7280;
+  font-size: 13px;
+  margin-top: 20px;
+  line-height: 1.5;
+}
+
+.pax-assist-watermark span {
+  display: block;
+  font-size: 11px;
+  margin-top: 4px;
+}
+
+.pax-assist-msg {
+  display: flex;
+  flex-direction: column;
+}
+
+.pax-assist-msg.right {
+  align-items: flex-end;
+}
+
+.pax-assist-msg.left {
+  align-items: flex-start;
+}
+
+.pax-assist-msg-meta {
+  font-size: 10px;
+  color: #8b919c;
+  margin-bottom: 2px;
+}
+
+.pax-assist-bubble {
+  max-width: 78%;
+  padding: 8px 12px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.pax-assist-bubble.pax {
+  background: var(--ac-red);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.pax-assist-bubble.admin {
+  background: #e8eaef;
+  color: var(--pax-text);
+  border: 1px solid var(--pax-border);
+  border-bottom-left-radius: 4px;
+}
+
+.pax-assist-bubble.agent {
+  background: #f0f4fa;
+  color: #1e3a5f;
+  border: 1px solid #c5d4e8;
+  border-bottom-left-radius: 4px;
+}
+
+.pax-assist-bubble.system {
+  background: #fff8e6;
+  color: #8a5b00;
+  font-style: italic;
+  border-radius: 8px;
+  border: 1px solid #f0e0b2;
+}
+
+.pax-assist-status-row {
+  padding: 0 16px 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--pax-muted);
+  flex-shrink: 0;
+  position: relative;
+  z-index: 9;
+}
+
+.pax-assist-loc-btn {
+  background: #fff;
+  color: var(--pax-text);
+  border: 1px solid var(--pax-border);
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pax-assist-loc-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pax-assist-input-area {
+  padding: 10px 16px 16px;
+  background: #fff;
+  border-top: 1px solid var(--pax-border);
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 9;
+}
+
+.pax-assist-input-area textarea {
+  flex: 1;
+  background: #f3f4f6;
+  border: 1px solid var(--pax-border);
+  border-radius: 20px;
+  color: var(--pax-text);
+  font-size: 15px;
+  padding: 8px 14px;
+  resize: none;
+  height: 40px;
+  line-height: 1.4;
+}
+
+.pax-assist-send {
+  background: var(--ac-red);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  height: 40px;
+  white-space: nowrap;
+}
+
+.pax-assist-send:disabled {
+  opacity: 0.4;
+}
+
+.pax-assist-input-area--disabled {
+  display: block;
+}
+
+.pax-assist-free-note {
+  font-size: 12px;
+  color: var(--pax-muted);
+  line-height: 1.4;
+}
+
+.pax-assist-nav-hint {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  font-size: 11px;
+  color: var(--pax-muted);
+  line-height: 1.45;
+  border-bottom: 1px solid var(--pax-border);
+  background: #fff;
+}
+
+.pax-assist-nav-route {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 4px;
+  color: var(--pax-text);
+  font-size: 13px;
+}
+
+.pax-assist-nav-replan {
+  border: 1px solid var(--pax-border);
+  background: #fff;
+  color: #8a1024;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* PDR-like airport / from / to planner (before map) */
+.pax-nav-plan {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  align-content: start;
+  background: linear-gradient(180deg, #fff 0%, #f3f5f8 100%);
+}
+
+.pax-nav-plan-head h2 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--pax-text);
+}
+
+.pax-nav-plan-head p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--pax-muted);
+}
+
+.pax-nav-plan-field {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #374151;
+}
+
+.pax-nav-plan-field select {
+  appearance: none;
+  border: 1px solid var(--pax-border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  background: #fff;
+  color: var(--pax-text);
+}
+
+.pax-nav-plan-field select:disabled {
+  opacity: 0.6;
+}
+
+.pax-nav-plan-error {
+  font-size: 12px;
+  font-weight: 700;
+  color: #a30d25;
+  line-height: 1.4;
+}
+
+.pax-nav-plan-confirm {
+  margin-top: 4px;
+  width: 100%;
+  text-align: center;
+}
+
+.pax-nav-plan-confirm:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.pax-assist-nav-frame {
+  flex: 1 1 auto;
+  min-height: 0;
+  position: relative;
+  background: #eef0f4;
+}
+
+.pax-assist-nav-frame iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #111;
+}
+
+/* Robot booking — sits under flight info strip, outside the chat dialog */
+.pax-assist-panel {
+  position: relative;
+}
+
+.pax-robot-booking {
+  flex-shrink: 0;
+  margin: 0;
+  border-radius: 0;
+  background: #fff;
+  border: 0;
+  border-bottom: 1px solid var(--pax-border);
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.pax-robot-booking-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  min-height: 44px;
+}
+
+.pax-robot-booking-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.pax-robot-booking-main-label {
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--pax-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pax-robot-booking-sub {
+  margin: 0;
+  color: var(--pax-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.pax-robot-booking-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.pax-robot-booking-toggle,
+.pax-robot-chat-alert {
+  border: 1px solid var(--pax-border);
+  background: #fff;
+  color: var(--pax-muted);
+  border-radius: 999px;
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pax-robot-booking-toggle {
+  color: #8a1024;
+  border-color: rgba(200, 16, 46, 0.35);
+  background: #fff5f6;
+}
+
+.pax-robot-chat-alert {
+  color: #8a1024;
+  border-color: rgba(200, 16, 46, 0.35);
+}
+
+.pax-robot-state-pill {
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #4b5563;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
+  flex-shrink: 0;
+}
+
+.pax-robot-state-pill.is-live {
+  background: #e8f7ec;
+  color: #1b5e28;
+}
+
+.pax-robot-tracking-compact {
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: var(--pax-muted);
+}
+
+.pax-robot-error {
+  padding: 0 12px 8px;
+  font-size: 11px;
+  color: #a30d25;
+  font-weight: 600;
+}
+
+.pax-robot-booking-body {
+  border-top: 1px solid var(--pax-border);
+  padding: 10px 12px 12px;
+  max-height: min(38vh, 320px);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.pax-robot-booking.is-open {
+  box-shadow: none;
+  background: #fafbfc;
+}
+
+.pax-robot-form {
+  display: grid;
+  gap: 10px;
+}
+
+.pax-robot-service-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.pax-robot-service-card {
+  text-align: left;
+  border: 1px solid var(--pax-border);
+  background: #f8fafc;
+  border-radius: 12px;
+  padding: 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 4px;
+}
+
+.pax-robot-service-card b {
+  font-size: 13px;
+}
+
+.pax-robot-service-card span {
+  font-size: 11px;
+  color: var(--pax-muted);
+  line-height: 1.35;
+}
+
+.pax-robot-service-card.active {
+  border-color: var(--ac-red);
+  background: #fff5f6;
+  box-shadow: inset 0 0 0 1px rgba(200, 16, 46, 0.25);
+}
+
+.pax-robot-route-row {
+  display: grid;
+  gap: 8px;
+}
+
+.pax-robot-form label,
+.pax-robot-route-row label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.pax-robot-form input,
+.pax-robot-form textarea {
+  border: 1px solid var(--pax-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 13px;
+  background: #fff;
+}
+
+.pax-robot-form textarea {
+  min-height: 52px;
+  resize: vertical;
+}
+
+.pax-robot-tracking-card {
+  margin-top: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.pax-robot-track-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.pax-robot-track-step {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 8px 4px;
+  border-radius: 8px;
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.pax-robot-track-step.done {
+  background: #e8f7ec;
+  color: #1b5e28;
+}
+
+.pax-shell--assist.robot-service-mode .pax-assist-mode-warn {
+  display: none;
+}
+
+@media (max-width: 520px) {
+  .pax-assist-logo {
+    height: 44px;
+  }
+  .pax-robot-service-cards {
+    grid-template-columns: 1fr;
+  }
+  .pax-robot-booking-body {
+    max-height: min(34vh, 280px);
+  }
+}

@@ -11,8 +11,10 @@ import {
 } from "./session";
 import { fetchClosestFlight, fetchTransfer, type FlightInstance, type TransferResult } from "./api/flightApi";
 import { fetchAirportWeather, type AirportWeather } from "./api/weatherApi";
+import { getTimeToGate } from "./api/journeyApi";
 import { IndoorMapEmbed, type MapLeg } from "./flight/IndoorMapEmbed";
 import { FlightCard, placeholderFlight } from "./flight/FlightCard";
+import { shortLocalClock, formatUtcClock, type BoardsDoors } from "./flight/flightCardHelpers";
 import { JourneySheets } from "./flight/JourneySheets";
 import { clientDefaultAirportId } from "../../config/client";
 import "./styles/pax.css";
@@ -50,6 +52,7 @@ export default function PaxFlightPage() {
   const [mapLeg, setMapLeg] = useState<MapLeg>("dep");
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [weather, setWeather] = useState<AirportWeather | null>(null);
+  const [boardsDoors, setBoardsDoors] = useState<Partial<BoardsDoors> | null>(null);
 
   const trip = useMemo(() => (session ? resolveTrip(session) : null), [session]);
 
@@ -141,6 +144,46 @@ export default function PaxFlightPage() {
     };
   }, [liveInstance?.arr_iata, liveInstance?.arr_airport_code]);
 
+  const gateFlight =
+    trip?.intent === "transfer"
+      ? trip.departureFlight || session?.passenger.flightId || ""
+      : trip?.flight || session?.passenger.flightId || "";
+  const gateDate =
+    trip?.intent === "transfer"
+      ? trip.departureDate || localCalendarDate()
+      : trip?.date || localCalendarDate();
+
+  useEffect(() => {
+    if (!session?.token || !gateFlight || trip?.intent === "arrive") {
+      setBoardsDoors(null);
+      return;
+    }
+    let cancelled = false;
+    getTimeToGate(session.token, gateFlight, gateDate)
+      .then((data) => {
+        if (cancelled) return;
+        const boardingLocal =
+          typeof data.boardingTimeLocal === "string" ? data.boardingTimeLocal : null;
+        const boardingUtc =
+          typeof data.boardingTime === "string" ? data.boardingTime : null;
+        const tz =
+          liveInstance?.origin_timezone ||
+          (data.flight as FlightInstance | undefined)?.origin_timezone ||
+          null;
+        const boards =
+          shortLocalClock(boardingLocal) ||
+          formatUtcClock(boardingUtc, tz) ||
+          undefined;
+        if (boards) setBoardsDoors({ boards });
+      })
+      .catch(() => {
+        if (!cancelled) setBoardsDoors(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.token, gateFlight, gateDate, trip?.intent, liveInstance?.origin_timezone]);
+
   if (checking) {
     return (
       <div className="pax-shell">
@@ -176,16 +219,10 @@ export default function PaxFlightPage() {
     ? "实时航班数据暂不可用。仍可使用 Time to Gate / Exit 与地图导航。"
     : undefined;
 
-  const gateFlight =
-    trip.intent === "transfer"
-      ? trip.departureFlight || session.passenger.flightId
-      : trip.flight || session.passenger.flightId;
   const exitFlight =
     trip.intent === "transfer"
       ? trip.arrivalFlight || session.passenger.flightId
       : trip.flight || session.passenger.flightId;
-  const gateDate =
-    trip.intent === "transfer" ? trip.departureDate || localCalendarDate() : trip.date || localCalendarDate();
   const exitDate =
     trip.intent === "transfer" ? trip.arrivalDate || localCalendarDate() : trip.date || localCalendarDate();
 
@@ -236,7 +273,7 @@ export default function PaxFlightPage() {
           <div className="pax-flight-grid">
             <div className="pax-flight-summary">
               {trip.intent === "transfer" ? (
-                <div className="pax-tabs" style={{ marginBottom: 8 }}>
+                <div className="pax-tabs">
                   <button
                     type="button"
                     className={`pax-tab${activeLeg === "arr" ? " active" : ""}`}
@@ -278,6 +315,7 @@ export default function PaxFlightPage() {
                 onOpenExit={() => setSheet("exit")}
                 notice={flightNotice}
                 weather={weather}
+                boardsDoors={boardsDoors}
               />
             </div>
 

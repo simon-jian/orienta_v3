@@ -5,9 +5,10 @@
  * Needs HubStore access, so it receives the store as a parameter
  * rather than using module-level singletons.
  */
+import crypto from "node:crypto";
 import type { Router, Request, Response } from "express";
 import webpush from "web-push";
-import { HubStore } from "../hub/HubStore";
+import { HubStore, type RobotRequest, type RobotServiceType } from "../hub/HubStore";
 import { setPaxPresenceFromHttp } from "../hub/presence";
 import { handlePaxOutboundChat } from "../hub/chat";
 import { storeAndBroadcastTrajectory, clearStoredTrajectory } from "../hub/trajectory";
@@ -16,13 +17,40 @@ import {
   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT,
   isPushConfigured, ROUTE_SITE_DEFAULT_TENANT, TOURIST_ALLOWED_ORIGINS,
 } from "../config";
-import type { ChatKind } from "../../src/types/types";
-import { requireAdmin, requireTenantAccess } from "./auth";
+import type { ChatKind, ChatMessage } from "../../src/types/types";
+import { adminEmailFromRequest, requireAdmin, requireTenantAccess } from "./auth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import type { AuditLog } from "../lib/auditLog";
 import { PushSubscriptionStore, type PushSub } from "../passengers/PushSubscriptionStore";
 import { logger } from "../lib/logger";
 import { canonicalTenantId } from "../lib/canonicalize";
+
+const ROBOT_SERVICE_TYPES = new Set<RobotServiceType>([
+  "follow",
+  "um",
+  "wheelchair",
+  "lost_delivery",
+]);
+
+function parseRobotServiceType(raw: unknown): RobotServiceType | null {
+  const value = String(raw || "").trim().toLowerCase() as RobotServiceType;
+  return ROBOT_SERVICE_TYPES.has(value) ? value : null;
+}
+
+function robotServiceLabel(serviceType: RobotServiceType): string {
+  switch (serviceType) {
+    case "follow":
+      return "跟随服务";
+    case "um":
+      return "UM 无人陪";
+    case "wheelchair":
+      return "特殊协助";
+    case "lost_delivery":
+      return "楼内递送";
+    default:
+      return serviceType;
+  }
+}
 
 // ─── VAPID helpers ────────────────────────────────────────────────────────────
 
@@ -164,10 +192,7 @@ export function registerPushRoutes(
     const textBody   = String(body.body || "").trim();
     const allowed    = new Set(["text", "location", "system", "ai_agent", "operator"]);
     const kind       = (allowed.has(String(body.kind || "text").toLowerCase()) ? String(body.kind || "text").toLowerCase() : "text") as ChatKind;
-    if (identity.claims && !identity.claims.capabilities?.includes("operator_chat") && kind !== "location") {
-      return res.status(403).json({ ok: false, error: "chat_not_allowed_for_plan" });
-    }
-    if (!identity.claims && !paxCanSendChat(null, kind)) {
+    if (!paxCanSendChat(identity.claims, kind)) {
       return res.status(403).json({ ok: false, error: "chat_not_allowed_for_plan" });
     }
     if (!textBody)    return res.status(400).json({ ok: false, error: "missing_body" });
@@ -184,6 +209,60 @@ export function registerPushRoutes(
     return res.json({ ok: true, message: msg });
   });
 
+  router.get("/chat-history", async (req: Request, res: Response) => {
+    const identity = await paxIdentityFromRequest(req, res, req.query as Record<string, unknown>);
+    if (!identity) return;
+    const messages = (await store.ensureChatHistory(identity.tenantId, identity.passengerId)).slice(-50);
+    return res.json({ ok: true, messages });
+  });
+
+  // Admin chat HTTP fallback (trycloudflare / flaky WS).
+  router.post("/admin-chat-send", requireAdmin, async (req: Request, res: Response) => {
+    const body = req.body || {};
+    const tenantId = canonicalTenantId(body.tenantId || body.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    const passengerId = String(body.passengerId || "").trim();
+    const textBody = String(body.body || "").trim();
+    const allowed = new Set(["text", "location", "system", "ai_agent", "operator"]);
+    const kind = (allowed.has(String(body.kind || "text").toLowerCase())
+      ? String(body.kind || "text").toLowerCase()
+      : "text") as ChatKind;
+    if (!passengerId) return res.status(400).json({ ok: false, error: "missing_passenger" });
+    if (!textBody) return res.status(400).json({ ok: false, error: "missing_body" });
+    if (textBody.length > 12000) return res.status(400).json({ ok: false, error: "body_too_large" });
+    const gateRef = typeof body.gateRef === "string" ? body.gateRef : undefined;
+    const chatMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      passengerId,
+      tenantId,
+      from: "admin",
+      kind,
+      body: textBody,
+      gateRef,
+      createdAt: Date.now(),
+    };
+    store.appendChat(tenantId, passengerId, chatMsg);
+    store.broadcastAdmins(tenantId, { type: "chat_msg", message: chatMsg });
+    store.broadcastPax(tenantId, passengerId, { type: "chat_msg", message: chatMsg });
+    void auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "admin_chat_send",
+      tenantId,
+      passengerId,
+      detail: kind,
+    });
+    return res.json({ ok: true, message: chatMsg });
+  });
+
+  router.get("/admin-chat-history", requireAdmin, async (req: Request, res: Response) => {
+    const tenantId = canonicalTenantId(req.query.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    const passengerId = String(req.query.passengerId || "").trim();
+    if (!passengerId) return res.status(400).json({ ok: false, error: "missing_passenger" });
+    const messages = (await store.ensureChatHistory(tenantId, passengerId)).slice(-50);
+    return res.json({ ok: true, passengerId, messages });
+  });
+
   // ── Pax presence HTTP heartbeat ───────────────────────────────────────────────
   router.post("/presence", async (req: Request, res: Response) => {
     const body        = req.body || {};
@@ -193,6 +272,192 @@ export function registerPushRoutes(
     const isOnline    = !(onlineRaw === false || onlineRaw === 0 || onlineRaw === "0");
     setPaxPresenceFromHttp(store, identity.tenantId, identity.passengerId, isOnline);
     return res.json({ ok: true, tenantId: identity.tenantId, passengerId: identity.passengerId, online: isOnline });
+  });
+
+  // ── Robot booking (ephemeral HubStore + admin notify) ─────────────────────────
+  router.get("/robot-request", async (req: Request, res: Response) => {
+    const identity = await paxIdentityFromRequest(req, res, req.query as Record<string, unknown>);
+    if (!identity) return;
+    const request = store.getRobotRequest(identity.tenantId, identity.passengerId) || null;
+    return res.json({ ok: true, request });
+  });
+
+  router.post("/robot-request", async (req: Request, res: Response) => {
+    const body = req.body || {};
+    const identity = await paxIdentityFromRequest(req, res, body);
+    if (!identity) return;
+
+    const serviceType = parseRobotServiceType(body.serviceType);
+    if (!serviceType) return res.status(400).json({ ok: false, error: "invalid_service_type" });
+
+    const partySize = Math.max(1, Math.min(6, Number(body.partySize) || 1));
+    const origin = String(body.origin || "").trim().slice(0, 120) || "旅客当前位置";
+    const destination = String(body.destination || "").trim().slice(0, 120) || "出发登机口";
+    const note = String(body.note || "").trim().slice(0, 500);
+    const now = Date.now();
+    const existing = store.getRobotRequest(identity.tenantId, identity.passengerId);
+    if (existing && existing.status !== "cancelled") {
+      return res.status(409).json({ ok: false, error: "robot_request_active", request: existing });
+    }
+
+    const request: RobotRequest = {
+      id: crypto.randomUUID(),
+      serviceType,
+      partySize,
+      origin,
+      destination,
+      note,
+      status: "submitted",
+      createdAt: now,
+      updatedAt: now,
+    };
+    store.setRobotRequest(identity.tenantId, identity.passengerId, request);
+
+    const label = robotServiceLabel(serviceType);
+    const sysMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      passengerId: identity.passengerId,
+      tenantId: identity.tenantId,
+      from: "system",
+      kind: "system",
+      body: `🤖 机器人服务请求：${label} · ${partySize}人 · ${origin} → ${destination}${note ? ` · ${note}` : ""}`,
+      createdAt: now,
+    };
+    store.appendChat(identity.tenantId, identity.passengerId, sysMsg);
+    store.broadcastAdmins(identity.tenantId, { type: "chat_msg", message: sysMsg });
+    store.broadcastPax(identity.tenantId, identity.passengerId, { type: "chat_msg", message: sysMsg });
+    const robotPayload = {
+      type: "robot_request" as const,
+      tenantId: identity.tenantId,
+      passengerId: identity.passengerId,
+      request,
+      at: now,
+    };
+    store.broadcastAdmins(identity.tenantId, robotPayload);
+    store.broadcastPax(identity.tenantId, identity.passengerId, {
+      type: "robot_request_update",
+      tenantId: identity.tenantId,
+      passengerId: identity.passengerId,
+      request,
+      at: now,
+    });
+
+    void auditLog?.record({
+      actorEmail: `pax:${identity.passengerId}`,
+      action: "pax_robot_request",
+      tenantId: identity.tenantId,
+      passengerId: identity.passengerId,
+      detail: serviceType,
+    });
+
+    return res.json({ ok: true, request });
+  });
+
+  router.delete("/robot-request", async (req: Request, res: Response) => {
+    const body = req.body || {};
+    const identity = await paxIdentityFromRequest(req, res, body);
+    if (!identity) return;
+    const existing = store.getRobotRequest(identity.tenantId, identity.passengerId);
+    if (!existing) return res.json({ ok: true, request: null });
+    const cancelled: RobotRequest = {
+      ...existing,
+      status: "cancelled",
+      updatedAt: Date.now(),
+    };
+    store.clearRobotRequest(identity.tenantId, identity.passengerId);
+    const payload = {
+      type: "robot_request_cleared" as const,
+      tenantId: identity.tenantId,
+      passengerId: identity.passengerId,
+      request: cancelled,
+      at: cancelled.updatedAt,
+    };
+    store.broadcastAdmins(identity.tenantId, payload);
+    store.broadcastPax(identity.tenantId, identity.passengerId, payload);
+    return res.json({ ok: true, request: cancelled });
+  });
+
+  // Admin: list + advance robot booking status (mounted under /api/orienta too).
+  router.get("/admin-robot-requests", requireAdmin, async (req: Request, res: Response) => {
+    const tenantId = canonicalTenantId(req.query.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    const prefix = `${tenantId}::`;
+    const requests: Array<RobotRequest & { passengerId: string }> = [];
+    for (const [key, request] of store.robotRequests) {
+      if (!key.startsWith(prefix)) continue;
+      if (request.status === "cancelled") continue;
+      requests.push({ ...request, passengerId: key.slice(prefix.length) });
+    }
+    requests.sort((a, b) => b.createdAt - a.createdAt);
+    return res.json({ ok: true, tenantId, requests });
+  });
+
+  router.post("/admin-robot-request", requireAdmin, async (req: Request, res: Response) => {
+    const body = req.body || {};
+    const tenantId = canonicalTenantId(body.tenantId || body.tenant) || canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+    const passengerId = String(body.passengerId || "").trim();
+    if (!passengerId) return res.status(400).json({ ok: false, error: "missing_passenger" });
+    const existing = store.getRobotRequest(tenantId, passengerId);
+    if (!existing) return res.status(404).json({ ok: false, error: "robot_request_not_found" });
+
+    const action = String(body.action || "advance").trim().toLowerCase();
+    const now = Date.now();
+    if (action === "cancel") {
+      const cancelled: RobotRequest = { ...existing, status: "cancelled", updatedAt: now };
+      store.clearRobotRequest(tenantId, passengerId);
+      const payload = {
+        type: "robot_request_cleared" as const,
+        tenantId,
+        passengerId,
+        request: cancelled,
+        at: now,
+      };
+      store.broadcastAdmins(tenantId, payload);
+      store.broadcastPax(tenantId, passengerId, payload);
+      return res.json({ ok: true, request: cancelled });
+    }
+
+    const statusRaw = String(body.status || "").trim().toLowerCase();
+    const allowed = new Set(["submitted", "assigned", "en_route", "serving"]);
+    let nextStatus = existing.status;
+    if (allowed.has(statusRaw)) {
+      nextStatus = statusRaw as RobotRequest["status"];
+    } else if (action === "advance") {
+      const order = ["submitted", "assigned", "en_route", "serving"] as const;
+      const idx = order.indexOf(existing.status as (typeof order)[number]);
+      const nextIdx = Math.min(order.length - 1, Math.max(0, idx) + 1);
+      nextStatus = order[nextIdx] ?? "serving";
+    } else {
+      return res.status(400).json({ ok: false, error: "invalid_status" });
+    }
+
+    const updated: RobotRequest = { ...existing, status: nextStatus, updatedAt: now };
+    store.setRobotRequest(tenantId, passengerId, updated);
+    const payload = {
+      type: "robot_request_update" as const,
+      tenantId,
+      passengerId,
+      request: updated,
+      at: now,
+    };
+    store.broadcastAdmins(tenantId, payload);
+    store.broadcastPax(tenantId, passengerId, payload);
+
+    const sysMsg: ChatMessage = {
+      id: crypto.randomUUID(),
+      passengerId,
+      tenantId,
+      from: "system",
+      kind: "system",
+      body: `🤖 机器人服务状态更新：${updated.status}`,
+      createdAt: now,
+    };
+    store.appendChat(tenantId, passengerId, sysMsg);
+    store.broadcastAdmins(tenantId, { type: "chat_msg", message: sysMsg });
+    store.broadcastPax(tenantId, passengerId, { type: "chat_msg", message: sysMsg });
+
+    return res.json({ ok: true, request: updated });
   });
 
   // ── Admin presence poll ───────────────────────────────────────────────────────

@@ -74,20 +74,14 @@ export function setPaxPresenceFromHttp(
 
   if (isOnline) {
     cancelPaxOffline(store, tenantId, passengerId);
-    const wasOnline = store.online.has(key);
     setPresence(store, tenantId, passengerId, true);
-    if (wasOnline) {
-      // WS/tunnel flap: server still had pax online, ping admin again
-      store.broadcastAdmins(tenantId, {
-        type: "presence",
-        tenantId,
-        passengerId,
-        online: true,
-        at: Date.now(),
-      });
-    }
     return;
   }
 
-  setPresence(store, tenantId, passengerId, false);
+  // HTTP offline must not clobber a live WebSocket (React effect remounts,
+  // Strict Mode, or session revalidation previously posted online:false while
+  // the pax socket was still connected — that made admin presence flap).
+  const sockets = store.paxSockets.get(key);
+  if (sockets && sockets.size > 0) return;
+  schedulePaxOffline(store, tenantId, passengerId);
 }

@@ -58,3 +58,6 @@ Thumbs.db
 # Route-site video assets (large; copy locally from v2 or download at deploy)
 apps/dashboard/public/route_site/*.mp4
 apps/dashboard/public/route_site/dynamic/
+
+# Offline Docker export (images + generated demo .env)
+docker/dist/

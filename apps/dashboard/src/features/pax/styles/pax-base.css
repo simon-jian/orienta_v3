@@ -1,0 +1,214 @@
+/* Passenger funnel — product shell (inspired by robots pax UI, no Apple assets). */
+
+.pax-shell {
+  --pax-bg0: #0b1220;
+  --pax-bg1: #152238;
+  --pax-accent: #c8102e;
+  --pax-accent-soft: rgba(200, 16, 46, 0.14);
+  --pax-text: #f4f6fb;
+  --pax-muted: rgba(244, 246, 251, 0.68);
+  --pax-card: rgba(255, 255, 255, 0.06);
+  --pax-border: rgba(255, 255, 255, 0.12);
+  --pax-ok: #34d399;
+  min-height: 100vh;
+  color: var(--pax-text);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, rgba(200, 16, 46, 0.28), transparent 55%),
+    radial-gradient(900px 500px at 90% 0%, rgba(56, 189, 248, 0.12), transparent 50%),
+    linear-gradient(165deg, var(--pax-bg0), var(--pax-bg1) 55%, #0a101c);
+  font-family: "Segoe UI", "PingFang SC", "Noto Sans SC", sans-serif;
+  box-sizing: border-box;
+}
+
+.pax-shell *,
+.pax-shell *::before,
+.pax-shell *::after {
+  box-sizing: border-box;
+}
+
+.pax-wrap {
+  width: min(720px, 100%);
+  margin: 0 auto;
+  padding: 28px 18px 48px;
+}
+
+.pax-brand {
+  font-size: clamp(2rem, 6vw, 2.8rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin: 0 0 8px;
+  line-height: 1.1;
+}
+
+.pax-lead {
+  margin: 0 0 24px;
+  color: var(--pax-muted);
+  font-size: 1.02rem;
+  line-height: 1.5;
+  max-width: 36em;
+}
+
+.pax-card {
+  background: var(--pax-card);
+  border: 1px solid var(--pax-border);
+  border-radius: 18px;
+  padding: 18px;
+  backdrop-filter: blur(10px);
+}
+
+.pax-card + .pax-card {
+  margin-top: 14px;
+}
+
+.pax-card h2 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}
+
+.pax-card p {
+  margin: 0 0 12px;
+  color: var(--pax-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.pax-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  padding: 12px 16px;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  background: var(--pax-accent);
+  color: #fff;
+}
+
+.pax-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.pax-btn.secondary {
+  background: transparent;
+  border-color: var(--pax-border);
+  color: var(--pax-text);
+}
+
+.pax-btn.ghost {
+  background: var(--pax-accent-soft);
+  color: #fecaca;
+}
+
+.pax-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 0.82rem;
+}
+
+.pax-field span {
+  font-weight: 700;
+  color: var(--pax-muted);
+}
+
+.pax-field input,
+.pax-field textarea,
+.pax-field select {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--pax-border);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--pax-text);
+  padding: 10px 12px;
+  font: inherit;
+}
+
+.pax-field textarea {
+  min-height: 88px;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+
+.pax-error {
+  margin: 10px 0 0;
+  color: #fecaca;
+  font-size: 0.88rem;
+}
+
+.pax-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.pax-tab {
+  flex: 1;
+  border-radius: 999px;
+  border: 1px solid var(--pax-border);
+  background: transparent;
+  color: var(--pax-muted);
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.pax-tab.active {
+  background: #fff;
+  color: #111827;
+  border-color: #fff;
+}
+
+.pax-map-frame {
+  width: 100%;
+  min-height: min(52vh, 420px);
+  border: 0;
+  border-radius: 16px;
+  background: #0a0f18;
+}
+
+.pax-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pax-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  font-size: 0.78rem;
+  color: var(--pax-muted);
+}
+
+.pax-chip.ok {
+  color: var(--pax-ok);
+}
+
+.pax-app-layout {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  min-height: 100vh;
+}
+
+.pax-app-main {
+  min-height: 0;
+}
+
+.pax-warn {
+  background: rgba(248, 113, 113, 0.16);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  color: #fecaca;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 0.85rem;
+  margin-bottom: 12px;
+}
+
+/* Flight page: robots portal shell (light page + dark flight card). */

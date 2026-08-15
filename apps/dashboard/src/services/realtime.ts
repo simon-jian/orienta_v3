@@ -11,6 +11,27 @@ import { wsUrl } from "../config/api";
 
 export type { MsgRecord, MsgStatus, MsgStatusEvent, ChatMessage, ChatKind, PresenceEvent, PaxTrajectoryData };
 
+/** Mirrors HubStore.RobotRequest — kept local to avoid feature↔service cycles. */
+export type RobotRequestPayload = {
+  id: string;
+  serviceType: string;
+  partySize: number;
+  origin: string;
+  destination: string;
+  note: string;
+  status: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type RobotRequestEvent = {
+  type: "robot_request" | "robot_request_update" | "robot_request_cleared";
+  tenantId: string;
+  passengerId: string;
+  request: RobotRequestPayload;
+  at?: number;
+};
+
 interface WsServerMsg {
   type: string;
   [key: string]: unknown;
@@ -88,6 +109,7 @@ export function connectAdminRealtime(opts: {
   onChatRead?(passengerId: string, messageId: string, at: number): void;
   onPaxTrajectory?(passengerId: string, data: PaxTrajectoryData): void;
   onPaxTrajectoryClear?(passengerId: string): void;
+  onRobotRequest?(ev: RobotRequestEvent): void;
   onConnectionChange?(up: boolean): void;
 }): AdminRealtime {
   const { tenantId } = opts;
@@ -143,6 +165,13 @@ export function connectAdminRealtime(opts: {
       }
       if (m.type === "pax_trajectory_clear" && m.passengerId) {
         opts.onPaxTrajectoryClear?.(m.passengerId as string);
+      }
+      if (
+        (m.type === "robot_request" || m.type === "robot_request_update" || m.type === "robot_request_cleared") &&
+        m.passengerId &&
+        m.request
+      ) {
+        opts.onRobotRequest?.(m as unknown as RobotRequestEvent);
       }
     };
   };
@@ -204,6 +233,7 @@ export function connectPaxRealtime(opts: {
   onChatHistory?(messages: ChatMessage[]): void;
   onMarkRead?(): void;
   onLocRequest?(): void;
+  onRobotRequest?(ev: RobotRequestEvent): void;
   onConnectionChange?(up: boolean): void;
 }): PaxRealtime {
   const { tenantId, passengerId } = opts;
@@ -247,6 +277,12 @@ export function connectPaxRealtime(opts: {
       }
       if (m.type === "chat_history") opts.onChatHistory?.(m.messages as ChatMessage[]);
       if (m.type === "loc_request") opts.onLocRequest?.();
+      if (
+        (m.type === "robot_request" || m.type === "robot_request_update" || m.type === "robot_request_cleared") &&
+        m.request
+      ) {
+        opts.onRobotRequest?.(m as unknown as RobotRequestEvent);
+      }
     };
   };
 

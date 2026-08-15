@@ -87,9 +87,45 @@ export function injectIndoorMapTileFixBeforeBodyClose(htmlUtf8: string): string 
   return htmlUtf8 + fix;
 }
 
+/**
+ * Ensure admin pax markers show name+status (not bare ID) and notify the
+ * parent dashboard on click — works for both repo and upstream airport-map.html.
+ */
+export function patchAdminPassengerMarkerUx(htmlUtf8: string): string {
+  const needle =
+    "mk.bindTooltip(id + (st ? ' · ' + st : ''), { direction: 'top', offset: [0, -8] });";
+  if (!htmlUtf8.includes(needle)) return htmlUtf8;
+  const replacement = [
+    "var nm = String(p.name || '').trim();",
+    "var label = (nm || id) + (st ? ' · ' + st : '');",
+    "mk.__orientaPax = { id: id, name: nm, status: st };",
+    "mk.bindTooltip(label, { direction: 'top', offset: [0, -8], sticky: true });",
+    "if (!mk.__orientaSelectBound) {",
+    "  mk.__orientaSelectBound = 1;",
+    "  mk.on('click', function () {",
+    "    try {",
+    "      var info = mk.__orientaPax || { id: id, name: '', status: '' };",
+    "      var spClick = new URLSearchParams(window.location.search || '');",
+    "      var po = (spClick.get('parentOrigin') || '').trim();",
+    "      try { po = decodeURIComponent(po); } catch (ePo) {}",
+    "      var target = po || window.location.origin;",
+    "      window.parent.postMessage({",
+    "        type: 'orienta-admin-select-passenger',",
+    "        passengerId: info.id,",
+    "        name: info.name || '',",
+    "        status: info.status || ''",
+    "      }, target);",
+    "    } catch (eClick) {}",
+    "  });",
+    "}",
+  ].join("\n            ");
+  return htmlUtf8.split(needle).join(replacement);
+}
+
 export function transformAirportMapHtmlFromSource(htmlUtf8: string): string {
   let html = injectIndoorMapFetchPatchHtml(htmlUtf8);
   html = injectIndoorMapTileFixBeforeBodyClose(html);
+  html = patchAdminPassengerMarkerUx(html);
   html = html
     .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/leaflet@1\.9\.4\/dist\/leaflet\.css/gi, "/vendor/leaflet/leaflet.css")
     .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/leaflet@1\.9\.4\/dist\/leaflet\.js/gi, "/vendor/leaflet/leaflet.js");

@@ -55,18 +55,24 @@ function IndoorMapEmbed(props: {
   tenantId: string;
   passengers: PassengerComputed[];
   selectedPassengerId: string | null;
+  onSelectPassenger: (id: string) => void;
   visible?: boolean;
 }) {
-  const { baseUrl, airport, tenantId, passengers, selectedPassengerId, visible } = props;
+  const { baseUrl, airport, tenantId, passengers, selectedPassengerId, onSelectPassenger, visible } = props;
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const throttleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapTabShownRef = useRef(false);
+  const onSelectRef = useRef(onSelectPassenger);
+  onSelectRef.current = onSelectPassenger;
 
   const iframeSrc = useMemo(() => {
     const u = new URL(baseUrl, typeof window !== "undefined" ? window.location.href : "http://localhost");
     u.searchParams.set("airport", airport);
     u.searchParams.set("tenant", tenantId);
     u.searchParams.set("mapRole", "operator");
+    if (typeof window !== "undefined") {
+      u.searchParams.set("parentOrigin", window.location.origin);
+    }
     const apiBase = INDOOR_MAP_API_BASE;
     if (apiBase) u.searchParams.set("apiBase", apiBase);
     return u.toString();
@@ -90,6 +96,7 @@ function IndoorMapEmbed(props: {
       selectedPassengerId,
       passengers: passengers.map((p) => ({
         id: p.id,
+        name: p.name,
         position: p.location,
         path:
           Array.isArray(p.path) && p.path.length > 0
@@ -100,6 +107,7 @@ function IndoorMapEmbed(props: {
         color: statusColor(p),
         extStatus: p.extStatus,
         status: p.status,
+        plan: p.plan,
       })),
     });
   }, [airport, tenantId, selectedPassengerId, passengers, targetOrigin]);
@@ -114,6 +122,19 @@ function IndoorMapEmbed(props: {
       if (throttleRef.current) clearTimeout(throttleRef.current);
     };
   }, [pushTrajectories]);
+
+  useEffect(() => {
+    function onMessage(ev: MessageEvent) {
+      if (ev.source !== iframeRef.current?.contentWindow) return;
+      if (targetOrigin && ev.origin !== targetOrigin && ev.origin !== window.location.origin) return;
+      const data = ev.data as { type?: string; passengerId?: unknown } | null;
+      if (!data || data.type !== "orienta-admin-select-passenger") return;
+      const pid = String(data.passengerId || "").trim();
+      if (pid) onSelectRef.current(pid);
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [targetOrigin]);
 
   useEffect(() => {
     if (!visible) {
@@ -232,6 +253,7 @@ export default function MapView(props: DashboardMapViewProps) {
         tenantId={tenantId}
         passengers={props.passengers}
         selectedPassengerId={props.selectedPassengerId}
+        onSelectPassenger={props.onSelectPassenger}
         visible={props.visible}
       />
     );

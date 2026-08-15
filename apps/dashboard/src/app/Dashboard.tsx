@@ -8,6 +8,7 @@ import ConversationPanel from "../features/chat/ConversationPanel";
 import { DeparturesFids, ArrivalsFids } from "../features/fids/FidsPanel";
 import DashboardTab from "../features/passengers/DashboardTab";
 import RiskBadges from "../features/passengers/RiskBadges";
+import { RobotRequestQueue } from "../features/passengers/RobotRequestQueue";
 import { useDashboard } from "../features/passengers/useDashboard";
 import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 
@@ -60,6 +61,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     chatHistory,
     sendSms, sendChat, requestLocation, openConversation,
     toasts, dismissToast,
+    robotRequests, advanceRobotRequest, cancelRobotRequest,
   } = useDashboard({
     tenantId, gates, flights, gatesById, flightsById,
     pekPoiReady, session,
@@ -124,7 +126,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
         search={search} onSearch={setSearch}
         title="中国国际航空公司后台"
         subtitle={airportLabel}
-        searchPlaceholder="搜索登机口（如 E21 / D06）…"
+        searchPlaceholder="搜索姓名 / ID / 航班 / 登机口…"
         gateCount={gates.length} passengerCount={passengers.length}
         transferCount={passengers.length}
         transferUrgentCount={riskCounts.red + riskCounts.yellow}
@@ -169,6 +171,15 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             </SectionErrorBoundary>
           </div>
           <div style={{ flex: "1.5 1 320px", minWidth: "min(400px, 100%)", minHeight: 400, overflow: "auto", display: "flex", flexDirection: "column" }}>
+            <RobotRequestQueue
+              requests={robotRequests}
+              onOpen={(id) => {
+                setSelectedPaxId(id);
+                openConversation(id);
+              }}
+              onAdvance={advanceRobotRequest}
+              onCancel={cancelRobotRequest}
+            />
             <DashboardTab
               passengers={passengersFilteredByGate}
               presence={presence}
@@ -203,9 +214,9 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
                 passengers={mapPassengers}
                 selectedPassengerId={selectedPaxId}
                 onSelectPassenger={(id) => {
-                  const next = id === selectedPaxId ? null : id;
-                  setSelectedPaxId(next);
-                  setMapViewMode(next ? "single" : "all");
+                  setSelectedPaxId(id);
+                  setMapViewMode("single");
+                  openConversation(id);
                 }}
                 onHoverPassenger={setHoverPaxId}
                 visible={tab === "map"}

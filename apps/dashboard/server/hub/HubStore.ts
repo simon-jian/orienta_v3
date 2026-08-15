@@ -42,6 +42,21 @@ export type TrajectoryData = {
   position: { lat: number; lng: number };
 };
 
+export type RobotServiceType = "follow" | "um" | "wheelchair" | "lost_delivery";
+export type RobotRequestStatus = "submitted" | "assigned" | "en_route" | "serving" | "cancelled";
+
+export type RobotRequest = {
+  id: string;
+  serviceType: RobotServiceType;
+  partySize: number;
+  origin: string;
+  destination: string;
+  note: string;
+  status: RobotRequestStatus;
+  createdAt: number;
+  updatedAt: number;
+};
+
 export class HubStore {
   constructor(private readonly chatRepo?: ChatRepository) {}
 
@@ -77,6 +92,8 @@ export class HubStore {
   readonly paxMeta = new Map<string, PaxMeta>();
   /** Live PDR trajectories: keyed by `tenantId::passengerId` */
   readonly paxTrajectories = new Map<string, TrajectoryData>();
+  /** Active robot booking requests: keyed by `tenantId::passengerId` */
+  readonly robotRequests = new Map<string, RobotRequest>();
   /** When each key's chatHistories/paxMeta/paxTrajectories entry was last touched — see pruneIdleCaches(). */
   private readonly lastTouched = new Map<string, number>();
 
@@ -89,6 +106,23 @@ export class HubStore {
     const key = HubStore.key(tenantId, passengerId);
     this.paxMeta.set(key, meta);
     this.touch(key);
+  }
+
+  setRobotRequest(tenantId: string, passengerId: string, request: RobotRequest): void {
+    const key = HubStore.key(tenantId, passengerId);
+    this.robotRequests.set(key, request);
+    this.touch(key);
+  }
+
+  getRobotRequest(tenantId: string, passengerId: string): RobotRequest | undefined {
+    return this.robotRequests.get(HubStore.key(tenantId, passengerId));
+  }
+
+  clearRobotRequest(tenantId: string, passengerId: string): boolean {
+    const key = HubStore.key(tenantId, passengerId);
+    const deleted = this.robotRequests.delete(key);
+    if (deleted) this.touch(key);
+    return deleted;
   }
 
   // ── Keys ────────────────────────────────────────────────────────────────────
@@ -226,6 +260,7 @@ export class HubStore {
     this.chatHistories.delete(key);
     this.paxMeta.delete(key);
     this.paxTrajectories.delete(key);
+    this.robotRequests.delete(key);
     this.lastTouched.delete(key);
     for (const [messageId, rec] of this.messages) {
       if (rec.tenantId === tenantId && rec.passengerId === passengerId) this.messages.delete(messageId);
@@ -249,6 +284,7 @@ export class HubStore {
       ...this.chatHistories.keys(),
       ...this.paxMeta.keys(),
       ...this.paxTrajectories.keys(),
+      ...this.robotRequests.keys(),
     ]);
     let evicted = 0;
     for (const key of candidateKeys) {
@@ -258,6 +294,7 @@ export class HubStore {
       this.chatHistories.delete(key);
       this.paxMeta.delete(key);
       this.paxTrajectories.delete(key);
+      this.robotRequests.delete(key);
       this.lastTouched.delete(key);
       evicted += 1;
     }

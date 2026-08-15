@@ -22,6 +22,9 @@ import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
 import { apiUrl } from "../../config/api";
 import { fetchPassengers } from "../../services/passengers/passengerSource";
+import type { AdminRobotRequest } from "./RobotRequestQueue";
+import type { RobotRequest } from "../pax/assist/assistTypes";
+import { mergeChatHistory, upsertChatMessage } from "../pax/assist/chatMerge";
 
 export type ToastItem = { id: string; title: string; body: string };
 
@@ -70,6 +73,11 @@ export type DashboardState = {
   // Toasts
   toasts: ToastItem[];
   dismissToast: (id: string) => void;
+
+  // Robot bookings
+  robotRequests: AdminRobotRequest[];
+  advanceRobotRequest: (passengerId: string) => void;
+  cancelRobotRequest: (passengerId: string) => void;
 };
 
 export function useDashboard(opts: {
@@ -140,12 +148,46 @@ export function useDashboard(opts: {
   const [chatHistory, setChatHistory] = useState<Record<string, ChatMessage[]>>({});
   const rtRef = useRef<AdminRealtime | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [robotRequests, setRobotRequests] = useState<AdminRobotRequest[]>([]);
 
   const pushToast = (title: string, body: string) => {
     const id = `t_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     setToasts((t) => [...t.slice(-4), { id, title, body }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
   };
+
+  const upsertRobotRequest = useCallback((passengerId: string, request: RobotRequest) => {
+    setRobotRequests((prev) => {
+      const next = prev.filter((r) => r.passengerId !== passengerId && r.id !== request.id);
+      if (request.status === "cancelled") return next;
+      return [{ ...request, passengerId }, ...next].sort((a, b) => b.createdAt - a.createdAt);
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const res = await fetch(
+          apiUrl(`/api/orienta/admin-robot-requests?tenant=${encodeURIComponent(tenantId)}`),
+          { credentials: "same-origin" },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { ok?: boolean; requests?: AdminRobotRequest[] };
+        if (!cancelled && data.ok && Array.isArray(data.requests)) {
+          setRobotRequests(data.requests);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    void load();
+    const t = window.setInterval(() => void load(), 15_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(t);
+    };
+  }, [tenantId]);
 
   useEffect(() => {
     const rt = connectAdminRealtime({
@@ -173,10 +215,13 @@ export function useDashboard(opts: {
         });
       },
       onChatMsg: (msg: ChatMessage) => {
-        setChatHistory((h) => ({ ...h, [msg.passengerId]: [...(h[msg.passengerId] || []), msg].slice(-50) }));
+        setChatHistory((h) => ({
+          ...h,
+          [msg.passengerId]: upsertChatMessage(h[msg.passengerId] || [], msg),
+        }));
       },
       onChatHistory: (pid: string, msgs: ChatMessage[]) => {
-        setChatHistory((h) => ({ ...h, [pid]: msgs }));
+        setChatHistory((h) => ({ ...h, [pid]: mergeChatHistory(h[pid] || [], msgs) }));
       },
       onChatRead: (pid: string, messageId: string, at: number) => {
         setChatHistory((h) => ({
@@ -197,10 +242,24 @@ export function useDashboard(opts: {
           return next;
         });
       },
+      onRobotRequest: (ev) => {
+        const req = ev.request as RobotRequest;
+        if (ev.type === "robot_request_cleared" || req.status === "cancelled") {
+          setRobotRequests((prev) => prev.filter((r) => r.passengerId !== ev.passengerId));
+          pushToast("Robot booking cleared", ev.passengerId);
+          return;
+        }
+        upsertRobotRequest(ev.passengerId, req);
+        if (ev.type === "robot_request") {
+          pushToast("Robot booking", `${ev.passengerId} · ${req.serviceType}`);
+          setOpenConvPaxId(ev.passengerId);
+          rtRef.current?.fetchHistory(ev.passengerId);
+        }
+      },
     });
     rtRef.current = rt;
     return () => { rtRef.current = null; rt.close(); };
-  }, [tenantId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tenantId, upsertRobotRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // HTTP presence poll (backup for flaky WS tunnels)
   useEffect(() => {
@@ -300,9 +359,18 @@ export function useDashboard(opts: {
     const q = search.trim().toLowerCase();
     if (!q) return passengers;
     return passengers.filter((p) => {
-      const gateId  = (p.gateId || "").toLowerCase();
+      const gateId = (p.gateId || "").toLowerCase();
       const gateName = (gatesById.get(p.gateId)?.name || "").toLowerCase();
-      return gateId.includes(q) || gateName.includes(q);
+      const name = (p.name || "").toLowerCase();
+      const id = (p.id || "").toLowerCase();
+      const flight = (p.flightId || "").toLowerCase();
+      return (
+        gateId.includes(q) ||
+        gateName.includes(q) ||
+        name.includes(q) ||
+        id.includes(q) ||
+        flight.includes(q)
+      );
     });
   }, [passengers, search, gatesById]);
 
@@ -374,20 +442,75 @@ export function useDashboard(opts: {
     pushToast("Message sent", `→ ${pid}: ${msg.slice(0, 60)}`);
   };
 
+  const fetchChatHistoryHttp = useCallback(async (pid: string) => {
+    try {
+      const res = await fetch(
+        apiUrl(
+          `/api/orienta/admin-chat-history?tenant=${encodeURIComponent(tenantId)}&passengerId=${encodeURIComponent(pid)}`,
+        ),
+        { credentials: "same-origin" },
+      );
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        messages?: ChatMessage[];
+      };
+      if (!res.ok || !data.ok || !Array.isArray(data.messages)) return;
+      setChatHistory((h) => ({ ...h, [pid]: mergeChatHistory(h[pid] || [], data.messages!) }));
+    } catch {
+      /* ignore */
+    }
+  }, [tenantId]);
+
   const sendChat = (pid: string, body: string) => {
+    const text = body.trim();
+    if (!text) return;
     const msgId = `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const localMsg: ChatMessage = {
-      id: msgId, passengerId: pid, tenantId, from: "admin", kind: "text", body,
+      id: msgId, passengerId: pid, tenantId, from: "admin", kind: "text", body: text,
       createdAt: Date.now(), status: "sending",
     };
     setChatHistory((h) => ({ ...h, [pid]: [...(h[pid] || []), localMsg].slice(-50) }));
     if (rtRef.current?.isConnected()) {
-      rtRef.current.chatSend(pid, body, "text");
+      rtRef.current.chatSend(pid, text, "text");
       setChatHistory((h) => ({
         ...h,
         [pid]: (h[pid] || []).map((m) => m.id === msgId ? { ...m, status: "sent" as const } : m),
       }));
+      return;
     }
+    void (async () => {
+      try {
+        const res = await fetch(apiUrl("/api/orienta/admin-chat-send"), {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ tenantId, passengerId: pid, body: text, kind: "text" }),
+        });
+        const data = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: ChatMessage;
+          error?: string;
+        };
+        if (!res.ok || !data.ok || !data.message) {
+          setChatHistory((h) => ({
+            ...h,
+            [pid]: (h[pid] || []).filter((m) => m.id !== msgId),
+          }));
+          pushToast("Chat send failed", data.error || `HTTP ${res.status}`);
+          return;
+        }
+        setChatHistory((h) => ({
+          ...h,
+          [pid]: upsertChatMessage(h[pid] || [], { ...data.message!, status: "sent" }),
+        }));
+      } catch (err) {
+        setChatHistory((h) => ({
+          ...h,
+          [pid]: (h[pid] || []).filter((m) => m.id !== msgId),
+        }));
+        pushToast("Chat send failed", err instanceof Error ? err.message : "error");
+      }
+    })();
   };
 
   const requestLocation = (pid: string) => {
@@ -398,6 +521,42 @@ export function useDashboard(opts: {
   const openConversation = (pid: string) => {
     setOpenConvPaxId(pid);
     rtRef.current?.fetchHistory(pid);
+    void fetchChatHistoryHttp(pid);
+  };
+
+  // Keep open conversation fresh when WS is down (phone via trycloudflare).
+  useEffect(() => {
+    if (!openConvPaxId) return;
+    void fetchChatHistoryHttp(openConvPaxId);
+    const t = window.setInterval(() => void fetchChatHistoryHttp(openConvPaxId), 4_000);
+    return () => window.clearInterval(t);
+  }, [openConvPaxId, fetchChatHistoryHttp]);
+
+  const postAdminRobot = async (passengerId: string, action: "advance" | "cancel") => {
+    try {
+      const res = await fetch(apiUrl("/api/orienta/admin-robot-request"), {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId, passengerId, action }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        ok?: boolean;
+        request?: RobotRequest;
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.request) {
+        pushToast("Robot update failed", data.error || `HTTP ${res.status}`);
+        return;
+      }
+      if (data.request.status === "cancelled") {
+        setRobotRequests((prev) => prev.filter((r) => r.passengerId !== passengerId));
+      } else {
+        upsertRobotRequest(passengerId, data.request);
+      }
+    } catch (err) {
+      pushToast("Robot update failed", err instanceof Error ? err.message : "error");
+    }
   };
 
   return {
@@ -413,5 +572,8 @@ export function useDashboard(opts: {
     chatHistory, msgById,
     sendSms, sendChat, requestLocation, openConversation,
     toasts, dismissToast: (id) => setToasts((t) => t.filter((x) => x.id !== id)),
+    robotRequests,
+    advanceRobotRequest: (pid) => void postAdminRobot(pid, "advance"),
+    cancelRobotRequest: (pid) => void postAdminRobot(pid, "cancel"),
   };
 }

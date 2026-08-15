@@ -10,6 +10,8 @@ export function paxCanSendChat(
   kind: string,
 ): boolean {
   if (kind === "location") return true;
-  // Capabilities from the signed session are the single source of truth.
-  return claims ? (claims.capabilities?.includes("operator_chat") ?? false) : false;
+  // Any valid signed session may send chat:
+  // free → AI agent reply; premium (operator_chat) → human operator path.
+  // Without claims, privileged chat is denied.
+  return !!claims;
 }

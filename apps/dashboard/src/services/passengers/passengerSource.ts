@@ -16,7 +16,9 @@ import type { Passenger } from "../../types/types";
  */
 export async function fetchPassengers(tenantId: string): Promise<Passenger[] | null> {
   try {
-    const r = await fetch(apiUrl(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`));
+    const r = await fetch(apiUrl(`/api/passengers?tenant=${encodeURIComponent(tenantId)}`), {
+      credentials: "same-origin",
+    });
     if (!r.ok) return null;
     const j = await r.json();
     if (!j.ok || !Array.isArray(j.passengers)) return null;
