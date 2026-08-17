@@ -122,10 +122,67 @@ export function patchAdminPassengerMarkerUx(htmlUtf8: string): string {
   return htmlUtf8.split(needle).join(replacement);
 }
 
-export function transformAirportMapHtmlFromSource(htmlUtf8: string): string {
+/**
+ * Prefer `?airport=SFO` (passenger flight page) over localStorage PEK default.
+ * Patches initAirportFilter when possible; otherwise injects a late apply.
+ */
+export function patchAirportQueryParamInit(htmlUtf8: string): string {
+  const replacement = [
+    "var code = 'PEK';",
+    "    try {",
+    "        var urlAp = (new URLSearchParams(location.search).get('airport') || '').trim().toUpperCase();",
+    "        if (urlAp && AIRPORTS[urlAp]) code = urlAp;",
+    "        else {",
+    "            var saved = localStorage.getItem(LS_AIRPORT);",
+    "            if (saved && AIRPORTS[saved]) code = saved;",
+    "        }",
+    "    } catch (_) {}",
+  ].join("\n");
+
+  const re =
+    /var code = 'PEK';\s*try \{\s*var saved = localStorage\.getItem\(LS_AIRPORT\);\s*if \(saved && AIRPORTS\[saved\]\) code = saved;\s*\} catch \(_\) \{\}/g;
+  if (re.test(htmlUtf8)) {
+    return htmlUtf8.replace(re, replacement);
+  }
+
+  if (htmlUtf8.includes("orienta-url-airport-init")) return htmlUtf8;
+  const inject =
+    "<script>/*orienta-url-airport-init*/(function(){try{var a=(new URLSearchParams(location.search).get('airport')||'').trim().toUpperCase();" +
+    "if(!a)return;function go(){try{if(typeof AIRPORTS==='undefined'||!AIRPORTS[a])return false;" +
+    "var fa=document.getElementById('fltAirport');if(!fa)return false;if(fa.value===a)return true;fa.value=a;" +
+    "if(typeof onAirportFilterChange==='function')onAirportFilterChange();return true}catch(e){return false}}" +
+    "if(!go()){setTimeout(go,120);setTimeout(go,600)}}catch(e){}})();<\/script>";
+  if (/<\/body>/i.test(htmlUtf8)) {
+    return htmlUtf8.replace(/<\/body>/i, `${inject}</body>`);
+  }
+  return htmlUtf8 + inject;
+}
+
+/**
+ * Hide the map's own airport picker for the operator dashboard, which now owns
+ * that choice and passes it as `?airport=`. Two pickers meant two sources of
+ * truth: switching inside the iframe left React still thinking it was showing
+ * the tenant's default airport. Passenger/kiosk embeds are untouched.
+ */
+export function patchHideAirportSwitcherForOperator(htmlUtf8: string): string {
+  if (htmlUtf8.includes("orienta-hide-map-airport-switcher")) return htmlUtf8;
+  const style =
+    "<style>/*orienta-hide-map-airport-switcher*/.mapctl-fg:has(> #fltAirport){display:none}</style>";
+  if (/<\/head>/i.test(htmlUtf8)) {
+    return htmlUtf8.replace(/<\/head>/i, `${style}</head>`);
+  }
+  return style + htmlUtf8;
+}
+
+export function transformAirportMapHtmlFromSource(
+  htmlUtf8: string,
+  opts?: { mapRole?: string },
+): string {
   let html = injectIndoorMapFetchPatchHtml(htmlUtf8);
   html = injectIndoorMapTileFixBeforeBodyClose(html);
   html = patchAdminPassengerMarkerUx(html);
+  html = patchAirportQueryParamInit(html);
+  if (opts?.mapRole === "operator") html = patchHideAirportSwitcherForOperator(html);
   html = html
     .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/leaflet@1\.9\.4\/dist\/leaflet\.css/gi, "/vendor/leaflet/leaflet.css")
     .replace(/https:\/\/cdn\.jsdelivr\.net\/npm\/leaflet@1\.9\.4\/dist\/leaflet\.js/gi, "/vendor/leaflet/leaflet.js");
@@ -140,10 +197,11 @@ export async function fetchUpstreamAirportMapHtml(
   const base = upstreamBase.replace(/\/+$/, "");
   const q = queryString.startsWith("?") ? queryString : queryString ? `?${queryString}` : "";
   const url = `${base}/airport-map.html${q}`;
+  const mapRole = new URLSearchParams(q.startsWith("?") ? q.slice(1) : q).get("mapRole") || undefined;
   try {
     const r = await fetch(url);
     let text = await r.text();
-    text = transformAirportMapHtmlFromSource(text);
+    text = transformAirportMapHtmlFromSource(text, { mapRole });
     return {
       status: r.status,
       html: text,
@@ -152,7 +210,7 @@ export async function fetchUpstreamAirportMapHtml(
   } catch (err) {
     const fb = options?.fallbackHtmlPath;
     if (fb && existsSync(fb)) {
-      const text = transformAirportMapHtmlFromSource(readFileSync(fb, "utf8"));
+      const text = transformAirportMapHtmlFromSource(readFileSync(fb, "utf8"), { mapRole });
       return { status: 200, html: text, contentType: "text/html; charset=utf-8" };
     }
     throw err;

@@ -220,8 +220,8 @@ export function getAdminCredentials(): Map<
         : e.startsWith("ops")
           ? "ops"
           : "admin";
-    const displayName = role === "ops" ? "国航运行席位" : "国航管理员";
-    const org = "Air China";
+    const displayName = role === "ops" ? "Orienta运行席位" : "Orienta管理员";
+    const org = "Orienta";
     // null = unrestricted (every tenant) — the default when ADMIN_TENANT_SCOPES
     // doesn't mention this email, matching pre-existing single-tenant deploys.
     const scopeRaw = tenantScopes.get(e);

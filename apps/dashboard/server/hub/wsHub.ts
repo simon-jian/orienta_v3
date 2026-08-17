@@ -27,6 +27,7 @@ import { ADMIN_ROLES, adminAllowedForTenant, adminPayloadFromCookieHeader } from
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import { logger } from "../lib/logger";
 import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
+import { countTelemetryAccepted } from "../lib/telemetryStats";
 
 type Role = "admin" | "pax";
 
@@ -463,7 +464,8 @@ export function attachWsHub(
           posRaw && typeof posRaw.lat === "number" && typeof posRaw.lng === "number"
             ? { lat: posRaw.lat, lng: posRaw.lng }
             : null;
-        storeAndBroadcastTrajectory(store, tenantId, passengerId, path, pos);
+        const stored = storeAndBroadcastTrajectory(store, tenantId, passengerId, path, pos);
+        if (stored) countTelemetryAccepted();
         return;
       }
 

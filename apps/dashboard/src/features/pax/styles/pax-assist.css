@@ -47,11 +47,13 @@
 }
 
 .pax-assist-logo {
-  height: 56px;
+  height: 48px;
   width: auto;
-  max-width: min(280px, 70vw);
+  max-width: min(72px, 22vw);
   object-fit: contain;
   display: block;
+  border-radius: 10px;
+  background: #fff;
 }
 
 .pax-assist-brand-actions {
@@ -539,6 +541,12 @@
   cursor: not-allowed;
 }
 
+.pax-assist-nav-telemetry {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--pax-muted, #6b7280);
+}
+
 .pax-assist-nav-frame {
   flex: 1 1 auto;
   min-height: 0;
@@ -553,6 +561,10 @@
   height: 100%;
   border: 0;
   background: #111;
+}
+
+.pax-assist-nav-frame--pdr iframe {
+  background: #0f0f12;
 }
 
 /* Robot booking — sits under flight info strip, outside the chat dialog */
@@ -778,7 +790,8 @@
 
 @media (max-width: 520px) {
   .pax-assist-logo {
-    height: 44px;
+    height: 40px;
+    max-width: 56px;
   }
   .pax-robot-service-cards {
     grid-template-columns: 1fr;

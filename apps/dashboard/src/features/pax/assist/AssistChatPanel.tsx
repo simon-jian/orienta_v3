@@ -12,7 +12,7 @@ function MessageList({
   if (!messages.length) {
     return (
       <div className="pax-assist-watermark">
-        Air China 智能中转 · Orienta Transfer Assist
+        Orienta 智能中转 · Transfer Assist
         <span>
           {plan === "premium"
             ? "Premium：可与运营助手对话。"

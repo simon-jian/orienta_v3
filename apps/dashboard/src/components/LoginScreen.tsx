@@ -34,10 +34,10 @@ export default function LoginScreen(props: {
       <div className="loginShell">
         <div className="loginBrand">
           <div className="loginMark">
-            <div className="loginLogo" />
+            <img className="loginLogoImg" src="/orienta-logo.svg" alt="Orienta" />
             <div>
-              <div className="loginTitle">Orienta</div>
-              <div className="loginSub">航司后台 · 北京首都机场 T3</div>
+              <div className="loginTitle">Orienta公司后台</div>
+              <div className="loginSub">Gate · Passenger · Ops Console</div>
             </div>
           </div>
           <div className="loginTag">Admin Console</div>

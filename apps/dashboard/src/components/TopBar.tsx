@@ -23,8 +23,8 @@ export default function TopBar(props: {
 }) {
   const {
     search, onSearch,
-    title = "中国国际航空公司后台",
-    subtitle = "国航 · Gate / Passenger Ops",
+    title = "Orienta公司后台",
+    subtitle = "Orienta · Gate / Passenger Ops",
     searchPlaceholder = "搜索登机口（如 E21 / D06）…",
     paused, setPaused,
     gateCount, passengerCount,
@@ -38,7 +38,7 @@ export default function TopBar(props: {
   return (
     <div className="topbar">
       <div className="brand">
-        <img className="logo" src="/airchina-logo.png" alt="中国国际航空" />
+        <img className="logo" src="/orienta-logo.svg" alt="Orienta" />
         <div>
           <div className="title">{title}</div>
           <div className="subtitle">{subtitle}</div>

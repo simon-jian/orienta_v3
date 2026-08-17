@@ -8,6 +8,7 @@ import {
 import { usePaxPush } from "./hooks/usePaxPush";
 import { usePaxRealtimeSession } from "./hooks/usePaxRealtimeSession";
 import { usePdrNavigation } from "./hooks/usePdrNavigation";
+import { usePdrTelemetryRelay } from "./hooks/usePdrTelemetryRelay";
 import { useAssistInfoStrip } from "./hooks/useAssistInfoStrip";
 import { AssistInfoStrip } from "./assist/AssistInfoStrip";
 import { AssistChatPanel } from "./assist/AssistChatPanel";
@@ -81,7 +82,15 @@ export default function PaxAppPage() {
   } = usePaxRealtimeSession(session);
 
   const onLocationStatus = useCallback((text: string) => setLocationStatus(text), [setLocationStatus]);
-  const nav = usePdrNavigation(session, realtimeRef, onLocationStatus, navPlan);
+  const nav = usePdrNavigation(session, realtimeRef, onLocationStatus, null);
+  // Positions from the embedded PDR page travel over the pax WebSocket, not its
+  // own HTTP pushes — see usePdrTelemetryRelay.
+  const telemetry = usePdrTelemetryRelay({
+    session,
+    realtimeRef,
+    wsUp: rtUp,
+    onStatus: onLocationStatus,
+  });
 
   useEffect(() => {
     if (!session) return;
@@ -184,7 +193,7 @@ export default function PaxAppPage() {
   return (
     <div className={`pax-shell pax-shell--assist${robotOpen ? " robot-service-mode" : ""}`}>
       <div className="pax-assist-brand">
-        <img className="pax-assist-logo" src="/airchina-logo.png" alt="Air China" />
+        <img className="pax-assist-logo" src="/orienta-logo.svg" alt="Orienta" />
         <div className="pax-assist-brand-actions">
           <a className="pax-btn secondary" href="/pax/flight" style={{ textDecoration: "none" }}>
             航班
@@ -236,8 +245,11 @@ export default function PaxAppPage() {
 
       {tab === "nav" ? (
         <AssistNavPanel
+          session={session}
           plan={navPlan}
           hints={navHints}
+          frameRef={telemetry.frameRef}
+          telemetryStatus={locationStatus}
           onConfirmPlan={(plan) => {
             saveConfirmedNavPlan(plan);
             saveNavHints({
@@ -253,16 +265,7 @@ export default function PaxAppPage() {
             clearConfirmedNavPlan();
             setNavPlan(null);
           }}
-          mapSrc={nav.mapSrc}
-          mapFrameRef={nav.mapFrameRef}
-          navDebug={nav.navDebug}
-          pdrStatus={nav.pdrStatus}
-          pdrActive={nav.pdrActive}
           pdrBackendOk={nav.pdrBackendOk}
-          pdrHasRoute={nav.pdrHasRoute}
-          routePlanning={nav.routePlanning}
-          canShareLocation={canShareLocation}
-          onTogglePdr={() => void nav.togglePdr()}
         />
       ) : (
         <section className="pax-assist-panel">

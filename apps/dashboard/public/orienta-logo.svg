@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 280" role="img" aria-label="Orienta">
+  <defs>
+    <linearGradient id="pin" x1="40" y1="20" x2="220" y2="250" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2f3a9e"/>
+      <stop offset="1" stop-color="#1a2370"/>
+    </linearGradient>
+  </defs>
+  <path fill="url(#pin)" d="M140 18c-52 0-94 42-94 94 0 70 94 150 94 150s94-80 94-150c0-52-42-94-94-94z"/>
+  <circle cx="140" cy="108" r="58" fill="#102a56"/>
+  <circle cx="140" cy="108" r="46" fill="none" stroke="#3d7ea6" stroke-width="3" opacity=".7"/>
+  <path fill="none" stroke="#4aa3c7" stroke-width="2" d="M102 128c18-28 58-28 76 0" opacity=".8"/>
+  <path fill="#f5c518" d="M96 118l78-28 10 8-34 18 28 8-8 10-36-14-10 30-12-6 8-28-24-10z"/>
+</svg>

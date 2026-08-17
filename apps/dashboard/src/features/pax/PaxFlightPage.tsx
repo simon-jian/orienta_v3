@@ -38,6 +38,14 @@ function usableGate(value: string | undefined | null): string {
   return g;
 }
 
+function usableAirport(value: string | undefined | null): string {
+  const c = String(value || "")
+    .trim()
+    .toUpperCase();
+  if (!c || c === "—" || c === "-") return "";
+  return c;
+}
+
 export default function PaxFlightPage() {
   const navigate = useNavigate();
   const [session, setSession] = useState<PaxSession | null>(() => getStoredPaxSession());
@@ -228,12 +236,19 @@ export default function PaxFlightPage() {
 
   const depGate = usableGate(displayInstance.dep_gate) || usableGate(session.passenger.gateId);
   const arrGate = usableGate(displayInstance.arr_gate);
-  const mapAirport =
+  const depAirportCode =
     trip.intent === "transfer"
-      ? transfer?.hub_airport || clientDefaultAirportId()
-      : mapLeg === "arr"
-        ? displayInstance.arr_iata || clientDefaultAirportId()
-        : displayInstance.dep_iata || clientDefaultAirportId();
+      ? usableAirport(transfer?.hub_airport) || clientDefaultAirportId()
+      : usableAirport(displayInstance.dep_iata) ||
+        usableAirport((displayInstance as { dep_airport_code?: string }).dep_airport_code) ||
+        clientDefaultAirportId();
+  const arrAirportCode =
+    trip.intent === "transfer"
+      ? usableAirport(transfer?.hub_airport) || clientDefaultAirportId()
+      : usableAirport(displayInstance.arr_iata) ||
+        usableAirport((displayInstance as { arr_airport_code?: string }).arr_airport_code) ||
+        clientDefaultAirportId();
+  const mapAirport = mapLeg === "arr" ? arrAirportCode : depAirportCode;
   const mapFrom =
     trip.intent === "transfer"
       ? transfer?.from_gate
@@ -325,6 +340,8 @@ export default function PaxFlightPage() {
                 gateFrom={mapFrom}
                 gateTo={mapTo}
                 airport={mapAirport}
+                depAirportLabel={depAirportCode}
+                arrAirportLabel={arrAirportCode}
                 mapLeg={mapLeg}
                 onMapLegChange={setMapLeg}
                 showLegToggle

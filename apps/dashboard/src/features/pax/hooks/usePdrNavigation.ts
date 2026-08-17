@@ -89,6 +89,20 @@ export function usePdrNavigation(
   useEffect(() => {
     if (!session) return;
 
+    // #region agent log
+    fetch("/api/debug-log", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        runId: "pre-fix", hypothesisId: "D",
+        location: "src/features/pax/hooks/usePdrNavigation.ts:92",
+        message: "legacy thin PDR client configured (plan is null in embed mode)",
+        data: { hasPlan: !!planRef.current, passengerId: session.passenger.id },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
+
     void configurePdrSession({
       passengerId: session.passenger.id,
       onStatus: setPdrStatus,
@@ -247,6 +261,19 @@ export function usePdrNavigation(
 
       if (data.type !== "orienta-pax-trajectory" || !isLatLng(data.position)) return;
       if (pdrActiveRef.current || isPdrSessionActive()) return;
+      // #region agent log
+      fetch("/api/debug-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: "pre-fix", hypothesisId: "D",
+          location: "src/features/pax/hooks/usePdrNavigation.ts:248",
+          message: "legacy path pushed a position (second source)",
+          data: { hasPlan: !!planRef.current, pathLen: Array.isArray(data.path) ? data.path.length : 0 },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       const pathRaw = Array.isArray(data.path) ? data.path : [];
       const path = pathRaw.filter(isLatLng);
       const position = data.position;

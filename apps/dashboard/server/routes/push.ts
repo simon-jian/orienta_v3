@@ -24,6 +24,7 @@ import type { AuditLog } from "../lib/auditLog";
 import { PushSubscriptionStore, type PushSub } from "../passengers/PushSubscriptionStore";
 import { logger } from "../lib/logger";
 import { canonicalTenantId } from "../lib/canonicalize";
+import { countTelemetryAccepted, countTelemetryRejected } from "../lib/telemetryStats";
 
 const ROBOT_SERVICE_TYPES = new Set<RobotServiceType>([
   "follow",
@@ -118,11 +119,47 @@ async function paxIdentityFromRequest(req: Request, res: Response, body: Record<
     passenger_id: body.passenger_id,
   });
   if (!resolved.ok) {
+    // #region agent log
+    if (req.path.includes("tourist-")) {
+      fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
+        body: JSON.stringify({
+          sessionId: "1fdb4e", runId: "pre-fix", hypothesisId: "C",
+          location: "server/routes/push.ts:122", message: "tourist identity rejected",
+          data: {
+            path: req.path,
+            status: resolved.failure.status,
+            error: resolved.failure.error,
+            hasAuthHeader: !!req.headers.authorization,
+            bodyTenant: String(body.tenant_id || body.tenantId || ""),
+            bodyPassenger: String(body.passenger_id || body.passengerId || ""),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
+    if (req.path.startsWith("/tourist-")) countTelemetryRejected();
     res.status(resolved.failure.status).json({ ok: false, error: resolved.failure.error });
     return null;
   }
   return resolved.identity;
 }
+
+// #region agent log
+let touristPushSeq = 0;
+function debugTouristEvent(message: string, hypothesisId: string, data: Record<string, unknown>): void {
+  fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
+    body: JSON.stringify({
+      sessionId: "1fdb4e", runId: "pre-fix", hypothesisId,
+      location: "server/routes/push.ts", message, data, timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+}
+// #endregion
 
 // ─── Route registration ───────────────────────────────────────────────────────
 
@@ -481,9 +518,29 @@ export function registerPushRoutes(
     if (!identity) return;
     const lat       = Number(body.lat);
     const lng       = Number(body.lng);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.status(400).json({ ok: false, error: "missing_lat_lng" });
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      countTelemetryRejected();
+      return res.status(400).json({ ok: false, error: "missing_lat_lng" });
+    }
     const ok = storeAndBroadcastTrajectory(store, identity.tenantId, identity.passengerId, Array.isArray(body.path) ? body.path : [], { lat, lng });
-    if (!ok) return res.status(503).json({ ok: false, error: "hub_not_ready" });
+    // #region agent log
+    touristPushSeq += 1;
+    if (touristPushSeq <= 2 || touristPushSeq % 5 === 0 || !ok) {
+      debugTouristEvent("tourist-position stored", "C", {
+        seq: touristPushSeq,
+        path: req.path,
+        passengerId: identity.passengerId,
+        tenantId: identity.tenantId,
+        pathLen: Array.isArray(body.path) ? body.path.length : 0,
+        stored: ok,
+      });
+    }
+    // #endregion
+    if (!ok) {
+      countTelemetryRejected();
+      return res.status(503).json({ ok: false, error: "hub_not_ready" });
+    }
+    countTelemetryAccepted();
     setPaxPresenceFromHttp(store, identity.tenantId, identity.passengerId, true);
     return res.json({ ok: true });
   });
@@ -505,6 +562,13 @@ export function registerPushRoutes(
     const identity = await paxIdentityFromRequest(req, res, body);
     if (!identity) return;
     clearStoredTrajectory(store, identity.tenantId, identity.passengerId);
+    // #region agent log
+    debugTouristEvent("tourist-deactivate cleared trajectory", "B", {
+      path: req.path,
+      passengerId: identity.passengerId,
+      pushesBefore: touristPushSeq,
+    });
+    // #endregion
     return res.json({ ok: true });
   });
 }

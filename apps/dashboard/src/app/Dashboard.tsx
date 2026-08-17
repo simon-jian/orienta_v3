@@ -17,28 +17,45 @@ import { loadGates } from "../services/poi/PoiService";
 import { buildFlights } from "../services/flightService";
 import { logout as authLogout } from "../services/auth";
 import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";
+import { INDOOR_AIRPORTS, findIndoorAirport } from "../config/indoorAirports";
 
 type DashTab = "dashboard" | "map";
+
+const AIRPORT_STORAGE_KEY = "orienta_admin_airport";
+
+function initialAirport(): string {
+  const fallback = clientDefaultAirportId();
+  if (typeof window === "undefined") return fallback;
+  const stored = localStorage.getItem(AIRPORT_STORAGE_KEY);
+  return findIndoorAirport(stored)?.code || fallback;
+}
 
 // ─── Dashboard component ──────────────────────────────────────────────────────
 
 export default function Dashboard({ session, onLogout }: { session: AdminSession; onLogout(): void }) {
-  const airport = clientDefaultAirportId();
+  // Which airport the operator is looking at. The map iframe used to be pinned
+  // to the tenant's default while its own internal dropdown could show another
+  // one, so React and the map disagreed about where passengers were.
+  const [airport, setAirport] = useState<string>(initialAirport);
   const tenantId = clientDefaultTenantId();
 
   const [tab, setTab] = useState<DashTab>("dashboard");
 
-  // Load PEK gates from POI API
+  // Gates from the POI API for the selected airport. Airports the indoor map
+  // knows but the tenant hasn't configured fall back to the tenant's own gates
+  // (see PoiService.resolve) — the map itself still shows the right POIs.
   const [pekGates, setPekGates] = useState<Gate[]>([]);
   const [pekPoiReady, setPekPoiReady] = useState(false);
   useEffect(() => {
     let cancelled = false;
-    setPekPoiReady(false);
-    loadGates()
+    // Deliberately not resetting pekPoiReady here: useDashboard treats its
+    // rising edge as "first load done" and wipes live trajectories, which would
+    // blank the operator's map on every airport switch.
+    loadGates(airport)
       .then(({ gates }) => { if (!cancelled) { setPekGates(gates); setPekPoiReady(true); } })
       .catch(() => { if (!cancelled) setPekPoiReady(true); });
     return () => { cancelled = true; };
-  }, []);
+  }, [airport]);
 
   const gates: Gate[] = useMemo(
     () => pekPoiReady ? pekGates : [],
@@ -111,7 +128,16 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     [selectedPaxId, passengers],
   );
 
-  const airportLabel = `${clientDefaultAirport().iata} ${clientDefaultAirport().defaultTerminal} · 国际→国际`;
+  const airportLabel = `${airport} ${clientDefaultAirport().defaultTerminal} · 国际→国际`;
+
+  const selectAirport = (code: string) => {
+    setAirport(code);
+    try {
+      localStorage.setItem(AIRPORT_STORAGE_KEY, code);
+    } catch {
+      /* private browsing — the selection just won't persist */
+    }
+  };
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
@@ -124,7 +150,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     <div className="app">
       <TopBar
         search={search} onSearch={setSearch}
-        title="中国国际航空公司后台"
+        title="Orienta公司后台"
         subtitle={airportLabel}
         searchPlaceholder="搜索姓名 / ID / 航班 / 登机口…"
         gateCount={gates.length} passengerCount={passengers.length}
@@ -138,6 +164,18 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
         mapViewFilter={mapViewMode}
         extraRight={
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <select
+              className="btn"
+              value={airport}
+              onChange={(e) => selectAirport(e.target.value)}
+              style={{ fontSize: 12 }}
+              title="地图机场"
+              aria-label="地图机场"
+            >
+              {INDOOR_AIRPORTS.map((a) => (
+                <option key={a.code} value={a.code}>{a.label}</option>
+              ))}
+            </select>
             <button className={"btn" + (tab === "dashboard" ? " primary" : "")} onClick={() => setTab("dashboard")} style={{ fontSize: 12 }}>📊 Dashboard</button>
             <button className={"btn" + (tab === "map" ? " primary" : "")} onClick={() => setTab("map")} style={{ fontSize: 12 }}>🗺️ Map {clientDefaultAirport().defaultTerminal}</button>
             <span className={"pill " + (rtUp ? "ok" : "warn")} style={{ fontSize: 11 }}>{rtUp ? "WS ●" : "WS ○"}</span>

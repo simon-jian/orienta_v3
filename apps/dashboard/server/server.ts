@@ -23,6 +23,7 @@ import { createProxyMiddleware } from "http-proxy-middleware";
 
 import { PORT, PDR_API_ORIGIN, INDOOR_MAP_UPSTREAM, INDOOR_MAP_API_UPSTREAM, VITE_LOCAL_AIRPORT_MAP, validateProductionSecurity } from "./config";
 import { pdrProxyAllowlist, isAllowedPdrUpgradePath } from "./middleware/pdrProxyGuard";
+import { injectPdrUiEmbedBridge } from "./pdrUiEmbed";
 
 // Fail fast, before anything else initializes, if production config is insecure
 // (weak/placeholder JWT_SECRET, plaintext admin passwords, kiosk scan wide open).
@@ -47,10 +48,11 @@ import { PushSubscriptionStore } from "./passengers/PushSubscriptionStore";
 import { JourneyStore } from "./journey/JourneyStore";
 import { AuditLog } from "./lib/auditLog";
 import { startMaintenanceJobs } from "./jobs/maintenance";
-import { createRateLimiter } from "./middleware/rateLimit";
+import { createRateLimiter, paxIdentityKey } from "./middleware/rateLimit";
 import { requestLog } from "./middleware/requestLog";
 import { logger } from "./lib/logger";
 import { indoorMapHealthStatus, pdrProxyHealthStatus } from "./lib/dependencyHealth";
+import { countTelemetryRateLimited, telemetryStatsSnapshot } from "./lib/telemetryStats";
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
 import { registerConfigRoutes } from "./routes/config";
@@ -109,7 +111,24 @@ const journeyStore = new JourneyStore(sqlDb);
 const authRateLimit = createRateLimiter({
   name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd, failClosed: true,
 });
-const paxRateLimit = createRateLimiter({ name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd });
+// Keyed per session rather than per IP: an airport's WiFi or a carrier NAT puts
+// many passengers behind one address, where a per-IP bucket makes them throttle
+// each other (see paxIdentityKey).
+const paxRateLimit = createRateLimiter({
+  name: "pax", windowMs: 60_000, maxRequests: 60, redis: redisCmd, keyFn: paxIdentityKey,
+});
+// Position telemetry gets its own budget. It used to share the bucket above with
+// chat polling and presence, so a walking passenger exhausted it in seconds and
+// their position silently stopped reaching the operator map. Positions normally
+// travel over the pax WebSocket now; this covers the HTTP fallback plus
+// standalone clients (route_site, kiosks).
+const touristTelemetryRateLimit = createRateLimiter({
+  name: "tourist-telemetry", windowMs: 60_000, maxRequests: 180, redis: redisCmd,
+  keyFn: paxIdentityKey, onLimited: countTelemetryRateLimited,
+});
+// Coarse outer cap, still per IP: paxIdentityKey mints a bucket per token, so
+// without this a single host could spray bogus tokens for unlimited budget.
+const paxIpRateLimit = createRateLimiter({ name: "pax-ip", windowMs: 60_000, maxRequests: 600, redis: redisCmd });
 const paxBasicRateLimit = createRateLimiter({ name: "pax-basic", windowMs: 60_000, maxRequests: 10, redis: redisCmd });
 const paxScanRateLimit = createRateLimiter({ name: "pax-scan", windowMs: 60_000, maxRequests: 20, redis: redisCmd });
 const paxBoardingPassRateLimit = createRateLimiter({
@@ -151,6 +170,19 @@ app.use(helmet({
 app.use(requestLog);
 app.use(cookieParser());
 
+// #region agent log
+// TEMPORARY debug relay: phones on the dev tunnel cannot reach the debug ingest
+// endpoint on 127.0.0.1, so browser-side instrumentation posts here instead.
+app.post("/api/debug-log", express.json({ limit: "32kb" }), (req, res) => {
+  fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
+    body: JSON.stringify({ sessionId: "1fdb4e", timestamp: Date.now(), ...(req.body || {}) }),
+  }).catch(() => {});
+  res.status(204).end();
+});
+// #endregion
+
 // ─── Upstream proxies BEFORE body parsers ─────────────────────────────────────
 // express.json / express.text consume the request stream. If they run first,
 // http-proxy-middleware forwards an empty body to PDR (POST /api/session loses
@@ -167,11 +199,68 @@ if (PDR_API_ORIGIN) {
     changeOrigin: true,
     ws: true,
     pathRewrite: { "^/pdr-api": "" },
+    on: {
+      // PDR has no CORS layer and guards its WS handshake by comparing Origin
+      // against its own Host, so a browser Origin of this dashboard's public
+      // URL is rejected — and that URL changes with every dev tunnel. Present
+      // the target's own origin instead: PDR is only reachable through this
+      // proxy, whose upgrade path allowlist is the real gate (see below).
+      proxyReqWs: (proxyReq) => proxyReq.setHeader("origin", PDR_API_ORIGIN),
+    },
   });
   app.use("/pdr-api", pdrProxyRateLimit, pdrProxyAllowlist(), pdrProxy);
   logger.info("pdr_api_proxy", { target: PDR_API_ORIGIN, allowlist: true });
+
+  // Full PDR frontend (pdr.html + js/*) for passenger embed — not allowlisted API-only.
+  app.get(["/pdr-ui", "/pdr-ui/", "/pdr-ui/index.html", "/pdr-ui/pdr.html"], async (req, res, next) => {
+    try {
+      const rawPath = (req.path || "").replace(/^\/pdr-ui/, "") || "/";
+      const targetPath = rawPath === "/" ? "/index.html" : rawPath;
+      const qs = req.url?.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
+      const upstream = `${PDR_API_ORIGIN.replace(/\/+$/, "")}${targetPath}${qs}`;
+      // #region agent log
+      {
+        const forwarded = new URLSearchParams(qs.startsWith("?") ? qs.slice(1) : qs);
+        fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
+          body: JSON.stringify({
+            sessionId: "1fdb4e", runId: "pre-fix", hypothesisId: "A",
+            location: "server/server.ts:190", message: "pdr-ui html fetched from upstream",
+            data: {
+              targetPath,
+              forwardedParams: [...forwarded.keys()],
+              forwardsSessionToken: forwarded.has("sessionToken"),
+              sessionTokenLen: (forwarded.get("sessionToken") || "").length,
+            },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+      }
+      // #endregion
+      const r = await fetch(upstream);
+      let html = await r.text();
+      html = injectPdrUiEmbedBridge(html);
+      res.status(r.status);
+      res.setHeader("content-type", "text/html; charset=utf-8");
+      res.setHeader("cache-control", "no-store");
+      res.send(html);
+    } catch (e) {
+      next(e);
+    }
+  });
+  app.use(
+    "/pdr-ui",
+    createProxyMiddleware({
+      target: PDR_API_ORIGIN,
+      changeOrigin: true,
+      pathRewrite: { "^/pdr-ui": "" },
+    }),
+  );
+  logger.info("pdr_ui_proxy", { target: PDR_API_ORIGIN, mount: "/pdr-ui" });
 } else {
   app.use("/pdr-api", (_req, res) => res.status(503).json({ error: "pdr_proxy_disabled", message: "Set PDR_API_ORIGIN env var to enable." }));
+  app.use("/pdr-ui", (_req, res) => res.status(503).send("PDR UI disabled — set PDR_API_ORIGIN"));
 }
 
 if (INDOOR_MAP_UPSTREAM || VITE_LOCAL_AIRPORT_MAP) {
@@ -199,7 +288,9 @@ if (INDOOR_MAP_UPSTREAM || VITE_LOCAL_AIRPORT_MAP) {
       const qs = req.url.includes("?") ? req.url.slice(req.url.indexOf("?")) : "";
       const https = isBrowserRequestHttps(req);
       if (VITE_LOCAL_AIRPORT_MAP) {
-        const html = transformAirportMapHtmlFromSource(readFileSync(REPO_AIRPORT_MAP_PATH, "utf8"));
+        const html = transformAirportMapHtmlFromSource(readFileSync(REPO_AIRPORT_MAP_PATH, "utf8"), {
+          mapRole: typeof req.query.mapRole === "string" ? req.query.mapRole : undefined,
+        });
         res.status(200);
         applyIframeSafeHtmlHeaders(res, https);
         applyAirportMapNoCacheHeaders(res);
@@ -332,14 +423,41 @@ registerOrientaRoutes(orientaRouter);
 app.use("/api/orienta", orientaRouter);
 
 // ─── Push / presence / tourist routes ─────────────────────────────────────────
-// paxRateLimit is attached to the routers themselves (not via app.use(prefix, ...))
-// because pushRouter is mounted at five different prefixes below. A limiter
-// attached only to one app-level prefix would not apply when the same router's
-// routes are reached through another prefix (e.g. /api/push/chat-send bypassing
-// a limiter that was only wired on /api/pax).
+// Unprefixed paths external clients post to (route_site, kiosks, the PDR app's
+// orienta bridge) rewritten onto the prefixed routes below, before the budget
+// middleware so aliased telemetry is billed like any other. Mounting pushRouter
+// on them directly cannot work: Express strips the entire mount path, leaving
+// "/", which matches none of the router's own routes.
+const TOURIST_ALIAS_PATHS = ["/api/tourist-position", "/api/tourist-deactivate"];
+app.use((req, _res, next) => {
+  if (TOURIST_ALIAS_PATHS.includes(req.path)) req.url = `/api/pax${req.url.slice("/api".length)}`;
+  next();
+});
+
+/**
+ * One HTTP budget for all passenger routes, charged once per request.
+ *
+ * Mounted at the prefixes rather than inside each router: /api/pax is served by
+ * two routers, and a router-level limiter charges the bucket even for paths that
+ * fall through to the next router — so anything pushRouter serves under /api/pax
+ * (chat polling, presence, telemetry) was silently billed twice, halving those
+ * budgets. Every prefix pushRouter is mounted at is listed here, so no route can
+ * reach it unbilled.
+ *
+ * Position telemetry is split out because it is an order of magnitude more
+ * frequent than the rest: sharing one bucket let a walking passenger starve
+ * their own chat and presence within seconds.
+ */
+const PAX_HTTP_PREFIXES = ["/api/pax", "/api/push", "/api/orienta"];
+const TELEMETRY_PATHS = new Set(["/tourist-position", "/tourist-deactivate"]);
+app.use(PAX_HTTP_PREFIXES, paxIpRateLimit, (req, res, next) =>
+  TELEMETRY_PATHS.has(req.path)
+    ? touristTelemetryRateLimit(req, res, next)
+    : paxRateLimit(req, res, next),
+);
+
 const paxSessionRouter = express.Router();
-paxSessionRouter.use(paxRateLimit);
-// Tighter caps on public mint / login paths (in addition to the router-wide limit).
+// Tighter caps on public mint / login paths (in addition to the shared budget).
 paxSessionRouter.post("/basic-session", paxBasicRateLimit);
 paxSessionRouter.post("/scan", paxScanRateLimit);
 paxSessionRouter.post("/boarding-pass", paxBoardingPassRateLimit);
@@ -348,18 +466,19 @@ registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
 app.use("/api/pax", paxSessionRouter);
 
 const journeyRouter = express.Router();
-journeyRouter.use(paxRateLimit);
+// Charged on this router's own paths, not router-wide: it is mounted at /api, so
+// a router-level limiter billed the shared pax bucket for every /api/* request
+// that merely passed through on its way to a later router — including the
+// position telemetry that has its own budget above.
+journeyRouter.use(["/flights", "/arrival"], paxRateLimit);
 registerJourneyRoutes(journeyRouter, journeyStore, registry);
 app.use("/api", journeyRouter);
 
 const pushRouter = express.Router();
-pushRouter.use(paxRateLimit);
 registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
 app.use("/api/push",               pushRouter);
 app.use("/api/pax",                pushRouter);
 app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tourist-*
-app.use("/api/tourist-position",   pushRouter);
-app.use("/api/tourist-deactivate", pushRouter);
 
 // ─── Passenger management routes ──────────────────────────────────────────────
 const passengerRouter = express.Router();
@@ -438,6 +557,10 @@ async function readinessBody(): Promise<{ overallOk: boolean; body: Record<strin
           bundledTilesPresent: existsSync(LOCAL_INDOOR_MAP_TILES_DIR),
         }),
       },
+      // Not part of overallOk: dropped telemetry degrades the operator map but
+      // doesn't make this instance unfit to serve. Reported so silent loss is
+      // observable — see lib/telemetryStats.ts.
+      pax_telemetry: telemetryStatsSnapshot(),
       ts: new Date().toISOString(),
     },
   };

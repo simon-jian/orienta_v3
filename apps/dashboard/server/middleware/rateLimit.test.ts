@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Request, Response } from "express";
-import { createRateLimiter } from "./rateLimit";
+import { createRateLimiter, paxIdentityKey } from "./rateLimit";
 
 function fakeRes() {
   const res = {
@@ -45,5 +45,40 @@ describe("createRateLimiter", () => {
     // windowMs negative → bucket is always expired, so every call is allowed.
     expect(call(limiter, "4.4.4.4").nexted).toBe(true);
     expect(call(limiter, "4.4.4.4").nexted).toBe(true);
+  });
+
+  it("reports rejections through onLimited", () => {
+    let limited = 0;
+    const limiter = createRateLimiter({ windowMs: 60_000, maxRequests: 1, onLimited: () => { limited += 1; } });
+    call(limiter, "5.5.5.5");
+    call(limiter, "5.5.5.5");
+    call(limiter, "5.5.5.5");
+    expect(limited).toBe(2);
+  });
+});
+
+describe("paxIdentityKey", () => {
+  function req(ip: string, authorization?: string) {
+    return { ip, headers: authorization ? { authorization } : {} } as unknown as Request;
+  }
+
+  it("keys by session token, so passengers behind one NAT don't share a bucket", () => {
+    const a = paxIdentityKey(req("9.9.9.9", "Bearer token-a"));
+    const b = paxIdentityKey(req("9.9.9.9", "Bearer token-b"));
+    expect(a).not.toBe(b);
+    expect(a.startsWith("sess:")).toBe(true);
+  });
+
+  it("is stable for the same token from a different address", () => {
+    expect(paxIdentityKey(req("9.9.9.9", "Bearer token-a")))
+      .toBe(paxIdentityKey(req("10.10.10.10", "bearer token-a")));
+  });
+
+  it("never leaks the token itself", () => {
+    expect(paxIdentityKey(req("9.9.9.9", "Bearer super-secret"))).not.toContain("super-secret");
+  });
+
+  it("falls back to the address when unauthenticated", () => {
+    expect(paxIdentityKey(req("9.9.9.9"))).toBe("ip:9.9.9.9");
   });
 });
