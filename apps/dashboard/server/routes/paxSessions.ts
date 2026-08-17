@@ -70,7 +70,7 @@ async function mintSessionFromBcbp(
     outboundLeg.julianDate,
     outboundLeg.sequenceNumber,
   ]);
-  const passenger = await registry.getOrCreate({
+  const created = await registry.getOrCreate({
     id: passengerId,
     tenantId,
     name: parsed.passengerName || String(body.name || "").trim() || "Unknown",
@@ -82,6 +82,16 @@ async function mintSessionFromBcbp(
     outboundTo: outbound.outboundTo || outboundLeg.toAirport || undefined,
     source,
   });
+  // See the account-login path: getOrCreate is insert-or-ignore, so a rescanned
+  // boarding pass would otherwise leave the operator on the previous itinerary.
+  const passenger =
+    (await registry.applyTrip(tenantId, passengerId, {
+      flightId: outbound.flightId,
+      gateId: outbound.gateId,
+      inboundFlight: firstLeg === outboundLeg ? undefined : firstLeg.flightId,
+      inboundFrom: firstLeg.fromAirport || undefined,
+      outboundTo: outbound.outboundTo || outboundLeg.toAirport || undefined,
+    })) ?? created;
 
   const session = await createSessionResponse({
     passenger,
@@ -270,7 +280,7 @@ export function registerPaxSessionRoutes(
 
     const outbound = await resolveOutboundFlight(departureFlight, canonicalGateId(body.gateId) || undefined, undefined, airportForTenant(tenantId));
     const passengerId = passengerIdFromStableParts("ACCT", [tenantId, email]);
-    const passenger = await registry.getOrCreate({
+    const created = await registry.getOrCreate({
       id: passengerId,
       tenantId,
       name: String(body.name || account.displayName || "").trim() || "Premium Passenger",
@@ -281,6 +291,16 @@ export function registerPaxSessionRoutes(
       outboundTo: outbound.outboundTo || undefined,
       source: "account_login",
     });
+    // A returning account keeps its registry row, and getOrCreate ignores every
+    // field for a row that already exists — so the flight just signed in with has
+    // to be pushed through explicitly, or the operator keeps seeing the old one.
+    const passenger =
+      (await registry.applyTrip(tenantId, passengerId, {
+        flightId: outbound.flightId,
+        gateId: outbound.gateId,
+        inboundFlight: canonicalFlightId(body.arrivalFlight || body.arr) || undefined,
+        outboundTo: outbound.outboundTo || undefined,
+      })) ?? created;
 
     const session = await createSessionResponse({
       passenger,

@@ -301,7 +301,7 @@ export function registerPaxInviteRoutes(
       (invite.leg === "inbound" ? invite.flight.arrGate : invite.flight.depGate);
     await invites.updateFlightSnapshot(invite.inviteId, snapshot);
 
-    const passenger = await registry.getOrCreate({
+    const created = await registry.getOrCreate({
       id: invite.passengerId,
       tenantId: invite.tenantId,
       name: invite.passengerName || "Guest",
@@ -313,11 +313,16 @@ export function registerPaxInviteRoutes(
       outboundTo: invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
       source: "api_import",
     });
-    // getOrCreate is a no-op for the row the issue step already created, so
-    // push the freshly resolved gate through explicitly.
-    if (gateId && passenger.gateId !== gateId) {
-      await registry.update(invite.tenantId, invite.passengerId, { gateId });
-    }
+    // getOrCreate is a no-op for the row the issue step already created, so the
+    // freshly resolved itinerary has to be pushed through explicitly.
+    const passenger =
+      (await registry.applyTrip(invite.tenantId, invite.passengerId, {
+        flightId: invite.flightId,
+        gateId,
+        inboundFlight: invite.leg === "inbound" ? invite.flightId : undefined,
+        inboundFrom: invite.leg === "inbound" ? snapshot.depIata || undefined : undefined,
+        outboundTo: invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
+      })) ?? created;
 
     const session = await createSessionResponse({
       passenger: { ...passenger, gateId: gateId || passenger.gateId },

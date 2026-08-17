@@ -28,6 +28,9 @@ import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import { logger } from "../lib/logger";
 import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 import { countTelemetryAccepted } from "../lib/telemetryStats";
+// #region agent log
+import { debugLog } from "../lib/debugLog";
+// #endregion
 
 type Role = "admin" | "pax";
 
@@ -219,6 +222,20 @@ export function attachWsHub(
         if (role === "pax") {
           safeAsyncHandler(ws, "pax_hello", async () => {
             const resolved = await resolvePaxWsHello(msg);
+            // #region agent log
+            debugLog({
+              runId: "post-fix", hypothesisId: "WS",
+              location: "server/hub/wsHub.ts:221",
+              message: resolved.ok ? "server accepted pax hello" : "server rejected pax hello",
+              data: {
+                ok: resolved.ok,
+                reason: resolved.ok ? null : resolved.reason,
+                hasSessionToken: typeof msg.sessionToken === "string" && msg.sessionToken.length > 0,
+                tenantId: String(msg.tenantId || ""),
+                passengerId: String(msg.passengerId || ""),
+              },
+            });
+            // #endregion
             if (!resolved.ok) {
               ws.close(1008, resolved.reason);
               return;

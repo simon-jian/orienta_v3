@@ -75,3 +75,35 @@ describe("PassengerRegistry.getOrCreate", () => {
     expect(record.name.length).toBe(200);
   });
 });
+
+describe("PassengerRegistry.applyTrip", () => {
+  it("moves a returning passenger onto their new itinerary", async () => {
+    const registry = await newRegistry();
+    await registry.getOrCreate({ ...baseInput, flightId: "UA889", gateId: "E16", outboundTo: "SFO" });
+
+    const updated = await registry.applyTrip("airchina", "TX1", {
+      flightId: "UA888",
+      gateId: "G3",
+      outboundTo: "PEK",
+    });
+
+    expect(updated?.flightId).toBe("UA888");
+    expect(updated?.gateId).toBe("G3");
+    expect(updated?.transfer.outboundTo).toBe("PEK");
+  });
+
+  it("keeps known values when the new lookup has none (airlines publish gates late)", async () => {
+    const registry = await newRegistry();
+    await registry.getOrCreate({ ...baseInput, flightId: "UA889", gateId: "E16" });
+
+    const updated = await registry.applyTrip("airchina", "TX1", { flightId: "UA888", gateId: "" });
+
+    expect(updated?.flightId).toBe("UA888");
+    expect(updated?.gateId).toBe("E16");
+  });
+
+  it("is a no-op for an unknown passenger", async () => {
+    const registry = await newRegistry();
+    expect(await registry.applyTrip("airchina", "NOPE", { flightId: "UA888" })).toBeNull();
+  });
+});

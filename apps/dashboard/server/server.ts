@@ -55,6 +55,9 @@ import { requestLog } from "./middleware/requestLog";
 import { logger } from "./lib/logger";
 import { indoorMapHealthStatus, pdrProxyHealthStatus } from "./lib/dependencyHealth";
 import { countTelemetryRateLimited, telemetryStatsSnapshot } from "./lib/telemetryStats";
+// #region agent log
+import { debugLog } from "./lib/debugLog";
+// #endregion
 import { MetricsRepository } from "./lib/MetricsRepository";
 import { registerMetricsRoutes } from "./routes/metrics";
 import { registerConfigRoutes } from "./routes/config";
@@ -180,14 +183,10 @@ app.use(requestLog);
 app.use(cookieParser());
 
 // #region agent log
-// TEMPORARY debug relay: phones on the dev tunnel cannot reach the debug ingest
-// endpoint on 127.0.0.1, so browser-side instrumentation posts here instead.
+// TEMPORARY debug relay: phones on the dev tunnel cannot reach the debug log
+// sink on this machine, so browser-side instrumentation posts here instead.
 app.post("/api/debug-log", express.json({ limit: "32kb" }), (req, res) => {
-  fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
-    body: JSON.stringify({ sessionId: "1fdb4e", timestamp: Date.now(), ...(req.body || {}) }),
-  }).catch(() => {});
+  debugLog({ ...(req.body || {}) });
   res.status(204).end();
 });
 // #endregion
@@ -206,7 +205,24 @@ if (PDR_API_ORIGIN) {
   pdrProxy = createProxyMiddleware({
     target: PDR_API_ORIGIN,
     changeOrigin: true,
-    ws: true,
+    // WebSocket upgrades are dispatched by this file's own `server.on("upgrade")`
+    // below, so the path allowlist applies to them.
+    //
+    // `ws: true` cannot be used for that: the library then registers its own
+    // upgrade listener on the HTTP server whose default path filter is "/",
+    // which matches every path. It therefore also answered the app's own /ws
+    // handshakes, and that second 101 response on a socket the hub had already
+    // upgraded looked like a corrupt frame to the browser ("RSV1 must be
+    // clear") — every passenger WebSocket died ~100ms after opening, so live
+    // positions and chat fell back to HTTP polling. It bypassed the allowlist
+    // for /pdr-api upgrades too.
+    ws: false,
+    // Belt and braces: consulted by the manual dispatch below as well, so a PDR
+    // upgrade for a path outside the allowlist can never be proxied.
+    pathFilter: (pathname: string, req: unknown) => {
+      const upgrade = String((req as http.IncomingMessage).headers?.upgrade || "").toLowerCase();
+      return upgrade !== "websocket" || isAllowedPdrUpgradePath(pathname);
+    },
     pathRewrite: { "^/pdr-api": "" },
     on: {
       // PDR has no CORS layer and guards its WS handshake by comparing Origin
@@ -230,21 +246,15 @@ if (PDR_API_ORIGIN) {
       // #region agent log
       {
         const forwarded = new URLSearchParams(qs.startsWith("?") ? qs.slice(1) : qs);
-        fetch("http://127.0.0.1:7463/ingest/6e47c4b5-768a-4ce2-a738-24475e41a169", {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "1fdb4e" },
-          body: JSON.stringify({
-            sessionId: "1fdb4e", runId: "pre-fix", hypothesisId: "A",
-            location: "server/server.ts:190", message: "pdr-ui html fetched from upstream",
-            data: {
-              targetPath,
-              forwardedParams: [...forwarded.keys()],
-              forwardsSessionToken: forwarded.has("sessionToken"),
-              sessionTokenLen: (forwarded.get("sessionToken") || "").length,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => {});
+        debugLog({
+          runId: "post-fix", hypothesisId: "A",
+          location: "server/server.ts:190", message: "pdr-ui html fetched from upstream",
+          data: {
+            targetPath,
+            forwardedParams: [...forwarded.keys()],
+            forwardsSessionToken: forwarded.has("sessionToken"),
+          },
+        });
       }
       // #endregion
       const r = await fetch(upstream);

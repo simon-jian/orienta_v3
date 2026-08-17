@@ -242,11 +242,29 @@ export function connectPaxRealtime(opts: {
   const reconnect = createReconnectController(() => connect());
 
   const connect = () => {
-    ws = new WebSocket(wsUrl());
+    const url = wsUrl();
+    // #region agent log
+    const dbgWs = (message: string, data: Record<string, unknown>) => {
+      void fetch("/api/debug-log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        keepalive: true,
+        body: JSON.stringify({
+          runId: "post-fix", hypothesisId: "WS",
+          location: "src/services/realtime.ts", message, data, timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    };
+    dbgWs("pax ws connecting", { url, pageProtocol: location.protocol });
+    // #endregion
+    ws = new WebSocket(url);
     ws.onopen = () => {
       connected = true;
       reconnect.reset();
       opts.onConnectionChange?.(true);
+      // #region agent log
+      dbgWs("pax ws open", { url });
+      // #endregion
       ws?.send(JSON.stringify({
         type: "hello",
         role: "pax",
@@ -260,12 +278,21 @@ export function connectPaxRealtime(opts: {
         gateId: opts.gateId,
       }));
     };
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
       connected = false;
       opts.onConnectionChange?.(false);
+      // #region agent log
+      // A 1008 here means the server rejected the hello (bad/expired session
+      // token); anything else points at the transport in front of it.
+      dbgWs("pax ws closed", { code: ev.code, reason: String(ev.reason || "").slice(0, 120), wasClean: ev.wasClean });
+      // #endregion
       reconnect.scheduleReconnect();
     };
-    ws.onerror = () => {};
+    ws.onerror = () => {
+      // #region agent log
+      dbgWs("pax ws error", { url });
+      // #endregion
+    };
     ws.onmessage = (ev) => {
       const m = safeParse(String(ev.data));
       if (!m) return;

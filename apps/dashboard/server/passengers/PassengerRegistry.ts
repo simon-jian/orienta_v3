@@ -84,7 +84,22 @@ export type PassengerPatch = Partial<Pick<
   | "name" | "nationality" | "locale" | "needsWheelchair" | "plan"
   | "flightId" | "gateId" | "extStatus" | "activity"
   | "isOnline" | "lastSeenAt"
->>;
+>> & {
+  // Flat columns in the row, but surfaced nested under `transfer` on the record,
+  // so they can't come from the Pick above.
+  inboundFlight?: string;
+  inboundFrom?: string;
+  outboundTo?: string;
+};
+
+/** The itinerary a passenger just identified themselves with. */
+export type TripAssignment = {
+  flightId?: string;
+  gateId?: string;
+  inboundFlight?: string;
+  inboundFrom?: string;
+  outboundTo?: string;
+};
 
 // ─── PassengerRegistry ────────────────────────────────────────────────────────
 
@@ -143,6 +158,43 @@ export class PassengerRegistry {
     return record;
   }
 
+  /**
+   * Move an existing passenger onto the itinerary they just signed in with.
+   *
+   * Session minting can't rely on `getOrCreate` for this: it is an
+   * insert-or-ignore, so every field handed to it for a returning passenger is
+   * discarded, and the operator kept seeing whatever flight that passenger first
+   * signed in with — a stale flight and a stale gate, while the passenger's own
+   * screen showed the new one.
+   *
+   * Only non-empty values are applied, so a lookup that came back without a gate
+   * (airlines publish them late) leaves the known gate alone instead of blanking
+   * it.
+   */
+  async applyTrip(tenantId: string, passengerId: string, trip: TripAssignment): Promise<PassengerRecord | null> {
+    const current = await this.get(tenantId, passengerId);
+    if (!current) return null;
+
+    // "—" is the record's placeholder for an unknown itinerary field, so it
+    // must not count as the current value.
+    const known = (value: string): string => (value && value !== "—" ? value : "");
+    const patch: PassengerPatch = {};
+    if (trip.flightId && trip.flightId !== current.flightId) patch.flightId = trip.flightId;
+    if (trip.gateId && trip.gateId !== current.gateId) patch.gateId = trip.gateId;
+    if (trip.inboundFlight && trip.inboundFlight !== known(current.transfer.inboundFlight)) {
+      patch.inboundFlight = trip.inboundFlight;
+    }
+    if (trip.inboundFrom && trip.inboundFrom !== known(current.transfer.inboundFrom)) {
+      patch.inboundFrom = trip.inboundFrom;
+    }
+    if (trip.outboundTo && trip.outboundTo !== known(current.transfer.outboundTo)) {
+      patch.outboundTo = trip.outboundTo;
+    }
+
+    if (Object.keys(patch).length === 0) return current;
+    return this.update(tenantId, passengerId, patch);
+  }
+
   async get(tenantId: string, passengerId: string): Promise<PassengerRecord | null> {
     const row = await this.db.get<DbRow>(
       "SELECT * FROM passengers WHERE id = ? AND tenant_id = ?",
@@ -170,6 +222,9 @@ export class PassengerRegistry {
     if (patch.plan            !== undefined) { sets.push("plan = ?");             vals.push(patch.plan); }
     if (patch.flightId        !== undefined) { sets.push("flight_id = ?");        vals.push(clampLen(patch.flightId, MAX_FLIGHT_ID_LEN)); }
     if (patch.gateId          !== undefined) { sets.push("gate_id = ?");          vals.push(clampLen(patch.gateId, MAX_GATE_ID_LEN)); }
+    if (patch.inboundFlight   !== undefined) { sets.push("inbound_flight = ?");   vals.push(clampLen(patch.inboundFlight, MAX_FLIGHT_ID_LEN)); }
+    if (patch.inboundFrom     !== undefined) { sets.push("inbound_from = ?");     vals.push(clampLen(patch.inboundFrom, MAX_FLIGHT_ID_LEN)); }
+    if (patch.outboundTo      !== undefined) { sets.push("outbound_to = ?");      vals.push(clampLen(patch.outboundTo, MAX_FLIGHT_ID_LEN)); }
     if (patch.extStatus       !== undefined) { sets.push("ext_status = ?");       vals.push(patch.extStatus); }
     if (patch.activity        !== undefined) { sets.push("activity = ?");         vals.push(patch.activity); }
     if (patch.isOnline        !== undefined) { sets.push("is_online = ?");        vals.push(patch.isOnline ? 1 : 0); }
