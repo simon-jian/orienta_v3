@@ -5,6 +5,7 @@
  */
 import type { Router, Request, Response } from "express";
 import { canonicalFlightId } from "../lib/canonicalize";
+import { publicOrigin } from "../lib/publicUrl";
 import { resolvePaxIdentity } from "../passengers/paxIdentity";
 import type { JourneyStore } from "../journey/JourneyStore";
 import { fetchJourneyFlight } from "../journey/journeyFlight";
@@ -41,12 +42,6 @@ function keyFromRequest(req: Request): { flightIdentifier: string; flightDate: s
   const flightDate = normalizeFlightDate(req.query.date);
   if (!flightIdentifier || !/^[A-Z0-9]{2,12}$/.test(flightIdentifier) || !flightDate) return null;
   return { flightIdentifier, flightDate };
-}
-
-function absoluteOrigin(req: Request): string {
-  const proto = (String(req.headers["x-forwarded-proto"] || req.protocol || "https").split(",")[0] ?? "https").trim();
-  const host = (String(req.headers["x-forwarded-host"] || req.headers.host || "localhost").split(",")[0] ?? "localhost").trim();
-  return `${proto}://${host}`;
 }
 
 function validatePreferencesPatch(
@@ -318,7 +313,7 @@ export function registerJourneyRoutes(
       if (share.status === "reused") {
         if (priorPublic && (await store.getPublicShare(share.shareId, priorPublic))) {
           const url =
-            `${absoluteOrigin(req)}/arrival/${encodeURIComponent(share.shareId)}` +
+            `${publicOrigin(req)}/arrival/${encodeURIComponent(share.shareId)}` +
             `?token=${encodeURIComponent(priorPublic)}` +
             `&shareId=${encodeURIComponent(share.shareId)}`;
           return res.json({
@@ -339,7 +334,7 @@ export function registerJourneyRoutes(
         return apiError(res, 409, "share_tokens_unavailable", "Could not mint share tokens.");
       }
       const url =
-        `${absoluteOrigin(req)}/arrival/${encodeURIComponent(share.shareId)}` +
+        `${publicOrigin(req)}/arrival/${encodeURIComponent(share.shareId)}` +
         `?token=${encodeURIComponent(share.publicToken)}` +
         `&shareId=${encodeURIComponent(share.shareId)}`;
       return res.status(201).json({

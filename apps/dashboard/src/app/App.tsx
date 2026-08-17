@@ -6,6 +6,7 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import LoginScreen from "../components/LoginScreen";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
 import PaxLoginPage from "../features/pax/PaxLoginPage";
+import PaxClaimPage from "../features/pax/PaxClaimPage";
 import { fetchSession, logout as authLogout, cacheSession } from "../services/auth";
 import { apiUrl } from "../config/api";
 import type { AdminSession } from "../types/types";
@@ -70,6 +71,7 @@ export default function App({ configDegraded = false }: { configDegraded?: boole
           <Route path="/pax"  element={<PaxEntryPage />} />
           <Route path="/pax/" element={<PaxEntryPage />} />
           <Route path="/pax/login" element={<PaxLoginPage />} />
+          <Route path="/pax/claim" element={<PaxClaimPage />} />
           <Route path="/pax/flight" element={<PaxFlightPage />} />
           <Route path="/pax/app" element={<PaxAppPage />} />
           <Route path="/arrival/:shareId" element={<ArrivalPlanPage />} />

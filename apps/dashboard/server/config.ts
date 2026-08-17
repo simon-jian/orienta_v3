@@ -117,6 +117,29 @@ export const VITE_INDOOR_MAP_SAME_ORIGIN = optional("VITE_INDOOR_MAP_SAME_ORIGIN
 // Server
 export const PORT = optionalInt("PORT", 5174);
 
+/**
+ * Origin used to build links handed to people (passenger claim links, arrival
+ * share links).
+ *
+ * Deriving these from the request's `Host` breaks the moment anything sits in
+ * front of the app: behind a tunnel or reverse proxy the server sees the local
+ * upstream host and mints `http://localhost:5173/...` links that are useless to
+ * the recipient. It is also attacker-controlled input, so a forged header could
+ * make us mint links pointing at someone else's domain. Falls back to the
+ * request origin when unset so local development needs no configuration.
+ */
+export const PUBLIC_BASE_URL = (() => {
+  const raw = optional("PUBLIC_BASE_URL");
+  if (!raw) return "";
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+    return url.origin;
+  } catch {
+    return "";
+  }
+})();
+
 /** Default airport terminal for POI lookups (Multi-airport Phase 1). Defaults to PEK's T3E. */
 export const DEFAULT_TERMINAL = optional("DEFAULT_TERMINAL") || "T3E";
 export const ROUTE_SITE_DEFAULT_TENANT = optional("ROUTE_SITE_DEFAULT_TENANT") || "airchina";

@@ -1,12 +1,18 @@
 import crypto from "node:crypto";
 import { timingSafeEqual } from "node:crypto";
 import type { Router, Request, Response } from "express";
-import { SignJWT } from "jose";
-import { JWT_SECRET, KIOSK_SCAN_SECRET, ROUTE_SITE_DEFAULT_TENANT } from "../config";
-import type { PassengerRegistry, PassengerRecord } from "../passengers/PassengerRegistry";
+import { KIOSK_SCAN_SECRET, ROUTE_SITE_DEFAULT_TENANT } from "../config";
+import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import type { PaxAccountStore } from "../passengers/PaxAccountStore";
 import { parseBcbp } from "../passengers/bcbpParser";
-import { bearerTokenFromHeader, PAX_SESSION_AUDIENCE, verifyPaxSessionToken } from "../passengers/paxSessionToken";
+import { bearerTokenFromHeader, verifyPaxSessionToken } from "../passengers/paxSessionToken";
+import {
+  createSessionResponse,
+  temporaryExpiryFromDeparture,
+  REGISTERED_SESSION_TTL_MS,
+  type AccountType,
+  type PaxSessionResponse,
+} from "../passengers/paxSessionMint";
 import { resolveOutbound as resolveOutboundFlight } from "../services/fidsService";
 import { airportForTenant, getTenant } from "../../src/config/tenants/registry";
 import { requireRole, requireTenantAccess, adminEmailFromRequest } from "./auth";
@@ -14,26 +20,6 @@ import type { AuditLog } from "../lib/auditLog";
 import type { PaxPlan } from "../../src/types/types";
 import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 
-type AccountType = "temporary" | "registered";
-
-type PaxCapability =
-  | "navigate"
-  | "receive_notifications"
-  | "share_location"
-  | "operator_chat";
-
-type PaxSessionResponse = {
-  token: string;
-  passenger: PassengerRecord;
-  accountType: AccountType;
-  plan: PaxPlan;
-  capabilities: PaxCapability[];
-  expiresAt: number;
-};
-
-const TEMP_SESSION_MIN_TTL_MS = 30 * 60_000;
-const TEMP_SESSION_GRACE_MS = 2 * 60 * 60_000;
-const REGISTERED_SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 /** BCBP boarding passes are ~60-120 chars; cap generously to block payload abuse. */
 const MAX_BCBP_PAYLOAD_LEN = 512;
 
@@ -124,73 +110,9 @@ function tenantFromBody(body: Record<string, unknown>): string {
   return requested && getTenant(requested) ? requested : canonicalTenantId(ROUTE_SITE_DEFAULT_TENANT);
 }
 
-function capabilitiesFor(plan: PaxPlan): PaxCapability[] {
-  const base: PaxCapability[] = ["navigate", "receive_notifications", "share_location"];
-  return plan === "premium" ? [...base, "operator_chat"] : base;
-}
-
-function temporaryExpiryFromDeparture(scheduledDepMs: number): number {
-  return Math.max(Date.now() + TEMP_SESSION_MIN_TTL_MS, scheduledDepMs + TEMP_SESSION_GRACE_MS);
-}
-
 function passengerIdFromStableParts(prefix: string, parts: string[]): string {
   const hash = crypto.createHash("sha256").update(parts.filter(Boolean).join("|")).digest("hex").slice(0, 12).toUpperCase();
   return `${prefix}_${hash}`;
-}
-
-async function signPaxSession(input: {
-  passengerId: string;
-  tenantId: string;
-  airportId: string;
-  accountType: AccountType;
-  plan: PaxPlan;
-  capabilities: PaxCapability[];
-  expiresAt: number;
-}): Promise<string> {
-  const secret = new TextEncoder().encode(JWT_SECRET);
-  const sessionId = crypto.randomUUID();
-  return new SignJWT({
-    sid: sessionId,
-    tenantId: input.tenantId,
-    airportId: input.airportId,
-    accountType: input.accountType,
-    plan: input.plan,
-    capabilities: input.capabilities,
-  })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuer(PAX_SESSION_AUDIENCE)
-    .setAudience(PAX_SESSION_AUDIENCE)
-    .setSubject(input.passengerId)
-    .setIssuedAt()
-    .setExpirationTime(Math.floor(input.expiresAt / 1000))
-    .sign(secret);
-}
-
-async function createSessionResponse(input: {
-  passenger: PassengerRecord;
-  tenantId: string;
-  accountType: AccountType;
-  plan: PaxPlan;
-  expiresAt: number;
-}): Promise<PaxSessionResponse> {
-  const capabilities = capabilitiesFor(input.plan);
-  const token = await signPaxSession({
-    passengerId: input.passenger.id,
-    tenantId: input.tenantId,
-    airportId: airportForTenant(input.tenantId),
-    accountType: input.accountType,
-    plan: input.plan,
-    capabilities,
-    expiresAt: input.expiresAt,
-  });
-  return {
-    token,
-    passenger: input.passenger,
-    accountType: input.accountType,
-    plan: input.plan,
-    capabilities,
-    expiresAt: input.expiresAt,
-  };
 }
 
 export function registerPaxSessionRoutes(

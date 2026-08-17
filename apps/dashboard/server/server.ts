@@ -41,9 +41,11 @@ import { registerFidsRoutes } from "./routes/fids";
 import { registerPushRoutes } from "./routes/push";
 import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
+import { registerPaxInviteRoutes } from "./routes/paxInvites";
 import { registerJourneyRoutes } from "./routes/journey";
 import { PassengerRegistry } from "./passengers/PassengerRegistry";
 import { PaxAccountStore } from "./passengers/PaxAccountStore";
+import { PaxInviteStore } from "./passengers/PaxInviteStore";
 import { PushSubscriptionStore } from "./passengers/PushSubscriptionStore";
 import { JourneyStore } from "./journey/JourneyStore";
 import { AuditLog } from "./lib/auditLog";
@@ -107,6 +109,7 @@ const pushSubStore = new PushSubscriptionStore(sqlDb);
 // ─── Passenger registry ───────────────────────────────────────────────────────
 const registry = new PassengerRegistry(sqlDb);
 const journeyStore = new JourneyStore(sqlDb);
+const paxInviteStore = new PaxInviteStore(sqlDb);
 
 const authRateLimit = createRateLimiter({
   name: "auth", windowMs: 60_000, maxRequests: 20, redis: redisCmd, failClosed: true,
@@ -136,6 +139,12 @@ const paxBoardingPassRateLimit = createRateLimiter({
 });
 const paxLoginRateLimit = createRateLimiter({
   name: "pax-login", windowMs: 60_000, maxRequests: 10, redis: redisCmd, failClosed: true,
+});
+// Redeeming an invite is a bearer-secret check, so it is brute-forceable in
+// principle — fail closed and keep the cap low. Legitimate use is one call per
+// passenger per device, with a retry or two after a network blip.
+const paxInviteRedeemRateLimit = createRateLimiter({
+  name: "pax-invite-redeem", windowMs: 60_000, maxRequests: 10, redis: redisCmd, failClosed: true,
 });
 // GET /api/flight/closest and POST /api/transfer call FlightAware directly on
 // every request (no FIDS cache) — cap per IP to protect the AeroAPI quota.
@@ -462,7 +471,9 @@ paxSessionRouter.post("/basic-session", paxBasicRateLimit);
 paxSessionRouter.post("/scan", paxScanRateLimit);
 paxSessionRouter.post("/boarding-pass", paxBoardingPassRateLimit);
 paxSessionRouter.post("/account-login", paxLoginRateLimit);
+paxSessionRouter.post("/invites/redeem", paxInviteRedeemRateLimit);
 registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
+registerPaxInviteRoutes(paxSessionRouter, paxInviteStore, registry, auditLog);
 app.use("/api/pax", paxSessionRouter);
 
 const journeyRouter = express.Router();
@@ -654,6 +665,7 @@ async function bootstrap(): Promise<void> {
     auditLog.init(),
     accountStore.init(),
     journeyStore.init(),
+    paxInviteStore.init(),
   ]);
   // Then apply versioned migrations — anything a bare CREATE TABLE IF NOT
   // EXISTS can't express on a database that already has data (see

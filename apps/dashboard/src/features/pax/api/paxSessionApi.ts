@@ -1,5 +1,6 @@
 import { apiUrl } from "../../../config/api";
 import {
+  getOrCreateDeviceId,
   savePaxSession,
   savePaxTrip,
   type PaxSession,
@@ -27,6 +28,22 @@ async function postSession(path: string, body: Record<string, unknown>): Promise
 
 export function mintBoardingPassSession(bcbp: string, extras: Record<string, unknown> = {}) {
   return postSession("/api/pax/boarding-pass", { bcbp, ...extras });
+}
+
+/**
+ * Claim a back-office invite link. The first successful call binds this
+ * browser's device id to the invite; later calls from any other device are
+ * refused with `device_mismatch`.
+ */
+export function redeemInvite(inviteId: string, token: string) {
+  return postSession("/api/pax/invites/redeem", {
+    inviteId,
+    token,
+    deviceId: getOrCreateDeviceId(),
+    // Only the client can see this, and it is what separates an iPad from a Mac
+    // (iPadOS Safari sends a desktop User-Agent). See server/lib/deviceSummary.
+    touchPoints: typeof navigator === "undefined" ? 0 : navigator.maxTouchPoints || 0,
+  });
 }
 
 export function mintBasicSession(input: {

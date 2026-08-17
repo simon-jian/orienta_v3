@@ -83,4 +83,19 @@ export const migrations: Migration[] = [
       );
     },
   },
+  {
+    // pax_invites recorded that *a* device had claimed a link but nothing about
+    // it, so the support desk could not tell whether a passenger reporting
+    // "it won't open" was on the phone that claimed it, nor whether their OS can
+    // receive Web Push at all. All nullable: rows bound before this stay valid
+    // and simply have no device description until their next redemption.
+    id: "2026_08_pax_invites_device_summary",
+    up: async (db) => {
+      if (!(await tableExists(db, "pax_invites"))) return;
+      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_os TEXT");
+      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_os_version TEXT");
+      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_browser TEXT");
+      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_is_mobile INTEGER");
+    },
+  },
 ];

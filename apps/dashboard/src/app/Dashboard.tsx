@@ -9,6 +9,7 @@ import { DeparturesFids, ArrivalsFids } from "../features/fids/FidsPanel";
 import DashboardTab from "../features/passengers/DashboardTab";
 import RiskBadges from "../features/passengers/RiskBadges";
 import { RobotRequestQueue } from "../features/passengers/RobotRequestQueue";
+import InvitesPanel from "../features/passengers/InvitesPanel";
 import { useDashboard } from "../features/passengers/useDashboard";
 import { statusBadge, extStatusLabel } from "../utils/statusDisplay";
 
@@ -19,7 +20,7 @@ import { logout as authLogout } from "../services/auth";
 import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";
 import { INDOOR_AIRPORTS, findIndoorAirport } from "../config/indoorAirports";
 
-type DashTab = "dashboard" | "map";
+type DashTab = "dashboard" | "map" | "invites";
 
 const AIRPORT_STORAGE_KEY = "orienta_admin_airport";
 
@@ -178,6 +179,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             </select>
             <button className={"btn" + (tab === "dashboard" ? " primary" : "")} onClick={() => setTab("dashboard")} style={{ fontSize: 12 }}>📊 Dashboard</button>
             <button className={"btn" + (tab === "map" ? " primary" : "")} onClick={() => setTab("map")} style={{ fontSize: 12 }}>🗺️ Map {clientDefaultAirport().defaultTerminal}</button>
+            <button className={"btn" + (tab === "invites" ? " primary" : "")} onClick={() => setTab("invites")} style={{ fontSize: 12 }}>🔗 旅客链接</button>
             <span className={"pill " + (rtUp ? "ok" : "warn")} style={{ fontSize: 11 }}>{rtUp ? "WS ●" : "WS ○"}</span>
             {passengersLoadError && (
               <span className="pill warn" style={{ fontSize: 11 }} title="乘客列表拉取失败，当前显示的可能是过期数据">
@@ -237,6 +239,15 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             </SectionErrorBoundary>
           </div>
         </div>
+
+        {/* ── Invites tab ── */}
+        {tab === "invites" && (
+          <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+            <SectionErrorBoundary label="旅客链接">
+              <InvitesPanel tenantId={tenantId} />
+            </SectionErrorBoundary>
+          </div>
+        )}
 
         {/* ── Map tab ── */}
         <div style={{

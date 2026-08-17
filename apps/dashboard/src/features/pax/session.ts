@@ -38,6 +38,42 @@ export type PaxSessionApiResult = {
 
 const STORAGE_KEY = "orienta_pax_session";
 const TRIP_KEY = "orienta_pax_trip";
+const DEVICE_KEY = "orienta_device_id";
+
+function randomId(): string {
+  // randomUUID needs a secure context; getRandomValues is available more
+  // widely, and the last resort only has to be unique, not unguessable — the
+  // server treats the device id as an identifier, never as a credential.
+  if (typeof crypto !== "undefined") {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    if (typeof crypto.getRandomValues === "function") {
+      const bytes = crypto.getRandomValues(new Uint8Array(16));
+      return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    }
+  }
+  return `${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+}
+
+/**
+ * Stable per-browser id used to bind an invite link to one device.
+ *
+ * Kept in localStorage so it survives closing the tab — sessionStorage (where
+ * the session itself lives) would make the passenger look like a new device on
+ * every visit. When storage is unavailable (private mode, blocked cookies) the
+ * id is generated per call: the current claim still succeeds, but the binding
+ * cannot persist, and the passenger will need a support reset next time.
+ */
+export function getOrCreateDeviceId(): string {
+  try {
+    const existing = localStorage.getItem(DEVICE_KEY);
+    if (existing) return existing;
+    const id = randomId();
+    localStorage.setItem(DEVICE_KEY, id);
+    return id;
+  } catch {
+    return randomId();
+  }
+}
 
 export function localCalendarDate(d = new Date()): string {
   const y = d.getFullYear();
