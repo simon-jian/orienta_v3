@@ -1,7 +1,8 @@
 {
   "name": "Orienta Passenger",
   "short_name": "Orienta",
-  "start_url": "/pax",
+  "start_url": "/pax/app",
+  "scope": "/pax",
   "display": "standalone",
   "background_color": "#0b1220",
   "theme_color": "#c8102e",

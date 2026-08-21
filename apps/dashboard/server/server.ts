@@ -149,6 +149,14 @@ const paxLoginRateLimit = createRateLimiter({
 const paxInviteRedeemRateLimit = createRateLimiter({
   name: "pax-invite-redeem", windowMs: 60_000, maxRequests: 10, redis: redisCmd, failClosed: true,
 });
+// Twilio is billed per send; keep the operator-facing button from being a
+// spray hose if a session is left open on a shared desk.
+const paxInviteSmsRateLimit = createRateLimiter({
+  name: "pax-invite-sms", windowMs: 60_000, maxRequests: 8, redis: redisCmd, failClosed: true,
+});
+const paxInviteEmailRateLimit = createRateLimiter({
+  name: "pax-invite-email", windowMs: 60_000, maxRequests: 8, redis: redisCmd, failClosed: true,
+});
 // GET /api/flight/closest and POST /api/transfer call FlightAware directly on
 // every request (no FIDS cache) — cap per IP to protect the AeroAPI quota.
 const aeroApiRateLimit = createRateLimiter({ name: "aeroapi", windowMs: 60_000, maxRequests: 30, redis: redisCmd });
@@ -482,8 +490,10 @@ paxSessionRouter.post("/scan", paxScanRateLimit);
 paxSessionRouter.post("/boarding-pass", paxBoardingPassRateLimit);
 paxSessionRouter.post("/account-login", paxLoginRateLimit);
 paxSessionRouter.post("/invites/redeem", paxInviteRedeemRateLimit);
+paxSessionRouter.post("/invites/:id/sms", paxInviteSmsRateLimit);
+paxSessionRouter.post("/invites/:id/email", paxInviteEmailRateLimit);
 registerPaxSessionRoutes(paxSessionRouter, registry, accountStore, auditLog);
-registerPaxInviteRoutes(paxSessionRouter, paxInviteStore, registry, auditLog);
+registerPaxInviteRoutes(paxSessionRouter, paxInviteStore, registry, auditLog, store, pushSubStore);
 app.use("/api/pax", paxSessionRouter);
 
 const journeyRouter = express.Router();

@@ -1,15 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { redeemInvite } from "./api/paxSessionApi";
+import { readClaimToken } from "./claimToken";
 import "./styles/pax.css";
 
 /**
  * Landing page for a back-office invite link.
  *
- * The link secret arrives in the URL fragment (`#t=…`) rather than the query
- * string so it never reaches the server in a request line, referrer or access
- * log. It is read here, exchanged for a session, and then stripped from the
- * address bar so a screenshot or shared URL carries nothing usable.
+ * The link secret is in `?t=` (and, for older links, `#t=`). Mail clients and
+ * QR scanners drop the fragment; the query form is what actually opens. After
+ * redeem we strip both from the address bar.
  *
  * Everything the passenger needs — flight, airports, gate — comes back with
  * the session, so there is no form on this page at all.
@@ -29,12 +29,6 @@ function messageFor(code: string): string {
   return ERROR_MESSAGES[code] || "领取失败，请稍后重试或联系工作人员。";
 }
 
-/** The secret lives in the fragment; the invite id stays a normal query param. */
-function readTokenFromHash(): string {
-  const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-  return new URLSearchParams(hash).get("t") || "";
-}
-
 export default function PaxClaimPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
@@ -47,7 +41,7 @@ export default function PaxClaimPage() {
   const inviteId = params.get("i") || "";
 
   const claim = useCallback(async () => {
-    const token = readTokenFromHash();
+    const token = readClaimToken(window.location.search, window.location.hash);
     if (!inviteId || !token) {
       setBusy(false);
       setError(messageFor("invalid_link"));

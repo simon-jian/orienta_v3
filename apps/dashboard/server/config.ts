@@ -118,15 +118,9 @@ export const VITE_INDOOR_MAP_SAME_ORIGIN = optional("VITE_INDOOR_MAP_SAME_ORIGIN
 export const PORT = optionalInt("PORT", 5174);
 
 /**
- * Origin used to build links handed to people (passenger claim links, arrival
- * share links).
- *
- * Deriving these from the request's `Host` breaks the moment anything sits in
- * front of the app: behind a tunnel or reverse proxy the server sees the local
- * upstream host and mints `http://localhost:5173/...` links that are useless to
- * the recipient. It is also attacker-controlled input, so a forged header could
- * make us mint links pointing at someone else's domain. Falls back to the
- * request origin when unset so local development needs no configuration.
+ * Fallback origin for invite / share links when the operator page origin is
+ * not on the request (scripts, missing header). Invite email and QR prefer
+ * the page the operator sent from (see publicOrigin).
  */
 export const PUBLIC_BASE_URL = (() => {
   const raw = optional("PUBLIC_BASE_URL");
@@ -255,10 +249,31 @@ export function getAdminCredentials(): Map<
   return map;
 }
 
-/** Check if VAPID push is configured. */
+/** Check if VAPID push is configured with real keys, not .env.example placeholders. */
 export function isPushConfigured(): boolean {
-  return !!(VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY);
+  const pub = VAPID_PUBLIC_KEY.trim();
+  const priv = VAPID_PRIVATE_KEY.trim();
+  if (!pub || !priv) return false;
+  const placeholder = /your_vapid|placeholder|changeme/i;
+  if (placeholder.test(pub) || placeholder.test(priv)) return false;
+  // web-push P-256 public key is 87 chars of base64url; examples are ~21.
+  return pub.length >= 80 && priv.length >= 40;
 }
+
+// ─── SMS (Twilio) — optional; invite SMS routes return 503 when missing ───────
+export const TWILIO_ACCOUNT_SID = optional("TWILIO_ACCOUNT_SID");
+export const TWILIO_AUTH_TOKEN = optional("TWILIO_AUTH_TOKEN");
+export const TWILIO_FROM_NUMBER = optional("TWILIO_FROM_NUMBER");
+/** Digits only, e.g. "1" or "86". Empty → operators must type a +country number. */
+export const SMS_DEFAULT_COUNTRY_CODE = optional("SMS_DEFAULT_COUNTRY_CODE");
+
+// ─── Email (SMTP) — optional; invite email routes return 503 when missing ─────
+export const SMTP_HOST = optional("SMTP_HOST");
+export const SMTP_PORT = optional("SMTP_PORT");
+export const SMTP_SECURE = optional("SMTP_SECURE");
+export const SMTP_USER = optional("SMTP_USER");
+export const SMTP_PASS = optional("SMTP_PASS");
+export const MAIL_FROM = optional("MAIL_FROM");
 
 // ─── Kiosk scan gating ────────────────────────────────────────────────────────
 // Optional shared secret required from boarding-pass scan kiosks before

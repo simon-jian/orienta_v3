@@ -36,10 +36,18 @@ export function adminEmailFromRequest(req: Request): string {
  * of tenants — callers must `return` immediately when this returns false.
  */
 export function requireTenantAccess(req: Request, res: Response, tenantId: string): boolean {
-  const payload = (req as AuthenticatedRequest).adminPayload;
-  if (payload && adminAllowedForTenant(payload, tenantId)) return true;
+  if (adminHasTenantAccess(req, tenantId)) return true;
   res.status(403).json({ ok: false, error: "tenant_not_allowed", tenantId });
   return false;
+}
+
+/**
+ * Same scope check as `requireTenantAccess`, but without writing a response.
+ * Use when a miss and a cross-tenant hit must look identical (404).
+ */
+export function adminHasTenantAccess(req: Request, tenantId: string): boolean {
+  const payload = (req as AuthenticatedRequest).adminPayload;
+  return !!(payload && adminAllowedForTenant(payload, tenantId));
 }
 
 /**

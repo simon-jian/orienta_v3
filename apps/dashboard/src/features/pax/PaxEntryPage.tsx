@@ -1,10 +1,15 @@
-import { Link } from "react-router-dom";
+import { Link, Navigate } from "react-router-dom";
+import { getStoredPaxSession } from "./session";
 import "./styles/pax.css";
 
 /**
  * Branded passenger entry (robots `/pax?full=1` treatment) — personal service only.
  */
 export default function PaxEntryPage() {
+  if (getStoredPaxSession()?.token) {
+    return <Navigate to="/pax/app" replace />;
+  }
+
   return (
     <div className="pax-shell">
       <div className="pax-wrap">

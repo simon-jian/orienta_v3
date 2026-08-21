@@ -20,6 +20,8 @@ import type {
   InviteFlightSnapshot,
   InviteLeg,
 } from "../passengers/PaxInviteStore";
+import { HubStore } from "../hub/HubStore";
+import type { PushSubscriptionStore } from "../passengers/PushSubscriptionStore";
 import {
   createSessionResponse,
   temporaryExpiryFromDeparture,
@@ -27,12 +29,26 @@ import {
 import { fetchFlightAware } from "../services/flightAware";
 import { resolveOutbound } from "../services/fidsService";
 import { airportForTenant } from "../../src/config/tenants/registry";
-import { requireRole, requireTenantAccess, adminEmailFromRequest } from "./auth";
+import { requireRole, requireTenantAccess, adminHasTenantAccess, adminEmailFromRequest } from "./auth";
+import { revokePaxSessionsForPassenger } from "../auth/paxSessionRevocation";
 import type { AuditLog } from "../lib/auditLog";
 import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 import { summarizeDevice } from "../lib/deviceSummary";
 import { publicOrigin } from "../lib/publicUrl";
 import { logger } from "../lib/logger";
+import {
+  SMS_ERRORS,
+  assertInviteSmsUrl,
+  inviteSmsBody,
+  isSmsConfigured,
+  maskPhone,
+  parseE164,
+  readSmsConfig,
+  sendTwilioSms,
+} from "../lib/sms";
+import { buildInviteClaimUrl } from "../lib/inviteClaimUrl";
+import { tryRenderInviteQr, type InviteQr } from "../lib/inviteQr";
+import { mailFromMismatch, readMailConfig, sendInviteMail } from "../lib/mail";
 
 /** Links outlive a delayed flight but not the trip; long enough to send by SMS a day ahead. */
 const INVITE_LIFETIME_MS = 48 * 60 * 60_000;
@@ -53,12 +69,12 @@ function normalizeDate(value: unknown): string | null {
 }
 
 /**
- * The secret rides in the URL fragment: browsers never send it to the server,
- * so it stays out of access logs, `Referer` headers and proxy traces. The
- * claim page reads it in JS and posts it back.
+ * Secret is in `?t=` (Outlook / QR scanners drop `#t=`) and repeated as
+ * `#t=` for older links. The claim page reads either form, then posts it
+ * back and strips it from the address bar.
  */
 function inviteUrl(req: Request, inviteId: string, token: string): string {
-  return `${publicOrigin(req)}/pax/claim?i=${encodeURIComponent(inviteId)}#t=${encodeURIComponent(token)}`;
+  return buildInviteClaimUrl(publicOrigin(req), inviteId, token);
 }
 
 type ResolvedFlight = {
@@ -139,11 +155,104 @@ function publicInvite(invite: PaxInvite): Omit<PaxInvite, "flight"> & { flight: 
   return invite;
 }
 
+type SmsAttempt =
+  | { sent: true; to: string }
+  | { sent: false; error: string; status: number };
+
+/**
+ * Validate + send. The URL (and its `#t=` secret) is never written to logs
+ * or the audit `detail` column — only a masked number.
+ */
+async function trySendInviteSms(opts: {
+  phone: unknown;
+  url: string;
+  inviteId: string;
+  expectedOrigin: string;
+  flightId?: string;
+}): Promise<SmsAttempt> {
+  const config = readSmsConfig();
+  if (!config) return { sent: false, error: SMS_ERRORS.not_configured, status: 503 };
+
+  const phone = parseE164(opts.phone, config.defaultCountryCode);
+  if (!phone.ok) return { sent: false, error: phone.error, status: 400 };
+
+  const claim = assertInviteSmsUrl(opts.url, opts.inviteId, opts.expectedOrigin);
+  if (!claim.ok) return { sent: false, error: claim.error, status: 400 };
+
+  const sent = await sendTwilioSms(config, phone.e164, inviteSmsBody(claim.url, opts.flightId));
+  if (!sent.ok) return { sent: false, error: sent.error, status: 502 };
+  return { sent: true, to: maskPhone(phone.e164) };
+}
+
+function inviteStillSendable(invite: PaxInvite): boolean {
+  return invite.isActive && !invite.revokedAt && Date.now() < invite.expiresAt;
+}
+
+async function trySendInviteEmail(opts: {
+  email: unknown;
+  url: string;
+  inviteId: string;
+  expectedOrigin: string;
+  name?: string;
+  flightId?: string;
+  qr?: InviteQr | null;
+}): Promise<SmsAttempt> {
+  const sent = await sendInviteMail(
+    {
+      to: opts.email,
+      url: opts.url,
+      inviteId: opts.inviteId,
+      expectedOrigin: opts.expectedOrigin,
+      name: opts.name,
+      flightId: opts.flightId,
+    },
+    opts.qr !== undefined ? { qr: opts.qr } : undefined,
+  );
+  return sent.ok
+    ? { sent: true, to: sent.to }
+    : { sent: false, error: sent.error, status: sent.status };
+}
+
+function emailStatus(): { emailConfigured: boolean; emailFromWarning: boolean } {
+  const config = readMailConfig();
+  return {
+    emailConfigured: !!config,
+    emailFromWarning: !!config && mailFromMismatch(config),
+  };
+}
+
+function inviteVisibleToAdmin(req: Request, invite: PaxInvite | null): invite is PaxInvite {
+  return !!invite && adminHasTenantAccess(req, invite.tenantId);
+}
+
+async function eraseInviteRecord(
+  invite: PaxInvite,
+  invites: PaxInviteStore,
+  registry: PassengerRegistry,
+  hub?: HubStore,
+  pushSubs?: PushSubscriptionStore,
+): Promise<{ inviteRemoved: boolean; passengerRemoved: boolean }> {
+  await revokePaxSessionsForPassenger(invite.tenantId, invite.passengerId);
+  const inviteRemoved = await invites.remove(invite.inviteId);
+  const remaining = await invites.countForPassenger(invite.tenantId, invite.passengerId);
+  let passengerRemoved = false;
+  if (remaining === 0) {
+    passengerRemoved = await registry.delete(invite.tenantId, invite.passengerId);
+    if (passengerRemoved) {
+      await hub?.purgePassenger(invite.tenantId, invite.passengerId);
+      await pushSubs?.removeAllForKey(HubStore.key(invite.tenantId, invite.passengerId));
+    }
+  }
+  return { inviteRemoved, passengerRemoved };
+}
+
 export function registerPaxInviteRoutes(
   router: Router,
   invites: PaxInviteStore,
   registry: PassengerRegistry,
   auditLog?: AuditLog,
+  hub?: HubStore,
+  pushSubs?: PushSubscriptionStore,
 ): void {
   /** POST /invites — issue a link. The secret is returned exactly once. */
   router.post("/invites", requireRole("admin", "ops"), async (req: Request, res: Response) => {
@@ -204,10 +313,63 @@ export function registerPaxInviteRoutes(
       detail: `${flightId}/${flightDate}/${leg}`,
     });
 
+    const url = inviteUrl(req, invite.inviteId, token);
+    const origin = publicOrigin(req);
+    const qr = await tryRenderInviteQr(url);
+    const phone = String(body.phone || "").trim();
+    const email = String(body.email || "").trim();
+    let sms: SmsAttempt | undefined;
+    if (phone) {
+      sms = await trySendInviteSms({
+        phone,
+        url,
+        inviteId: invite.inviteId,
+        expectedOrigin: origin,
+        flightId,
+      });
+      if (sms.sent) {
+        void auditLog?.record({
+          actorEmail: adminEmailFromRequest(req),
+          action: "pax_invite_sms",
+          tenantId,
+          passengerId,
+          detail: sms.to,
+        });
+      }
+    }
+
+    let emailResult: SmsAttempt | undefined;
+    if (email) {
+      emailResult = await trySendInviteEmail({
+        email,
+        url,
+        inviteId: invite.inviteId,
+        expectedOrigin: origin,
+        name: name || undefined,
+        flightId,
+        qr,
+      });
+      if (emailResult.sent) {
+        void auditLog?.record({
+          actorEmail: adminEmailFromRequest(req),
+          action: "pax_invite_email",
+          tenantId,
+          passengerId,
+          detail: emailResult.to,
+        });
+      }
+    }
+
     return res.status(201).json({
       ok: true,
       invite: publicInvite(invite),
-      url: inviteUrl(req, invite.inviteId, token),
+      url,
+      qrDataUrl: qr?.dataUrl,
+      publicOrigin: origin,
+      smsConfigured: isSmsConfigured(),
+      ...emailStatus(),
+      sms,
+      email: emailResult,
     });
   });
 
@@ -216,16 +378,117 @@ export function registerPaxInviteRoutes(
     const tenantId = tenantFromQuery(req);
     if (!requireTenantAccess(req, res, tenantId)) return;
     const list = await invites.list(tenantId);
-    return res.json({ ok: true, tenantId, invites: list.map(publicInvite) });
+    return res.json({
+      ok: true,
+      tenantId,
+      invites: list.map(publicInvite),
+      publicOrigin: publicOrigin(req),
+      smsConfigured: isSmsConfigured(),
+      ...emailStatus(),
+    });
+  });
+
+  /**
+   * POST /invites/erase-inactive — drop expired/revoked invite rows. If a
+   * passenger has no leftover invites, the registry row goes too.
+   */
+  router.post("/invites/erase-inactive", requireRole("admin", "ops"), async (req: Request, res: Response) => {
+    const tenantId = tenantFromQuery(req);
+    if (!requireTenantAccess(req, res, tenantId)) return;
+
+    const stale = await invites.listInactive(tenantId);
+    let erased = 0;
+    let passengersRemoved = 0;
+    for (const invite of stale) {
+      const result = await eraseInviteRecord(invite, invites, registry, hub, pushSubs);
+      if (result.inviteRemoved) erased += 1;
+      if (result.passengerRemoved) passengersRemoved += 1;
+      void auditLog?.record({
+        actorEmail: adminEmailFromRequest(req),
+        action: "pax_invite_erase",
+        tenantId: invite.tenantId,
+        passengerId: invite.passengerId,
+      });
+    }
+    return res.json({ ok: true, erased, passengersRemoved });
+  });
+
+  /**
+   * POST /invites/:id/sms — text the claim URL that is still on the operator's
+   * screen. The server no longer has the secret, so the client must send `url`.
+   */
+  router.post("/invites/:id/sms", requireRole("admin", "ops"), async (req: Request, res: Response) => {
+    const invite = await invites.get(String(req.params.id || ""));
+    if (!inviteVisibleToAdmin(req, invite)) {
+      return res.status(404).json({ ok: false, error: "invite_not_found" });
+    }
+    if (!inviteStillSendable(invite)) {
+      return res.status(409).json({ ok: false, error: "invite_inactive" });
+    }
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const sms = await trySendInviteSms({
+      phone: body.phone,
+      url: String(body.url || ""),
+      inviteId: invite.inviteId,
+      expectedOrigin: publicOrigin(req),
+      flightId: invite.flightId,
+    });
+    if (!sms.sent) return res.status(sms.status).json({ ok: false, error: sms.error });
+
+    void auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "pax_invite_sms",
+      tenantId: invite.tenantId,
+      passengerId: invite.passengerId,
+      detail: sms.to,
+    });
+    return res.json({ ok: true, to: sms.to });
+  });
+
+  /**
+   * POST /invites/:id/email — same as SMS: the secret is only on the operator's
+   * screen, so the client posts `url` and we check it against this invite.
+   */
+  router.post("/invites/:id/email", requireRole("admin", "ops"), async (req: Request, res: Response) => {
+    const invite = await invites.get(String(req.params.id || ""));
+    if (!inviteVisibleToAdmin(req, invite)) {
+      return res.status(404).json({ ok: false, error: "invite_not_found" });
+    }
+    if (!inviteStillSendable(invite)) {
+      return res.status(409).json({ ok: false, error: "invite_inactive" });
+    }
+
+    const body = (req.body || {}) as Record<string, unknown>;
+    const sent = await trySendInviteEmail({
+      email: body.email,
+      url: String(body.url || ""),
+      inviteId: invite.inviteId,
+      expectedOrigin: publicOrigin(req),
+      name: invite.passengerName || undefined,
+      flightId: invite.flightId,
+    });
+    if (!sent.sent) return res.status(sent.status).json({ ok: false, error: sent.error });
+
+    void auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "pax_invite_email",
+      tenantId: invite.tenantId,
+      passengerId: invite.passengerId,
+      detail: sent.to,
+    });
+    return res.json({ ok: true, to: sent.to });
   });
 
   /** DELETE /invites/:id — revoke. */
   router.delete("/invites/:id", requireRole("admin", "ops"), async (req: Request, res: Response) => {
     const invite = await invites.get(String(req.params.id || ""));
-    if (!invite) return res.status(404).json({ ok: false, error: "invite_not_found" });
-    if (!requireTenantAccess(req, res, invite.tenantId)) return;
+    if (!inviteVisibleToAdmin(req, invite)) {
+      return res.status(404).json({ ok: false, error: "invite_not_found" });
+    }
 
     const revoked = await invites.revoke(invite.inviteId);
+    await revokePaxSessionsForPassenger(invite.tenantId, invite.passengerId);
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "pax_invite_revoke",
@@ -235,14 +498,33 @@ export function registerPaxInviteRoutes(
     return res.json({ ok: true, revoked });
   });
 
+  /** POST /invites/:id/erase — remove the invite row and orphaned passenger. */
+  router.post("/invites/:id/erase", requireRole("admin", "ops"), async (req: Request, res: Response) => {
+    const invite = await invites.get(String(req.params.id || ""));
+    if (!inviteVisibleToAdmin(req, invite)) {
+      return res.status(404).json({ ok: false, error: "invite_not_found" });
+    }
+
+    const result = await eraseInviteRecord(invite, invites, registry, hub, pushSubs);
+    void auditLog?.record({
+      actorEmail: adminEmailFromRequest(req),
+      action: "pax_invite_erase",
+      tenantId: invite.tenantId,
+      passengerId: invite.passengerId,
+      detail: result.passengerRemoved ? "passenger_removed" : "invite_only",
+    });
+    return res.json({ ok: true, ...result });
+  });
+
   /**
    * POST /invites/:id/reset-device — support path for a passenger who cleared
    * site data or changed phones. The next open re-binds.
    */
   router.post("/invites/:id/reset-device", requireRole("admin", "ops"), async (req: Request, res: Response) => {
     const invite = await invites.get(String(req.params.id || ""));
-    if (!invite) return res.status(404).json({ ok: false, error: "invite_not_found" });
-    if (!requireTenantAccess(req, res, invite.tenantId)) return;
+    if (!inviteVisibleToAdmin(req, invite)) {
+      return res.status(404).json({ ok: false, error: "invite_not_found" });
+    }
 
     await invites.resetDevice(invite.inviteId);
     void auditLog?.record({

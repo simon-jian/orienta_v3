@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../../config/indoorMap";
 import {
   checkPdrBackendAvailable,
@@ -55,19 +55,21 @@ export function usePdrNavigation(
   const planRef = useRef(plan);
   planRef.current = plan;
 
-  useEffect(() => {
-    let cancelled = false;
-    checkPdrBackendAvailable()
+  const refreshPdrBackend = useCallback(() => {
+    return checkPdrBackendAvailable()
       .then((ok) => {
-        if (!cancelled) setPdrBackendOk(ok);
+        setPdrBackendOk(ok);
+        return ok;
       })
       .catch(() => {
-        if (!cancelled) setPdrBackendOk(false);
+        setPdrBackendOk(false);
+        return false;
       });
-    return () => {
-      cancelled = true;
-    };
   }, []);
+
+  useEffect(() => {
+    void refreshPdrBackend();
+  }, [refreshPdrBackend]);
 
   useEffect(() => {
     pdrActiveRef.current = pdrActive;
@@ -363,5 +365,6 @@ export function usePdrNavigation(
     routePlanning,
     togglePdr,
     stop,
+    refreshPdrBackend,
   };
 }

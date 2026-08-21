@@ -22,17 +22,39 @@ export type NavPlanConfirmed = {
   confirmedAt: number;
 };
 
-export function saveNavHints(hints: NavPlanHints): void {
+function readStore(key: string): string | null {
   try {
-    sessionStorage.setItem(HINTS_KEY, JSON.stringify(hints));
+    return localStorage.getItem(key) ?? sessionStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeStore(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+    sessionStorage.removeItem(key);
   } catch {
     /* ignore */
   }
 }
 
+function clearStore(key: string): void {
+  try {
+    localStorage.removeItem(key);
+    sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function saveNavHints(hints: NavPlanHints): void {
+  writeStore(HINTS_KEY, JSON.stringify(hints));
+}
+
 export function getNavHints(): NavPlanHints | null {
   try {
-    const raw = sessionStorage.getItem(HINTS_KEY);
+    const raw = readStore(HINTS_KEY);
     return raw ? (JSON.parse(raw) as NavPlanHints) : null;
   } catch {
     return null;
@@ -40,16 +62,12 @@ export function getNavHints(): NavPlanHints | null {
 }
 
 export function saveConfirmedNavPlan(plan: NavPlanConfirmed): void {
-  try {
-    sessionStorage.setItem(PLAN_KEY, JSON.stringify(plan));
-  } catch {
-    /* ignore */
-  }
+  writeStore(PLAN_KEY, JSON.stringify(plan));
 }
 
 export function getConfirmedNavPlan(): NavPlanConfirmed | null {
   try {
-    const raw = sessionStorage.getItem(PLAN_KEY);
+    const raw = readStore(PLAN_KEY);
     if (!raw) return null;
     const plan = JSON.parse(raw) as NavPlanConfirmed;
     if (!plan?.airport || !plan.fromPoiId || !plan.toPoiId) return null;
@@ -61,11 +79,7 @@ export function getConfirmedNavPlan(): NavPlanConfirmed | null {
 }
 
 export function clearConfirmedNavPlan(): void {
-  try {
-    sessionStorage.removeItem(PLAN_KEY);
-  } catch {
-    /* ignore */
-  }
+  clearStore(PLAN_KEY);
 }
 
 /** Flight page → assist nav tab query (no side effects). */

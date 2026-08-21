@@ -168,12 +168,23 @@ disown || true
 PUBLIC_URL="$(wait_for_tunnel_url "$TUNNEL_LOG")"
 echo "$PUBLIC_URL" >"$URL_FILE"
 
+ENV_FILE="$DASHBOARD_DIR/.env"
+if [[ -f "$ENV_FILE" ]]; then
+  if grep -q '^PUBLIC_BASE_URL=' "$ENV_FILE"; then
+    sed -i.bak -E "s|^PUBLIC_BASE_URL=.*|PUBLIC_BASE_URL=${PUBLIC_URL}|" "$ENV_FILE"
+    rm -f "${ENV_FILE}.bak"
+  else
+    printf '\nPUBLIC_BASE_URL=%s\n' "$PUBLIC_URL" >>"$ENV_FILE"
+  fi
+fi
+
 cat <<EOF
 
 ================================================================
   Phone (HTTPS / PWA test)
   Open:     ${PUBLIC_URL}/pax
   Login:    ${PUBLIC_URL}/pax/login
+  Invite:   ${PUBLIC_URL}/pax/claim  (PUBLIC_BASE_URL follows this URL; no Express restart)
 
   iPhone Web Push:
     Safari → share → Add to Home Screen → open from icon
@@ -188,5 +199,8 @@ cat <<EOF
   - Map must be reachable FROM THIS MACHINE via INDOOR_MAP_UPSTREAM
     in apps/dashboard/.env (phone never talks to the LAN IP directly).
   - If Push subscribe fails, set real VAPID_* in .env and restart Express.
+  - This script writes the new URL to /tmp/orienta_pax_tunnel/public_url.txt
+    and apps/dashboard/.env. Invite emails/QR pick it up on the next issue
+    (no Express restart). Old emails still point at the previous hostname.
 ================================================================
 EOF

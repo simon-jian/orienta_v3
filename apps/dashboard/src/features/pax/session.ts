@@ -82,20 +82,52 @@ export function localCalendarDate(d = new Date()): string {
   return `${y}-${m}-${day}`;
 }
 
-export function savePaxSession(session: PaxSession): void {
-  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-  if (session.trip) {
-    sessionStorage.setItem(TRIP_KEY, JSON.stringify(session.trip));
+/**
+ * Home-screen PWAs are a separate browser context on iOS: they do not see
+ * Safari's sessionStorage. Persist here so the icon can reopen /pax/app.
+ */
+function readStore(key: string): string | null {
+  try {
+    return localStorage.getItem(key) ?? sessionStorage.getItem(key);
+  } catch {
+    return null;
   }
 }
 
+function writeStore(key: string, value: string): void {
+  localStorage.setItem(key, value);
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearStore(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function savePaxSession(session: PaxSession): void {
+  writeStore(STORAGE_KEY, JSON.stringify(session));
+  if (session.trip) writeStore(TRIP_KEY, JSON.stringify(session.trip));
+}
+
 export function savePaxTrip(trip: PaxTripContext): void {
-  sessionStorage.setItem(TRIP_KEY, JSON.stringify(trip));
+  writeStore(TRIP_KEY, JSON.stringify(trip));
 }
 
 export function getStoredPaxTrip(): PaxTripContext | null {
   try {
-    const raw = sessionStorage.getItem(TRIP_KEY);
+    const raw = readStore(TRIP_KEY);
     return raw ? (JSON.parse(raw) as PaxTripContext) : null;
   } catch {
     return null;
@@ -104,7 +136,7 @@ export function getStoredPaxTrip(): PaxTripContext | null {
 
 export function getStoredPaxSession(): PaxSession | null {
   try {
-    const raw = sessionStorage.getItem(STORAGE_KEY);
+    const raw = readStore(STORAGE_KEY);
     if (!raw) return null;
     const session = JSON.parse(raw) as PaxSession;
     if (!session.trip) {
@@ -118,8 +150,8 @@ export function getStoredPaxSession(): PaxSession | null {
 }
 
 export function clearPaxSession(): void {
-  sessionStorage.removeItem(STORAGE_KEY);
-  sessionStorage.removeItem(TRIP_KEY);
+  clearStore(STORAGE_KEY);
+  clearStore(TRIP_KEY);
 }
 
 export async function fetchPaxSession(token: string): Promise<PaxSession> {

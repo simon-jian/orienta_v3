@@ -266,6 +266,7 @@ export default function PaxAppPage() {
             setNavPlan(null);
           }}
           pdrBackendOk={nav.pdrBackendOk}
+          onRetryPdr={() => { void nav.refreshPdrBackend(); }}
         />
       ) : (
         <section className="pax-assist-panel">

@@ -180,4 +180,35 @@ describe("PaxInviteStore", () => {
     const list = await store.list("airchina");
     expect(list.map((i) => i.passengerId).sort()).toEqual(["PAX-1", "PAX-2"]);
   });
+
+  it("hard-deletes a row and counts remaining invites per passenger", async () => {
+    const store = await newStore();
+    const a = await store.create({ ...baseInput, passengerId: "PAX-KEEP" });
+    const b = await store.create({ ...baseInput, passengerId: "PAX-KEEP" });
+    expect(await store.countForPassenger("airchina", "PAX-KEEP")).toBe(2);
+
+    expect(await store.remove(a.invite.inviteId)).toBe(true);
+    expect(await store.get(a.invite.inviteId)).toBeNull();
+    expect(await store.countForPassenger("airchina", "PAX-KEEP")).toBe(1);
+    expect(await store.get(b.invite.inviteId)).not.toBeNull();
+    expect(await store.remove("inv_missing")).toBe(false);
+  });
+
+  it("lists only revoked or expired invites", async () => {
+    const store = await newStore();
+    const live = await store.create(baseInput);
+    const expired = await store.create({
+      ...baseInput,
+      passengerId: "PAX-OLD",
+      expiresAt: Date.now() - 1,
+    });
+    const revoked = await store.create({ ...baseInput, passengerId: "PAX-REV" });
+    await store.revoke(revoked.invite.inviteId);
+
+    const inactive = await store.listInactive("airchina");
+    expect(inactive.map((i) => i.inviteId).sort()).toEqual(
+      [expired.invite.inviteId, revoked.invite.inviteId].sort(),
+    );
+    expect(inactive.some((i) => i.inviteId === live.invite.inviteId)).toBe(false);
+  });
 });

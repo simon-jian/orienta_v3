@@ -29,6 +29,7 @@ type Props = {
   onConfirmPlan: (plan: NavPlanConfirmed) => void;
   onChangePlan: () => void;
   pdrBackendOk: boolean | null;
+  onRetryPdr?: () => void;
 };
 
 /**
@@ -59,6 +60,7 @@ export function AssistNavPanel({
   onConfirmPlan,
   onChangePlan,
   pdrBackendOk,
+  onRetryPdr,
 }: Props) {
   // #region agent log
   useEffect(() => {
@@ -76,7 +78,14 @@ export function AssistNavPanel({
     return (
       <section className="pax-assist-nav-panel">
         <div className="pax-assist-nav-hint">
-          PDR 后端未启动（需要 `PDR_API_ORIGIN` / :8000）。无法进入步行导航。
+          步行导航需要本机 PDR 服务（端口 8000）。当前探测不到，请在电脑上运行
+          <code> npm run pdr:dev </code>
+          后再点重试。
+          {onRetryPdr ? (
+            <button type="button" className="pax-assist-nav-replan" onClick={onRetryPdr} style={{ marginLeft: 8 }}>
+              重试
+            </button>
+          ) : null}
           <button type="button" className="pax-assist-nav-replan" onClick={onChangePlan} style={{ marginLeft: 8 }}>
             重新选路
           </button>

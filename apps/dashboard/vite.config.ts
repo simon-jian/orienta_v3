@@ -30,9 +30,12 @@ export default defineConfig({
   },
   server: {
     port: 5173,
-    // Cloudflare quick tunnels present Host: *.trycloudflare.com; Vite blocks
-    // unknown hosts by default (dev-only phone HTTPS testing).
-    allowedHosts: [".trycloudflare.com", "localhost", ".localhost"],
+    // Listen on the LAN so http://192.168.x.x:5173 works from a phone on Wi-Fi.
+    // Default is 127.0.0.1 only — that is why the LAN URL failed.
+    host: true,
+    // Vite 6 blocks unknown Host headers. true covers localhost, LAN IPs, and
+    // the changing *.trycloudflare.com hostname from the quick tunnel.
+    allowedHosts: true,
     proxy: {
       // Dev server proxies all API/WS calls to the Express backend
       "/api":                  "http://localhost:5175",

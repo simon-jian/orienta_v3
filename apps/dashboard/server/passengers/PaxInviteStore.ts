@@ -401,6 +401,32 @@ export class PaxInviteStore {
     return result.changes > 0;
   }
 
+  /** Hard-delete the row. Revoke keeps the record; this removes it from the list. */
+  async remove(inviteId: string): Promise<boolean> {
+    const result = await this.db.run("DELETE FROM pax_invites WHERE invite_id = ?", [inviteId]);
+    return result.changes > 0;
+  }
+
+  async countForPassenger(tenantId: string, passengerId: string): Promise<number> {
+    const row = await this.db.get<{ n: number }>(
+      "SELECT COUNT(*) AS n FROM pax_invites WHERE tenant_id = ? AND passenger_id = ?",
+      [tenantId, passengerId],
+    );
+    return Number(row?.n ?? 0);
+  }
+
+  /** Revoked, or past `expiresAt`. Active unexpired invites are left alone. */
+  async listInactive(tenantId: string, nowMs = Date.now()): Promise<PaxInvite[]> {
+    const rows = await this.db.all<InviteRow>(
+      `SELECT * FROM pax_invites
+        WHERE tenant_id = ?
+          AND (is_active = 0 OR revoked_at IS NOT NULL OR expires_at <= ?)
+        ORDER BY created_at DESC`,
+      [tenantId, nowMs],
+    );
+    return rows.map(mapRow);
+  }
+
   /** Clear the binding so the passenger can claim the link from a new device. */
   async resetDevice(inviteId: string): Promise<boolean> {
     const result = await this.db.run(
