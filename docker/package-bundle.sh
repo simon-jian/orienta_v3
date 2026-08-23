@@ -135,7 +135,11 @@ lines = [
     "HOST_PORT=5174",
     "",
     f"JWT_SECRET={quote(jwt_secret)}",
-    f"ADMIN_CREDENTIALS=admin@airchina.com:{admin_hash},ops@airchina.com:{ops_hash}",
+    # Quoted because a scrypt hash contains `$`, and Compose interpolates
+    # unquoted env-file values: `scrypt$salt$hash` came out with the hash
+    # segment expanded as an unset variable ("... variable is not set.
+    # Defaulting to a blank string"), which corrupts the admin password.
+    f"ADMIN_CREDENTIALS={quote(f'admin@airchina.com:{admin_hash},ops@airchina.com:{ops_hash}')}",
     f"KIOSK_SCAN_SECRET={quote(kiosk_secret)}",
     f"PAX_ACCOUNT_CREDENTIALS={quote(take('PAX_ACCOUNT_CREDENTIALS'))}",
     "",
@@ -179,6 +183,15 @@ print(f"  sms:    {status(bool(take('TWILIO_ACCOUNT_SID') and take('TWILIO_AUTH_
 print(f"  flights:{status(bool(take('FLIGHTAWARE_API_KEY')))}", flush=True)
 PY
 
+if [[ ! -f "$ROOT/apps/dashboard/.env" ]]; then
+  echo "  WARNING: apps/dashboard/.env not found — bundle has no SMTP/VAPID/flight keys." >&2
+fi
+
+# Visible twin of the dotfile: copies that skip hidden files still carry the config.
+cp "$OUT_DIR/stack/.env" "$OUT_DIR/stack/env.bundle"
+printf '%s %s built %s\n' "$IMAGE" "$PLATFORM" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+  > "$OUT_DIR/stack/BUNDLE_VERSION"
+
 cat > "$OUT_DIR/INSTALL.txt" <<EOF
 Orienta v3 dashboard — ${TARGET} (${PLATFORM})
 
@@ -201,7 +214,12 @@ copied from the pack machine). The demo PC does not need this git repo.
      cd stack
      ./load-and-start.sh
    First start fills PUBLIC_BASE_URL with this machine's LAN IP so
-   invite emails/QR open on a phone on the same network.
+   invite emails/QR open on a phone on the same network. The script then
+   prints which features (email / push / SMS / flights) the container got.
+
+   Copy this folder with 'cp -a' or a tar archive: stack/.env is a hidden
+   file. If it is lost, stack/env.bundle holds the same values and the
+   start script restores it automatically.
 
 4. Open:
      http://localhost:5174

@@ -69,6 +69,39 @@ describe("runMigrations", () => {
     expect(await db.get("SELECT id FROM schema_migrations WHERE id = ?", ["m_bad"])).toBeUndefined();
   });
 
+  it("is a no-op on a fresh database whose init() already created the baseline columns", async () => {
+    const db = await newDb();
+    const { PaxInviteStore } = await import("../passengers/PaxInviteStore");
+    await new PaxInviteStore(db).init();
+
+    // Reproduces a first-boot crash loop: the table exists (so the guard lets
+    // the migration run) but init() already created every column it adds, and a
+    // bare ADD COLUMN aborted the whole boot with "duplicate column name".
+    const { migrations } = await import("./migrationList");
+    await expect(runMigrations(db, migrations)).resolves.toBeUndefined();
+  });
+
+  it("still adds the device columns to a pax_invites table predating them", async () => {
+    const db = await newDb();
+    await db.exec(`
+      CREATE TABLE pax_invites (
+        invite_id TEXT NOT NULL PRIMARY KEY,
+        device_hash BLOB,
+        device_bound_at BIGINT
+      );
+    `);
+
+    const { migrations } = await import("./migrationList");
+    const deviceSummary = migrations.find((m) => m.id === "2026_08_pax_invites_device_summary")!;
+    await runMigrations(db, [deviceSummary]);
+
+    const columns = (await db.all<{ name: string }>("PRAGMA table_info(pax_invites)")).map((c) => c.name);
+    expect(columns).toContain("device_os");
+    expect(columns).toContain("device_os_version");
+    expect(columns).toContain("device_browser");
+    expect(columns).toContain("device_is_mobile");
+  });
+
   it(
     "the chat_messages composite-PK migration preserves existing rows and widens the conflict target",
     async () => {

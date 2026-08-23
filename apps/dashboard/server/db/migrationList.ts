@@ -30,6 +30,32 @@ async function tableExists(db: SqlDb, table: string): Promise<boolean> {
   return !!row;
 }
 
+/**
+ * Add a column only when it is absent.
+ *
+ * `tableExists` alone is not enough: on a fresh database the store's `init()`
+ * has already created the table at the current baseline shape, which includes
+ * every column these migrations were written to add. A bare `ADD COLUMN` then
+ * aborts the whole boot with "duplicate column name" — the table exists, so
+ * the migration ran, and the column was already there.
+ */
+async function addColumnIfMissing(
+  db: SqlDb,
+  table: string,
+  column: string,
+  type: string,
+): Promise<void> {
+  if (db.dialect === "pg") {
+    // Postgres can express this directly, and its DDL is transactional, so a
+    // concurrent boot racing on the same column cannot half-apply it.
+    await db.exec(`ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} ${type}`);
+    return;
+  }
+  const columns = await db.all<{ name: string }>(`PRAGMA table_info(${table})`);
+  if (columns.some((c) => c.name === column)) return;
+  await db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+}
+
 export const migrations: Migration[] = [
   {
     // chat_messages was keyed by a bare `id` (assumed globally unique, e.g. a
@@ -77,7 +103,7 @@ export const migrations: Migration[] = [
     id: "2026_08_metrics_events_tenant_id",
     up: async (db) => {
       if (!(await tableExists(db, "metrics_events"))) return;
-      await db.exec("ALTER TABLE metrics_events ADD COLUMN tenant_id TEXT");
+      await addColumnIfMissing(db, "metrics_events", "tenant_id", "TEXT");
       await db.exec(
         "CREATE INDEX IF NOT EXISTS idx_metrics_tenant_created ON metrics_events (tenant_id, created_at)",
       );
@@ -92,10 +118,10 @@ export const migrations: Migration[] = [
     id: "2026_08_pax_invites_device_summary",
     up: async (db) => {
       if (!(await tableExists(db, "pax_invites"))) return;
-      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_os TEXT");
-      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_os_version TEXT");
-      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_browser TEXT");
-      await db.exec("ALTER TABLE pax_invites ADD COLUMN device_is_mobile INTEGER");
+      await addColumnIfMissing(db, "pax_invites", "device_os", "TEXT");
+      await addColumnIfMissing(db, "pax_invites", "device_os_version", "TEXT");
+      await addColumnIfMissing(db, "pax_invites", "device_browser", "TEXT");
+      await addColumnIfMissing(db, "pax_invites", "device_is_mobile", "INTEGER");
     },
   },
 ];

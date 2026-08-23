@@ -2,7 +2,8 @@
  * App — route guard only.
  */
 import { lazy, Suspense, useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
+import { titleForPath } from "./documentTitle";
 import LoginScreen from "../components/LoginScreen";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
 import PaxLoginPage from "../features/pax/PaxLoginPage";
@@ -18,6 +19,15 @@ const Dashboard = lazy(() => import("./Dashboard"));
 const PaxAppPage = lazy(() => import("../features/pax/PaxAppPage"));
 const PaxFlightPage = lazy(() => import("../features/pax/PaxFlightPage"));
 const ArrivalPlanPage = lazy(() => import("../features/pax/ArrivalPlanPage"));
+
+/** Keeps the tab title in step with the route. Must live inside the router. */
+function DocumentTitle() {
+  const { pathname } = useLocation();
+  useEffect(() => {
+    document.title = titleForPath(pathname);
+  }, [pathname]);
+  return null;
+}
 
 function RouteLoading() {
   return (
@@ -65,6 +75,7 @@ export default function App({ configDegraded = false }: { configDegraded?: boole
 
   return (
     <BrowserRouter>
+      <DocumentTitle />
       {configDegraded && <ConfigDegradedBanner />}
       <Suspense fallback={<RouteLoading />}>
         <Routes>

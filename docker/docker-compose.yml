@@ -1,6 +1,12 @@
 # Offline / demo compose — image only, no build context.
 # Load orienta-v3-dashboard:latest first, then:
 #   docker compose --env-file .env up -d
+#
+# The project name is pinned because Compose otherwise derives it from the
+# containing directory, which this bundle and the orienta-map bundle both call
+# "stack". They then shared one project, so `docker compose down` run in either
+# folder treated the other's containers as part of its own stack.
+name: orienta-v3
 services:
   orienta:
     image: orienta-v3-dashboard:latest

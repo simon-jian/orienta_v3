@@ -174,18 +174,24 @@ export function registerJourneyRoutes(
       const uiPrefs = uiPreferencesFromStored(preferences);
       const calculatedAt = new Date();
       const estimate = estimateTimeToGate(instance, uiPrefs, events, calculatedAt);
-      const target = new Date(calculatedAt.valueOf() + estimate.range.max * 60_000);
+      // The engine already anchors this window to boarding time (target gate
+      // arrival minus the processing range). Deriving it from `now + range.max`
+      // instead collapsed it to `now … now + (max - min)`, so the passenger was
+      // told to set off within the next half hour for a flight boarding the
+      // next morning — and it contradicted the target arrival shown beside it.
+      const entryStart = estimate.recommendedTerminalEntryStart;
+      const entryEnd = estimate.recommendedTerminalEntryEnd;
       return res.json({
         ok: true,
         data: {
           ...estimate,
-          terminalEntryRange: localRange(
-            new Date(target.valueOf() - estimate.range.max * 60_000),
-            new Date(target.valueOf() - estimate.range.min * 60_000),
-            instance.origin_timezone,
-          ),
+          // Null when boarding time is unknown; the sheet then falls back to
+          // showing the processing range on its own.
+          terminalEntryRange:
+            entryStart && entryEnd
+              ? localRange(new Date(entryStart), new Date(entryEnd), instance.origin_timezone)
+              : null,
           totalRange: estimate.range,
-          targetGateArrival: target.toISOString(),
           gateBuffer: uiPrefs.boardingBuffer,
           departureTerminal: instance.dep_terminal,
           departureGate: instance.dep_gate,

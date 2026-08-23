@@ -76,11 +76,26 @@ async function signToken(payload: object): Promise<string> {
     .sign(secret);
 }
 
-function setAuthCookie(res: Response, token: string): void {
+/**
+ * Mark the cookie `Secure` only when this request actually arrived over TLS.
+ *
+ * Keyed off NODE_ENV instead, a production build served over plain HTTP — a
+ * LAN or demo box opened as http://<ip>:5174 — sent a `Secure` cookie that the
+ * browser silently refused to store. Login returned 200 and the UI rendered
+ * from its cached session, while every subsequent API call arrived with no
+ * cookie and failed `not_authenticated`. `req.secure` honours
+ * X-Forwarded-Proto (server.ts sets `trust proxy`), so a TLS deployment behind
+ * a reverse proxy still gets the flag.
+ */
+export function authCookieSecure(req: Request): boolean {
+  return req.secure === true;
+}
+
+function setAuthCookie(req: Request, res: Response, token: string): void {
   res.cookie(ADMIN_COOKIE_NAME, token, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: authCookieSecure(req),
     maxAge: ADMIN_JWT_TTL_S * 1000,
     path: "/",
   });
@@ -92,11 +107,11 @@ function setAuthCookie(res: Response, token: string): void {
  * `clearCookie(ADMIN_COOKIE_NAME)` call site should go through this, not a
  * bare `res.clearCookie(ADMIN_COOKIE_NAME)`.
  */
-function clearAuthCookie(res: Response): void {
+function clearAuthCookie(req: Request, res: Response): void {
   res.clearCookie(ADMIN_COOKIE_NAME, {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: authCookieSecure(req),
     path: "/",
   });
 }
@@ -124,7 +139,7 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
   }
   const payload = await verifyAdminToken(token);
   if (!payload) {
-    clearAuthCookie(res);
+    clearAuthCookie(req, res);
     res.status(401).json({ ok: false, error: "token_invalid_or_expired" });
     return;
   }
@@ -147,7 +162,7 @@ export function requireRole(...allowed: AdminRole[]) {
     }
     const payload = await verifyAdminToken(token);
     if (!payload) {
-      clearAuthCookie(res);
+      clearAuthCookie(req, res);
       res.status(401).json({ ok: false, error: "token_invalid_or_expired" });
       return;
     }
@@ -202,7 +217,7 @@ export function registerAuthRoutes(router: Router, auditLog?: AuditLog): void {
     };
 
     const token = await signToken(payload);
-    setAuthCookie(res, token);
+    setAuthCookie(req, res, token);
     auditLog?.record({
       actorEmail: key,
       action: "admin_login",
@@ -231,7 +246,7 @@ export function registerAuthRoutes(router: Router, auditLog?: AuditLog): void {
 
     const payload = await verifyAdminToken(token);
     if (!payload) {
-      clearAuthCookie(res);
+      clearAuthCookie(req, res);
       return res.status(401).json({ ok: false, error: "token_invalid_or_expired" });
     }
 
@@ -249,7 +264,7 @@ export function registerAuthRoutes(router: Router, auditLog?: AuditLog): void {
         await revokeAdminToken(String(payload.jti), payload.exp * 1000);
       }
     }
-    clearAuthCookie(res);
+    clearAuthCookie(req, res);
     return res.json({ ok: true });
   });
 }

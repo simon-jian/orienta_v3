@@ -74,13 +74,53 @@ function normalizeGateToken(value: string): string {
     .replace(/\s+/g, "");
 }
 
-/** Prefill From/To from flight gate codes (E21, Gate E21, …). */
+type GateToken = { prefix: string; number: number; suffix: string };
+
+/**
+ * Gate codes as a comparable shape, so zero padding and any descriptive text
+ * around them stop mattering: the map publishes SFO gates as "G08 登机口"
+ * while a flight reports gate "G8", and comparing the strings (whole or as
+ * substrings) matched neither — the destination was left unselected even
+ * though the gate was known.
+ */
+function gateTokensIn(value: string): GateToken[] {
+  const token = normalizeGateToken(value);
+  const out: GateToken[] = [];
+  const pattern = /([A-Z]*)(\d{1,4})([A-Z]?)/g;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(token)) !== null) {
+    out.push({ prefix: match[1] ?? "", number: Number(match[2]), suffix: match[3] ?? "" });
+  }
+  return out;
+}
+
+function sameGate(a: GateToken, b: GateToken): boolean {
+  return a.prefix === b.prefix && a.number === b.number && a.suffix === b.suffix;
+}
+
+/** Prefill From/To from flight gate codes (E21, Gate E21, G8 ↔ "G08 登机口", …). */
 export function matchPoiByGateHint(pois: NavPoi[], gateHint: string | undefined | null): NavPoi | null {
   const hint = normalizeGateToken(gateHint || "");
   if (!hint || hint === "—" || hint === "-") return null;
   const gates = pois.filter((p) => /gate|arrival|departure/i.test(p.category));
   const pool = gates.length ? gates : pois;
+
   const exact = pool.find((p) => normalizeGateToken(p.name) === hint);
   if (exact) return exact;
+
+  // Only compare structurally when the hint itself looks like a gate code,
+  // so a hint of "8" can't claim G8 over C8.
+  const hintTokens = gateTokensIn(hint).filter((t) => t.prefix !== "");
+  const hintToken = hintTokens.length === 1 ? hintTokens[0]! : null;
+  if (hintToken) {
+    const structural = pool.find((p) => gateTokensIn(p.name).some((t) => sameGate(t, hintToken)));
+    if (structural) return structural;
+  }
+
+  // A digits-only hint cannot say which concourse it belongs to, and loose
+  // substring matching would happily pick "C08" for "8". Leaving the field
+  // empty for the passenger to choose beats prefilling the wrong gate.
+  if (/^\d+$/.test(hint)) return null;
+
   return pool.find((p) => normalizeGateToken(p.name).includes(hint) || hint.includes(normalizeGateToken(p.name))) || null;
 }

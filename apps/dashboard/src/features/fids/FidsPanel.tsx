@@ -198,6 +198,12 @@ function FidsBoard({
       <div style={{ flex: 1, overflowY: "auto", fontSize: 13, fontWeight: 700 }}>
         {loading ? (
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600 }}>Loading…</div>
+        ) : status === "unauthenticated" ? (
+          <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12, lineHeight: 1.5 }}>
+            登录已失效，请退出后重新登录。
+            <br />
+            Admin session rejected — sign out and sign in again.
+          </div>
         ) : status === "unconfigured" ? (
           <div style={{ opacity: 0.5, padding: 20, fontWeight: 600, fontSize: 12, lineHeight: 1.5 }}>
             未接入实时航班数据源（设置 FLIGHTAWARE_API_KEY）。
