@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../../config/indoorMap";
 import { clientDefaultAirportId } from "../../../config/client";
 import type { PaxSession } from "../session";
-import { buildStartNavHref, prepareStartNavigation } from "../assist/navPlan";
+import { buildStartNavHref, gateHintsForLeg, prepareStartNavigation } from "../assist/navPlan";
 
 export type MapLeg = "dep" | "arr";
 
@@ -97,8 +97,7 @@ export function IndoorMapEmbed({
 
   const hints = {
     airport: airportCode,
-    fromGateHint: from,
-    toGateHint: to,
+    ...gateHintsForLeg(from, to, mapLeg),
     flightId: session.passenger.flightId,
   };
 

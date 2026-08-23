@@ -64,7 +64,7 @@ export default function PaxAppPage() {
   const [robotOpen, setRobotOpen] = useState(false);
   const [navPlan, setNavPlan] = useState<NavPlanConfirmed | null>(() => getConfirmedNavPlan());
   const [navHints, setNavHints] = useState<NavPlanHints>(() => hintsFromUrlAndStorage(getStoredPaxSession()));
-  const push = usePaxPush(session);
+  usePaxPush(session);
 
   const {
     rtUp,
@@ -223,24 +223,6 @@ export default function PaxAppPage() {
         >
           室内导航
         </button>
-      </div>
-
-      {!push.standalone ? (
-        <div className="pax-assist-mode-warn">
-          当前是浏览器标签页（有地址栏），不是独立 PWA App。请添加到主屏幕后从图标打开，手机通知与离开 30s 提醒才可用。
-        </div>
-      ) : null}
-
-      <div className="pax-assist-push">
-        <button
-          type="button"
-          className="pax-assist-push-btn"
-          onClick={() => void push.enablePush()}
-          disabled={push.enabled}
-        >
-          {push.enabled ? "通知已开启" : "开启手机通知"}
-        </button>
-        {push.hint ? <div className="pax-assist-push-hint">{push.hint}</div> : null}
       </div>
 
       {tab === "nav" ? (

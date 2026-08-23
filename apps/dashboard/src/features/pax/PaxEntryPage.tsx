@@ -16,13 +16,13 @@ export default function PaxEntryPage() {
         <p className="pax-chip ok" style={{ marginBottom: 16 }}>Orienta Passenger</p>
         <h1 className="pax-brand">Orienta</h1>
         <p className="pax-lead">
-          个人机场导航与行程助手。扫登机牌或登录后，获取到登机口/出口时间、室内导航与通知。
+          个人机场导航与行程助手。扫登机牌或登录后，获取到登机口/出口时间与室内导航。
         </p>
 
         <section className="pax-card">
           <h2>个人服务</h2>
           <p>
-            使用手机领取航班绑定会话，查看行程估计，开始室内导航，并在安装 Web App 后接收离开提醒。
+            使用手机领取航班绑定会话，查看行程估计，开始室内导航。
           </p>
           <Link className="pax-btn" to="/pax/login" style={{ display: "inline-block", textDecoration: "none" }}>
             继续

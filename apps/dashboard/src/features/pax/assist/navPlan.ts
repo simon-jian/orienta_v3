@@ -82,6 +82,30 @@ export function clearConfirmedNavPlan(): void {
   clearStore(PLAN_KEY);
 }
 
+/**
+ * Which end of the walk a known gate belongs to.
+ *
+ * The flight page hands the map the same gate as both ends, because the map
+ * only needs a point to centre on. Passing that pair straight to the route
+ * planner prefilled 起点 with the gate the passenger is walking *toward* and
+ * left 终点 empty — and an identical pair can never be confirmed anyway, since
+ * start and end must differ. A departure gate is a destination; an arrival gate
+ * is where the walk starts.
+ */
+export function gateHintsForLeg(
+  fromGate: string | undefined,
+  toGate: string | undefined,
+  leg: "dep" | "arr",
+): { fromGateHint?: string; toGateHint?: string } {
+  // A real two-ended route (a transfer) already says which end is which.
+  if (fromGate && toGate && fromGate !== toGate) {
+    return { fromGateHint: fromGate, toGateHint: toGate };
+  }
+  const gate = toGate || fromGate;
+  if (!gate) return {};
+  return leg === "arr" ? { fromGateHint: gate } : { toGateHint: gate };
+}
+
 /** Flight page → assist nav tab query (no side effects). */
 export function buildStartNavHref(hints: NavPlanHints): string {
   const q = new URLSearchParams({ tab: "nav", plan: "1" });

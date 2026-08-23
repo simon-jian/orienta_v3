@@ -50,9 +50,11 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
         setPois(list);
         const from = matchPoiByGateHint(list, hints.fromGateHint);
         const to = matchPoiByGateHint(list, hints.toGateHint);
-        if (from) setFromId(from.id);
-        if (to && to.id !== from?.id) setToId(to.id);
-        else if (to && !from) setToId(to.id);
+        // Destination first: the gate a passenger is walking toward is the half
+        // worth prefilling, and when both hints land on the same POI only one
+        // of them may be kept (start and end must differ to confirm a route).
+        if (to) setToId(to.id);
+        if (from && from.id !== to?.id) setFromId(from.id);
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "poi_load_failed");

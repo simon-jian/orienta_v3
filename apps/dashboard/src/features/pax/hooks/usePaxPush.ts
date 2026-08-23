@@ -72,7 +72,7 @@ export function usePaxPush(session: PaxSession | null) {
       return;
     }
     if (!standalone) {
-      setHint("请先将本页「添加到主屏幕」并以独立 Web App 打开（iPhone 需要）。");
+      setHint("手机通知暂不可用。");
       return;
     }
     try {
