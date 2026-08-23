@@ -5,7 +5,7 @@ import { clientDefaultAirport } from "../../config/client";
 
 export default function DashboardTab({
   passengers, presence, riskCounts, priorityList,
-  onSelectPax, onSendSms, onRequestLocation, onOpenConversation,
+  onSelectPax, onSendSms, onRequestLocation, onOpenConversation, onDeletePax,
   gatesById, flightsById,
 }: {
   passengers: PassengerComputed[];
@@ -16,6 +16,11 @@ export default function DashboardTab({
   onSendSms(pid: string, msg: string): void;
   onRequestLocation(pid: string): void;
   onOpenConversation(pid: string): void;
+  /**
+   * Omitted for seats that may not erase records (the server allows admin
+   * only), so an operator is never shown a button that can only fail.
+   */
+  onDeletePax?: (pid: string) => void;
   gatesById: Map<string, Gate>;
   flightsById: Map<string, Flight>;
 }) {
@@ -159,6 +164,15 @@ export default function DashboardTab({
                         {p.extStatus === "lost" && <button className="tcd-action-btn" onClick={() => onRequestLocation(p.id)}>📍</button>}
                         {(p.extStatus === "offline" || p.extStatus === "lost") && (
                           <button className="tcd-action-btn" onClick={() => onSendSms(p.id, `Orienta: Your flight ${p.flightId} is at Gate ${gate?.name}. Please proceed immediately.`)}>📨</button>
+                        )}
+                        {onDeletePax && (
+                          <button
+                            className="tcd-action-btn"
+                            title="删除旅客（同时清除聊天记录与推送订阅，不可恢复）"
+                            onClick={() => onDeletePax(p.id)}
+                          >
+                            🗑
+                          </button>
                         )}
                       </div>
                     </td>

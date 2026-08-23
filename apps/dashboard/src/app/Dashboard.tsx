@@ -77,13 +77,33 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     rtUp, presence,
     openConvPaxId, setOpenConvPaxId,
     chatHistory,
-    sendSms, sendChat, requestLocation, openConversation,
+    sendSms, sendChat, requestLocation, openConversation, removePassenger,
     toasts, dismissToast,
     robotRequests, advanceRobotRequest, cancelRobotRequest,
   } = useDashboard({
     tenantId, gates, flights, gatesById, flightsById,
     pekPoiReady, session,
   });
+
+  // Erasing a passenger is admin-only server-side (routes/passengers.ts), so
+  // ops/viewer seats don't get the button at all.
+  const canErasePassengers = session.user.role === "admin";
+
+  async function confirmRemovePassenger(passengerId: string) {
+    const pax = passengers.find((p) => p.id === passengerId);
+    const label = pax?.name ? `${pax.name}（${passengerId}）` : passengerId;
+    if (!window.confirm(`删除旅客 ${label}？\n\n聊天记录、推送订阅和登录会话会一并清除，且无法恢复。`)) {
+      return;
+    }
+    const result = await removePassenger(passengerId);
+    if (!result.ok) {
+      const reason =
+        result.error === "forbidden"
+          ? "当前账号无权删除旅客（需要管理员角色）。"
+          : "删除失败，请稍后重试。";
+      window.alert(reason);
+    }
+  }
 
   // Resizable sidebar
   const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
@@ -229,6 +249,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
               onSendSms={sendSms}
               onRequestLocation={requestLocation}
               onOpenConversation={openConversation}
+              onDeletePax={canErasePassengers ? (id) => void confirmRemovePassenger(id) : undefined}
               gatesById={gatesById}
               flightsById={flightsById}
             />

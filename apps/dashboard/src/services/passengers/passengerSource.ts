@@ -27,3 +27,31 @@ export async function fetchPassengers(tenantId: string): Promise<Passenger[] | n
     return null;
   }
 }
+
+/** Distinct failure reasons so the board can explain what to do next. */
+export type DeletePassengerResult =
+  | { ok: true }
+  | { ok: false; error: "not_found" | "forbidden" | "request_failed" };
+
+/**
+ * Erase one passenger. The server cascades to chat history and push
+ * subscriptions and revokes their sessions, so this is not reversible.
+ * Admin-only server-side; `forbidden` is what an ops seat gets back.
+ */
+export async function deletePassenger(
+  tenantId: string,
+  passengerId: string,
+): Promise<DeletePassengerResult> {
+  try {
+    const r = await fetch(
+      apiUrl(`/api/passengers/${encodeURIComponent(passengerId)}?tenant=${encodeURIComponent(tenantId)}`),
+      { method: "DELETE", credentials: "same-origin" },
+    );
+    if (r.ok) return { ok: true };
+    if (r.status === 404) return { ok: false, error: "not_found" };
+    if (r.status === 401 || r.status === 403) return { ok: false, error: "forbidden" };
+    return { ok: false, error: "request_failed" };
+  } catch {
+    return { ok: false, error: "request_failed" };
+  }
+}

@@ -19,6 +19,7 @@ import type { PassengerRegistry } from "../passengers/PassengerRegistry";
 import { HubStore } from "../hub/HubStore";
 import type { AuditLog } from "../lib/auditLog";
 import type { PushSubscriptionStore } from "../passengers/PushSubscriptionStore";
+import type { PaxInviteStore } from "../passengers/PaxInviteStore";
 import { buildFlights } from "../../src/services/flightService";
 import { airportForTenant } from "../../src/config/tenants/registry";
 import type { Passenger, PaxPlan, PaxExtStatus, PassengerActivity } from "../../src/types/types";
@@ -69,6 +70,7 @@ export function registerPassengerRoutes(
   registry: PassengerRegistry,
   auditLog?: AuditLog,
   pushSubs?: PushSubscriptionStore,
+  invites?: PaxInviteStore,
 ): void {
 
   /** GET /api/passengers — list all passengers for a tenant */
@@ -212,7 +214,15 @@ export function registerPassengerRoutes(
     });
   });
 
-  /** DELETE /api/passengers/:id — admin only. Cascades to chat history and push subscriptions. */
+  /**
+   * DELETE /api/passengers/:id — admin only. Cascades to chat history, push
+   * subscriptions and invite links.
+   *
+   * Invites have to go with the passenger: redeeming one re-creates the
+   * registry record (routes/paxInvites.ts), so a surviving active link let the
+   * passenger reopen it and silently undo the deletion — and the row keeps
+   * their name either way.
+   */
   router.delete("/:id", requireRole("admin"), async (req: Request, res: Response) => {
     const tenantId    = tenantFromQuery(req);
     if (!requireTenantAccess(req, res, tenantId)) return;
@@ -222,14 +232,15 @@ export function registerPassengerRoutes(
 
     const { chatRowsDeleted } = await store.purgePassenger(tenantId, passengerId);
     await pushSubs?.removeAllForKey(HubStore.key(tenantId, passengerId));
+    const invitesDeleted = (await invites?.removeAllForPassenger(tenantId, passengerId)) ?? 0;
     await revokePaxSessionsForPassenger(tenantId, passengerId);
 
     void auditLog?.record({
       actorEmail: adminEmailFromRequest(req),
       action: "passenger_delete",
       tenantId, passengerId,
-      detail: `chat_rows=${chatRowsDeleted}`,
+      detail: `chat_rows=${chatRowsDeleted} invites=${invitesDeleted}`,
     });
-    return res.json({ ok: true });
+    return res.json({ ok: true, invitesDeleted });
   });
 }

@@ -21,7 +21,11 @@ import type {
 import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
 import { apiUrl } from "../../config/api";
-import { fetchPassengers } from "../../services/passengers/passengerSource";
+import {
+  fetchPassengers,
+  deletePassenger as deletePassengerApi,
+  type DeletePassengerResult,
+} from "../../services/passengers/passengerSource";
 import type { AdminRobotRequest } from "./RobotRequestQueue";
 import type { RobotRequest } from "../pax/assist/assistTypes";
 import { mergeChatHistory, upsertChatMessage } from "../pax/assist/chatMerge";
@@ -68,6 +72,8 @@ export type DashboardState = {
   sendSms: (pid: string, msg: string) => void;
   sendChat: (pid: string, body: string) => void;
   requestLocation: (pid: string) => void;
+  /** Irreversible: cascades to chat history, push subscriptions and sessions. */
+  removePassenger: (pid: string) => Promise<DeletePassengerResult>;
   openConversation: (pid: string) => void;
 
   // Toasts
@@ -559,6 +565,28 @@ export function useDashboard(opts: {
     }
   };
 
+  /**
+   * Erase a passenger and drop them from the board at once, rather than waiting
+   * up to 10s for the next poll. Panels pinned to that passenger are closed,
+   * since the record they render no longer exists. A 404 counts as success —
+   * the row is already gone, which is what the operator wanted.
+   */
+  const removePassenger = useCallback(
+    async (passengerId: string): Promise<DeletePassengerResult> => {
+      const result = await deletePassengerApi(tenantId, passengerId);
+      if (!result.ok && result.error !== "not_found") return result;
+
+      setPassengersRaw((prev) =>
+        prev ? { passengers: prev.passengers.filter((p) => p.id !== passengerId) } : prev,
+      );
+      setSelectedPaxId((id) => (id === passengerId ? null : id));
+      setOpenConvPaxId((id) => (id === passengerId ? null : id));
+      void loadPassengers();
+      return { ok: true };
+    },
+    [tenantId, loadPassengers],
+  );
+
   return {
     passengers, priorityList, riskCounts,
     passengersLoadError, passengersLastSyncAt,
@@ -570,7 +598,7 @@ export function useDashboard(opts: {
     rtUp, presence,
     openConvPaxId, setOpenConvPaxId,
     chatHistory, msgById,
-    sendSms, sendChat, requestLocation, openConversation,
+    sendSms, sendChat, requestLocation, openConversation, removePassenger,
     toasts, dismissToast: (id) => setToasts((t) => t.filter((x) => x.id !== id)),
     robotRequests,
     advanceRobotRequest: (pid) => void postAdminRobot(pid, "advance"),

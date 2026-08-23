@@ -513,7 +513,7 @@ app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tour
 
 // ─── Passenger management routes ──────────────────────────────────────────────
 const passengerRouter = express.Router();
-registerPassengerRoutes(passengerRouter, store, registry, auditLog, pushSubStore);
+registerPassengerRoutes(passengerRouter, store, registry, auditLog, pushSubStore, paxInviteStore);
 app.use("/api/passengers", passengerRouter);
 
 // ─── Health probe (P0-8) ──────────────────────────────────────────────────────

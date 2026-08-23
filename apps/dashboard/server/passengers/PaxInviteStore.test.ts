@@ -194,6 +194,32 @@ describe("PaxInviteStore", () => {
     expect(await store.remove("inv_missing")).toBe(false);
   });
 
+  it("removes every invite for one passenger, leaving other passengers alone", async () => {
+    const store = await newStore();
+    // Erasing a passenger has to take their invites: redeeming one re-creates
+    // the registry record, so a surviving link would undo the deletion.
+    const a = await store.create({ ...baseInput, passengerId: "PAX-GONE" });
+    const b = await store.create({ ...baseInput, passengerId: "PAX-GONE" });
+    const other = await store.create({ ...baseInput, passengerId: "PAX-STAYS" });
+    const otherTenant = await store.create({
+      ...baseInput,
+      tenantId: "other",
+      passengerId: "PAX-GONE",
+    });
+
+    expect(await store.removeAllForPassenger("airchina", "PAX-GONE")).toBe(2);
+    expect(await store.get(a.invite.inviteId)).toBeNull();
+    expect(await store.get(b.invite.inviteId)).toBeNull();
+    expect(await store.get(other.invite.inviteId)).not.toBeNull();
+    // Same passenger id under a different tenant is a different person.
+    expect(await store.get(otherTenant.invite.inviteId)).not.toBeNull();
+  });
+
+  it("reports zero when a passenger has no invites", async () => {
+    const store = await newStore();
+    expect(await store.removeAllForPassenger("airchina", "PAX-NONE")).toBe(0);
+  });
+
   it("lists only revoked or expired invites", async () => {
     const store = await newStore();
     const live = await store.create(baseInput);

@@ -407,6 +407,20 @@ export class PaxInviteStore {
     return result.changes > 0;
   }
 
+  /**
+   * Drop every invite belonging to one passenger. Part of erasing the
+   * passenger: the rows hold their name, and — because redeeming an invite
+   * re-creates the registry record — a surviving active link would let the
+   * passenger walk back in and silently undo the deletion.
+   */
+  async removeAllForPassenger(tenantId: string, passengerId: string): Promise<number> {
+    const result = await this.db.run(
+      "DELETE FROM pax_invites WHERE tenant_id = ? AND passenger_id = ?",
+      [tenantId, passengerId],
+    );
+    return result.changes;
+  }
+
   async countForPassenger(tenantId: string, passengerId: string): Promise<number> {
     const row = await this.db.get<{ n: number }>(
       "SELECT COUNT(*) AS n FROM pax_invites WHERE tenant_id = ? AND passenger_id = ?",
