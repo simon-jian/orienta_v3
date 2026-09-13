@@ -32,6 +32,16 @@ export function isPrivateLanHostname(host: string): boolean {
   return false;
 }
 
+/** Tailscale / CGNAT: 100.64.0.0/10 — the operator's own mesh, same trust as LAN. */
+export function isTailscaleHostname(host: string): boolean {
+  const h = host.toLowerCase().replace(/^\[|\]$/g, "");
+  const parts = h.split(".");
+  if (parts.length !== 4 || parts.some((p) => !/^\d+$/.test(p))) return false;
+  const a = Number(parts[0]);
+  const b = Number(parts[1]);
+  return a === 100 && b >= 64 && b <= 127;
+}
+
 function isEphemeralTunnel(origin: string): boolean {
   try {
     return new URL(origin).hostname.endsWith(".trycloudflare.com");
@@ -93,7 +103,12 @@ export function isAllowedOperatorOrigin(origin: string, req?: Request): boolean 
   const parsed = parseOrigin(origin);
   if (!parsed) return false;
   const host = new URL(parsed).hostname;
-  if (isLoopbackHostname(host) || isPrivateLanHostname(host) || isEphemeralTunnel(parsed)) {
+  if (
+    isLoopbackHostname(host) ||
+    isPrivateLanHostname(host) ||
+    isTailscaleHostname(host) ||
+    isEphemeralTunnel(parsed)
+  ) {
     return true;
   }
   if (PUBLIC_BASE_URL && parsed === PUBLIC_BASE_URL) return true;

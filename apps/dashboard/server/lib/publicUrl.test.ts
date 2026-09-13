@@ -72,6 +72,19 @@ describe("publicOrigin", () => {
     ).toBe("http://192.168.0.23:5173");
   });
 
+  it("treats a Tailscale 100.x address as the operator network, not trycloudflare", async () => {
+    const publicOrigin = await loadPublicOrigin("https://transparent-specifically-caring-economies.trycloudflare.com");
+    expect(
+      publicOrigin(
+        fakeReq({
+          host: "localhost:5175",
+          origin: "http://100.118.69.95:5173",
+          "x-orienta-page-origin": "http://100.118.69.95:5173",
+        }),
+      ),
+    ).toBe("http://100.118.69.95:5173");
+  });
+
   it("reads pageOrigin from the JSON body when the proxy drops headers", async () => {
     const publicOrigin = await loadPublicOrigin("https://ops.example.com");
     const req = fakeReq({ host: "localhost:5175" }) as Request & { body?: { pageOrigin: string } };
