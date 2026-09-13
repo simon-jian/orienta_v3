@@ -20,6 +20,7 @@ import {
 } from "../../src/config/tenants/registry";
 import { serializeAirport } from "../../src/config/airports/schema";
 import type { AirportDefinition } from "../../src/config/airports/types";
+import { resolveWebRtcIceServers } from "../hub/webrtcIce";
 
 /** Sanitized, client-safe view of an airport definition (no demo/seed data). */
 function publicAirport(def: AirportDefinition) {
@@ -77,5 +78,10 @@ export function registerConfigRoutes(router: Router): void {
         tenant: defaultTenantId(),
       },
     });
+  });
+
+  router.get("/webrtc", async (_req: Request, res: Response) => {
+    const iceServers = await resolveWebRtcIceServers();
+    res.json({ ok: true, iceServers });
   });
 }

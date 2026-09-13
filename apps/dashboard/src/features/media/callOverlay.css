@@ -1,0 +1,219 @@
+.orienta-call-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  background: rgba(10, 12, 16, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+/* Keep the top of the viewport free so the browser's Allow prompt is clickable.
+   A full-screen overlay is why operators saw "need permission" with no way to grant it. */
+.orienta-call-overlay.is-compact {
+  align-items: end;
+  background: transparent;
+  pointer-events: none;
+  padding: 16px 16px 24px;
+}
+
+.orienta-call-card {
+  width: min(420px, 100%);
+  background: #111827;
+  color: #f9fafb;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+}
+
+.orienta-call-overlay.is-compact .orienta-call-card {
+  pointer-events: auto;
+  width: min(440px, 100%);
+}
+
+.orienta-call-stage {
+  position: relative;
+  min-height: 240px;
+  background: #0b1220;
+}
+
+.orienta-call-overlay.is-compact .orienta-call-stage {
+  min-height: 140px;
+}
+
+.orienta-call-stage.is-audio {
+  min-height: 160px;
+}
+
+.orienta-call-remote,
+.orienta-call-local {
+  background: #0b1220;
+}
+
+.orienta-call-remote {
+  width: 100%;
+  height: min(52vh, 360px);
+  object-fit: cover;
+  display: block;
+}
+
+.orienta-call-overlay.is-compact .orienta-call-remote {
+  height: 140px;
+}
+
+.orienta-call-remote.is-audio {
+  height: 180px;
+  object-fit: contain;
+  opacity: 0;
+}
+
+/* Keep in the layout — display:none stops iOS Safari from playing remote audio. */
+.orienta-call-remote-audio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.orienta-call-avatar {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  font-size: 48px;
+  font-weight: 800;
+  color: #e5e7eb;
+  letter-spacing: 0.04em;
+  z-index: 1;
+}
+
+.orienta-call-waiting {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: #d1d5db;
+  text-align: center;
+}
+
+.orienta-call-local,
+.orienta-call-remote.is-self {
+  transform: scaleX(-1);
+}
+
+.orienta-call-local-wrap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  width: 128px;
+  height: 170px;
+  z-index: 2;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.orienta-call-local {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #111;
+}
+
+.orienta-call-local-tag {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 3;
+  font-size: 10px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 6px;
+  padding: 2px 6px;
+}
+
+.orienta-call-remote.is-self {
+  position: relative;
+  z-index: 1;
+  opacity: 1;
+  height: min(52vh, 360px);
+}
+
+.orienta-call-overlay.is-compact .orienta-call-local-wrap {
+  width: 88px;
+  height: 118px;
+}
+
+.orienta-call-meta {
+  padding: 14px 16px 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.orienta-call-title {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.orienta-call-sub {
+  font-size: 12px;
+  color: #9ca3af;
+}
+
+.orienta-call-error {
+  padding: 0 16px 8px;
+  font-size: 12px;
+  color: #fca5a5;
+  line-height: 1.45;
+}
+
+.orienta-call-hint {
+  padding: 0 16px 8px;
+  font-size: 13px;
+  color: #fde68a;
+  line-height: 1.45;
+}
+
+.orienta-call-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px 16px;
+  justify-content: center;
+}
+
+.orienta-call-btn {
+  border: 0;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #374151;
+  color: #fff;
+}
+
+.orienta-call-btn.accept {
+  background: #16a34a;
+}
+
+.orienta-call-btn.reject,
+.orienta-call-btn.hangup {
+  background: #dc2626;
+}
+
+.orienta-call-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

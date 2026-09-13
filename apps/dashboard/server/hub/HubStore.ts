@@ -324,8 +324,8 @@ export class HubStore {
     this.bus?.publish({ scope: "admins", tenantId, payload: msg });
   }
 
-  broadcastPax(tenantId: string, passengerId: string, msg: unknown): void {
-    this.deliverPaxLocal(tenantId, passengerId, msg);
+  broadcastPax(tenantId: string, passengerId: string, msg: unknown, excludeWs?: WebSocket): void {
+    this.deliverPaxLocal(tenantId, passengerId, msg, excludeWs);
     this.bus?.publish({ scope: "pax", tenantId, passengerId, payload: msg });
   }
 
@@ -348,12 +348,13 @@ export class HubStore {
     }
   }
 
-  private deliverPaxLocal(tenantId: string, passengerId: string, msg: unknown): void {
+  private deliverPaxLocal(tenantId: string, passengerId: string, msg: unknown, excludeWs?: WebSocket): void {
     const key = HubStore.key(tenantId, passengerId);
     const set = this.paxSockets.get(key);
     if (!set) return;
     const payload = JSON.stringify(msg);
     for (const ws of set) {
+      if (ws === excludeWs) continue;
       if (ws.readyState === WebSocket.OPEN) ws.send(payload);
     }
   }

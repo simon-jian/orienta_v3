@@ -39,6 +39,11 @@ import { registerFlightRoutes, registerLegacyFlightFallback, registerOrientaRout
 import { registerWeatherRoutes } from "./routes/weather";
 import { registerFidsRoutes } from "./routes/fids";
 import { registerPushRoutes } from "./routes/push";
+import {
+  registerAdminVoiceNoteRoute,
+  registerPaxVoiceNoteRoute,
+  registerVoiceNoteGetRoute,
+} from "./routes/voiceNotes";
 import { registerPassengerRoutes } from "./routes/passengers";
 import { registerPaxSessionRoutes } from "./routes/paxSessions";
 import { registerPaxInviteRoutes } from "./routes/paxInvites";
@@ -187,6 +192,11 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: "same-origin" },
   frameguard: { action: "sameorigin" },
 }));
+app.use((_req, res, next) => {
+  res.setHeader("Permissions-Policy", "camera=(self), microphone=(self)");
+  res.setHeader("Feature-Policy", "camera 'self'; microphone 'self'");
+  next();
+});
 app.use(requestLog);
 app.use(cookieParser());
 
@@ -507,9 +517,15 @@ app.use("/api", journeyRouter);
 
 const pushRouter = express.Router();
 registerPushRoutes(pushRouter, store, pushSubStore, auditLog);
+registerPaxVoiceNoteRoute(pushRouter, store, auditLog);
+registerAdminVoiceNoteRoute(pushRouter, store, auditLog);
 app.use("/api/push",               pushRouter);
 app.use("/api/pax",                pushRouter);
 app.use("/api/orienta",            pushRouter);  // /api/orienta/presence, /tourist-*
+
+const voiceNoteGetRouter = express.Router();
+registerVoiceNoteGetRoute(voiceNoteGetRouter);
+app.use("/api/voice-notes", paxIpRateLimit, paxRateLimit, voiceNoteGetRouter);
 
 // ─── Passenger management routes ──────────────────────────────────────────────
 const passengerRouter = express.Router();

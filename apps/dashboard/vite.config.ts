@@ -36,6 +36,11 @@ export default defineConfig({
     // Vite 6 blocks unknown Host headers. true covers localhost, LAN IPs, and
     // the changing *.trycloudflare.com hostname from the quick tunnel.
     allowedHosts: true,
+    headers: {
+      // Required for getUserMedia in some Chromium builds; also documents intent.
+      "Permissions-Policy": "camera=(self), microphone=(self)",
+      "Feature-Policy": "camera 'self'; microphone 'self'",
+    },
     proxy: {
       // Dev server proxies all API/WS calls to the Express backend
       "/api":                  "http://localhost:5175",

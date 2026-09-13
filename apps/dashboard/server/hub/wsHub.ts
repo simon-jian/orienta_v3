@@ -28,6 +28,8 @@ import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import { logger } from "../lib/logger";
 import { canonicalTenantId, canonicalFlightId, canonicalGateId } from "../lib/canonicalize";
 import { countTelemetryAccepted } from "../lib/telemetryStats";
+import { normalizeChatKind } from "./chatKinds";
+import { CALL_EVENT_TYPES, relayCallMessage } from "./callRelay";
 // #region agent log
 import { debugLog } from "../lib/debugLog";
 // #endregion
@@ -47,10 +49,7 @@ const MAX_CHAT_BODY_LEN = 12_000;
  * this same set; the WS path previously cast whatever string a client sent
  * straight to `ChatKind` with no check.
  */
-const VALID_CHAT_KINDS = new Set<ChatKind>(["text", "location", "system", "ai_agent", "operator"]);
-function normalizeChatKind(raw: unknown): ChatKind {
-  return typeof raw === "string" && VALID_CHAT_KINDS.has(raw as ChatKind) ? (raw as ChatKind) : "text";
-}
+export { normalizeChatKind } from "./chatKinds";
 
 /**
  * Same-origin check for the WS upgrade. Browsers always send `Origin`; non-
@@ -162,14 +161,17 @@ export function attachWsHub(
         rateWindowStart = now;
         messageCount = 0;
       }
-      messageCount += 1;
-      if (messageCount > MESSAGE_RATE_LIMIT) {
-        try { ws.close(1008, "rate_limited"); } catch { /* ignore close errors */ }
-        return;
-      }
 
       const msg = safeJsonParse(String(raw));
       if (!msg) return;
+      // ICE trickle is bursty; don't spend the shared 60/10s budget on it.
+      if (msg.type !== "call_signal") {
+        messageCount += 1;
+        if (messageCount > MESSAGE_RATE_LIMIT) {
+          try { ws.close(1008, "rate_limited"); } catch { /* ignore close errors */ }
+          return;
+        }
+      }
 
       // ── HELLO ────────────────────────────────────────────────────────────────
       if (msg.type === "hello") {
@@ -499,6 +501,17 @@ export function attachWsHub(
           wsSend(ws, { type: "chat_history", passengerId: pid, messages: hist });
         });
         return;
+      }
+
+      // ── ADMIN or PAX: WebRTC call signaling (not persisted) ────────────────
+      if (CALL_EVENT_TYPES.has(msg.type as "call_invite")) {
+        relayCallMessage(store, {
+          role,
+          tenantId,
+          sessionPassengerId: passengerId,
+          msg,
+          excludeWs: ws,
+        });
       }
     });
 

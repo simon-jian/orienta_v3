@@ -71,7 +71,7 @@ export function handlePaxOutboundChat(
   store.broadcastAdmins(tenantId, { type: "chat_msg", message: chatMsg });
   store.broadcastPax(tenantId, pid, { type: "chat_msg", message: chatMsg });
 
-  if (!isPremium(store, tenantId, pid)) {
+  if (kind !== "voice" && !isPremium(store, tenantId, pid)) {
     const hist = store.getChatHistory(tenantId, pid);
     const aiBody = aiAgentReply(pid, body, hist);
     setTimeout(() => {

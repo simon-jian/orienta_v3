@@ -139,7 +139,38 @@ export type MsgRecord = {
 
 // ─── Chat ────────────────────────────────────────────────────────────────────
 
-export type ChatKind = "text" | "location" | "system" | "ai_agent" | "operator";
+export type ChatKind = "text" | "location" | "system" | "ai_agent" | "operator" | "voice";
+
+export type CallMode = "audio" | "video";
+export type CallParty = "admin" | "pax";
+export type CallEventType =
+  | "call_invite"
+  | "call_accept"
+  | "call_reject"
+  | "call_hangup"
+  | "call_signal";
+
+export type CallSdpPayload = {
+  type: "offer" | "answer";
+  sdp: string;
+};
+
+export type CallCandidatePayload = {
+  candidate: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+};
+
+/** WebRTC signaling over the existing admin↔pax WebSocket hub. Not persisted as chat. */
+export type CallEvent = {
+  type: CallEventType;
+  callId: string;
+  passengerId: string;
+  mode?: CallMode;
+  from?: CallParty;
+  sdp?: CallSdpPayload;
+  candidate?: CallCandidatePayload;
+};
 
 /** Client-side delivery status for messages sent by admin. */
 export type ChatMsgStatus = "sending" | "sent" | "delivered" | "read";

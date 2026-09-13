@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, MsgRecord } from "../../../types/types";
+import { VoiceNoteBubble } from "../../media/VoiceNoteBubble";
+import { VoiceNoteRecorder } from "../../media/VoiceNoteRecorder";
 import { usePaxI18n, type PaxMessageKey } from "../i18n";
 import { fmtAssistTime } from "./assistTypes";
 
 function MessageList({
   messages,
   plan,
+  voiceAuthHeaders,
 }: {
   messages: ChatMessage[];
   plan: "free" | "premium";
+  voiceAuthHeaders?: Record<string, string>;
 }) {
   const { t, intlLocale } = usePaxI18n();
   if (!messages.length) {
@@ -34,7 +38,13 @@ function MessageList({
             <div className="pax-assist-msg-meta">
               {fromLabel} · {fmtAssistTime(m.createdAt, intlLocale)}
             </div>
-            <div className={`pax-assist-bubble ${role}`}>{m.body}</div>
+            <div className={`pax-assist-bubble ${role}`}>
+              {m.kind === "voice" ? (
+                <VoiceNoteBubble body={m.body} authHeaders={voiceAuthHeaders} playLabel={t("media.playVoice")} />
+              ) : (
+                m.body
+              )}
+            </div>
           </div>
         );
       })}
@@ -50,9 +60,13 @@ type Props = {
   notifications: MsgRecord[];
   unreadChat: boolean;
   locationStatus: string;
+  voiceAuthHeaders?: Record<string, string>;
   onClearUnread: () => void;
   onSendChat: (body: string) => void;
   onShareLocation: () => void;
+  onStartVideo?: () => void;
+  onStartAudio?: () => void;
+  onSendVoiceNote?: (blob: Blob, durationMs: number) => Promise<void>;
 };
 
 export function AssistChatPanel({
@@ -63,9 +77,13 @@ export function AssistChatPanel({
   notifications,
   unreadChat,
   locationStatus,
+  voiceAuthHeaders,
   onClearUnread,
   onSendChat,
   onShareLocation,
+  onStartVideo,
+  onStartAudio,
+  onSendVoiceNote,
 }: Props) {
   const t = usePaxI18n().t;
   const [input, setInput] = useState("");
@@ -122,7 +140,7 @@ export function AssistChatPanel({
       ) : null}
 
       <div className="pax-assist-msgs" ref={msgsRef} onScroll={onClearUnread}>
-        <MessageList messages={chat} plan={plan} />
+        <MessageList messages={chat} plan={plan} voiceAuthHeaders={voiceAuthHeaders} />
       </div>
 
       <div className="pax-assist-status-row">
@@ -133,21 +151,44 @@ export function AssistChatPanel({
       </div>
 
       {canChat ? (
-        <div className="pax-assist-input-area">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                send();
-              }
-            }}
-            placeholder={plan === "premium" ? t("chat.placeholderPremium") : t("chat.placeholderFree")}
-          />
-          <button type="button" className="pax-assist-send" disabled={!input.trim()} onClick={send}>
-            {t("chat.send")}
-          </button>
+        <div className="pax-assist-input-area pax-assist-input-area--media">
+          <div className="pax-assist-media-row">
+            <button type="button" className="pax-assist-loc-btn" onClick={onStartVideo}>
+              {t("media.video")}
+            </button>
+            <button type="button" className="pax-assist-loc-btn" onClick={onStartAudio}>
+              {t("media.voice")}
+            </button>
+            {onSendVoiceNote ? (
+              <VoiceNoteRecorder
+                buttonClassName="pax-assist-loc-btn"
+                onSend={onSendVoiceNote}
+                labels={{
+                  record: t("media.record"),
+                  recording: (sec) => t("media.recording", { sec }),
+                  stop: t("media.recordStop"),
+                  cancel: t("media.recordCancel"),
+                  failed: t("media.voiceNoteFailed"),
+                }}
+              />
+            ) : null}
+          </div>
+          <div className="pax-assist-input-row">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+              placeholder={plan === "premium" ? t("chat.placeholderPremium") : t("chat.placeholderFree")}
+            />
+            <button type="button" className="pax-assist-send" disabled={!input.trim()} onClick={send}>
+              {t("chat.send")}
+            </button>
+          </div>
         </div>
       ) : (
         <div className="pax-assist-input-area pax-assist-input-area--disabled">

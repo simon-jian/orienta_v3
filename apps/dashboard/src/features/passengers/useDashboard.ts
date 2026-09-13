@@ -14,9 +14,9 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
-  PassengerComputed, PaxExtStatus, LatLng, Gate, Flight, ChatMessage,
+  PassengerComputed, PaxExtStatus, LatLng, Gate, Flight, ChatMessage, ChatKind,
   MsgRecord, MsgStatusEvent, PresenceEvent, PaxTrajectoryData, AdminSession,
-  Passenger,
+  Passenger, CallEvent,
 } from "../../types/types";
 import { computePassenger } from "../../utils/passenger-compute";
 import { connectAdminRealtime, type AdminRealtime } from "../../services/realtime";
@@ -70,7 +70,10 @@ export type DashboardState = {
   chatHistory: Record<string, ChatMessage[]>;
   msgById: Record<string, MsgRecord>;
   sendSms: (pid: string, msg: string) => void;
-  sendChat: (pid: string, body: string) => void;
+  sendChat: (pid: string, body: string, kind?: ChatKind) => void;
+  sendCall: (pid: string, event: Omit<CallEvent, "passengerId">) => void;
+  registerCallHandler: (fn: ((ev: CallEvent) => void) | null) => void;
+  sendVoiceNote: (pid: string, blob: Blob, durationMs: number) => Promise<void>;
   requestLocation: (pid: string) => void;
   /** Irreversible: cascades to chat history, push subscriptions and sessions. */
   removePassenger: (pid: string) => Promise<DeletePassengerResult>;
@@ -153,6 +156,7 @@ export function useDashboard(opts: {
   const [msgById, setMsgById] = useState<Record<string, MsgRecord>>({});
   const [chatHistory, setChatHistory] = useState<Record<string, ChatMessage[]>>({});
   const rtRef = useRef<AdminRealtime | null>(null);
+  const onCallRef = useRef<((ev: CallEvent) => void) | null>(null);
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [robotRequests, setRobotRequests] = useState<AdminRobotRequest[]>([]);
 
@@ -247,6 +251,15 @@ export function useDashboard(opts: {
           delete next[pid];
           return next;
         });
+      },
+      onCall: (ev: CallEvent) => {
+        if (ev.type === "call_invite" && ev.from === "pax") {
+          const display =
+            (passengersRaw?.passengers || []).find((p) => p.id === ev.passengerId)?.name ||
+            ev.passengerId;
+          pushToast(ev.mode === "video" ? "Incoming video" : "Incoming voice", display);
+        }
+        onCallRef.current?.(ev);
       },
       onRobotRequest: (ev) => {
         const req = ev.request as RobotRequest;
@@ -463,17 +476,17 @@ export function useDashboard(opts: {
     }
   }, [tenantId]);
 
-  const sendChat = (pid: string, body: string) => {
+  const sendChat = (pid: string, body: string, kind: ChatKind = "text") => {
     const text = body.trim();
     if (!text) return;
     const msgId = `local_${Date.now()}_${Math.random().toString(16).slice(2)}`;
     const localMsg: ChatMessage = {
-      id: msgId, passengerId: pid, tenantId, from: "admin", kind: "text", body: text,
+      id: msgId, passengerId: pid, tenantId, from: "admin", kind, body: text,
       createdAt: Date.now(), status: "sending",
     };
     setChatHistory((h) => ({ ...h, [pid]: [...(h[pid] || []), localMsg].slice(-50) }));
     if (rtRef.current?.isConnected()) {
-      rtRef.current.chatSend(pid, text, "text");
+      rtRef.current.chatSend(pid, text, kind);
       setChatHistory((h) => ({
         ...h,
         [pid]: (h[pid] || []).map((m) => m.id === msgId ? { ...m, status: "sent" as const } : m),
@@ -486,7 +499,7 @@ export function useDashboard(opts: {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ tenantId, passengerId: pid, body: text, kind: "text" }),
+          body: JSON.stringify({ tenantId, passengerId: pid, body: text, kind }),
         });
         const data = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
@@ -513,6 +526,40 @@ export function useDashboard(opts: {
         pushToast("Chat send failed", err instanceof Error ? err.message : "error");
       }
     })();
+  };
+
+  const sendCall = useCallback((pid: string, event: Omit<CallEvent, "passengerId">) => {
+    rtRef.current?.sendCall(pid, event);
+  }, []);
+
+  const registerCallHandler = useCallback((fn: ((ev: CallEvent) => void) | null) => {
+    onCallRef.current = fn;
+  }, []);
+
+  const sendVoiceNote = async (pid: string, blob: Blob, durationMs: number) => {
+    const res = await fetch(apiUrl("/api/orienta/admin-voice-note"), {
+      method: "POST",
+      credentials: "same-origin",
+      headers: {
+        "Content-Type": blob.type || "audio/webm",
+        "X-Voice-Duration-Ms": String(Math.round(durationMs)),
+        "X-Passenger-Id": pid,
+        "X-Tenant-Id": tenantId,
+      },
+      body: blob,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: ChatMessage;
+      error?: string;
+    };
+    if (!res.ok || !data.ok || !data.message) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    setChatHistory((h) => ({
+      ...h,
+      [pid]: upsertChatMessage(h[pid] || [], { ...data.message!, status: "sent" }),
+    }));
   };
 
   const requestLocation = (pid: string) => {
@@ -594,7 +641,7 @@ export function useDashboard(opts: {
     rtUp, presence,
     openConvPaxId, setOpenConvPaxId,
     chatHistory, msgById,
-    sendSms, sendChat, requestLocation, openConversation, removePassenger,
+    sendSms, sendChat, sendCall, registerCallHandler, sendVoiceNote, requestLocation, openConversation, removePassenger,
     toasts, dismissToast: (id) => setToasts((t) => t.filter((x) => x.id !== id)),
     robotRequests,
     advanceRobotRequest: (pid) => void postAdminRobot(pid, "advance"),

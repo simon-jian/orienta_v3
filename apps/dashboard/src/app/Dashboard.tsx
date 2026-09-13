@@ -20,6 +20,10 @@ import { logout as authLogout } from "../services/auth";
 import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";
 import { CONSOLE_TITLE } from "../config/branding";
 import { INDOOR_AIRPORTS, findIndoorAirport } from "../config/indoorAirports";
+import { usePeerCall } from "../features/media/usePeerCall";
+import { adminCallLabels, CallOverlay } from "../features/media/CallOverlay";
+import { formatCallSummary } from "../features/media/voiceNoteBody";
+import type { CallMode } from "../types/types";
 
 type DashTab = "dashboard" | "map" | "invites";
 
@@ -78,13 +82,61 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     rtUp, presence,
     openConvPaxId, setOpenConvPaxId,
     chatHistory,
-    sendSms, sendChat, requestLocation, openConversation, removePassenger,
+    sendSms, sendChat, sendCall, registerCallHandler, sendVoiceNote, requestLocation, openConversation, removePassenger,
     toasts, dismissToast,
     robotRequests, advanceRobotRequest, cancelRobotRequest,
   } = useDashboard({
     tenantId, gates, flights, gatesById, flightsById,
     pekPoiReady, session,
   });
+
+  const call = usePeerCall({
+    selfRole: "admin",
+    send: (pid, event) => sendCall(pid, event),
+  });
+  const summaryRef = useRef<{
+    passengerId: string;
+    mode: CallMode;
+    connected: boolean;
+    elapsedMs: number;
+  } | null>(null);
+
+  useEffect(() => {
+    registerCallHandler((ev) => { void call.handleEvent(ev); });
+    return () => registerCallHandler(null);
+  }, [call.handleEvent, registerCallHandler]);
+
+  useEffect(() => {
+    if (call.passengerId && call.mode && (call.phase === "connecting" || call.phase === "in_call" || call.phase === "outgoing")) {
+      summaryRef.current = {
+        passengerId: call.passengerId,
+        mode: call.mode,
+        connected: call.phase === "in_call" || (summaryRef.current?.connected ?? false),
+        elapsedMs: call.elapsedMs,
+      };
+    }
+    if (call.phase === "in_call") {
+      summaryRef.current = {
+        passengerId: call.passengerId || summaryRef.current?.passengerId || "",
+        mode: call.mode || summaryRef.current?.mode || "audio",
+        connected: true,
+        elapsedMs: call.elapsedMs,
+      };
+    }
+    if (call.phase === "idle") {
+      const s = summaryRef.current;
+      summaryRef.current = null;
+      if (s?.connected && s.passengerId) {
+        sendChat(s.passengerId, formatCallSummary(s.mode, s.elapsedMs), "system");
+      }
+    }
+  }, [call.phase, call.passengerId, call.mode, call.elapsedMs, sendChat]);
+
+  const acceptIncoming = async () => {
+    call.primeLocalMedia(call.mode === "audio" ? "audio" : "video");
+    if (call.passengerId) openConversation(call.passengerId);
+    await call.accept();
+  };
 
   // Erasing a passenger is admin-only server-side (routes/passengers.ts), so
   // ops/viewer seats don't get the button at all.
@@ -360,6 +412,9 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
                   onClose={() => setOpenConvPaxId(null)}
                   isOnline={!!presence[openConvPaxId]}
                   isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
+                  onStartVideo={() => void call.startCall(openConvPaxId, "video")}
+                  onStartAudio={() => void call.startCall(openConvPaxId, "audio")}
+                  onSendVoiceNote={(blob, ms) => sendVoiceNote(openConvPaxId, blob, ms)}
                 />
               </SectionErrorBoundary>
             </div>
@@ -380,9 +435,20 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
             onClose={() => setOpenConvPaxId(null)}
             isOnline={!!presence[openConvPaxId]}
             isPremium={passengers.find((p) => p.id === openConvPaxId)?.plan === "premium"}
+            onStartVideo={() => void call.startCall(openConvPaxId, "video")}
+            onStartAudio={() => void call.startCall(openConvPaxId, "audio")}
+            onSendVoiceNote={(blob, ms) => sendVoiceNote(openConvPaxId, blob, ms)}
           />
         </SectionErrorBoundary>
       )}
+
+      <CallOverlay
+        call={{ ...call, accept: acceptIncoming }}
+        peerLabel={
+          passengers.find((p) => p.id === call.passengerId)?.name || call.passengerId || "Passenger"
+        }
+        labels={adminCallLabels()}
+      />
 
       <ToastHost items={toasts} onDismiss={dismissToast} />
     </div>

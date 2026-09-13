@@ -17,7 +17,8 @@ import {
   VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, VAPID_SUBJECT,
   isPushConfigured, ROUTE_SITE_DEFAULT_TENANT, TOURIST_ALLOWED_ORIGINS,
 } from "../config";
-import type { ChatKind, ChatMessage } from "../../src/types/types";
+import type { ChatMessage } from "../../src/types/types";
+import { normalizeChatKind } from "../hub/chatKinds";
 import { adminEmailFromRequest, requireAdmin, requireTenantAccess } from "./auth";
 import { paxCanSendChat } from "../auth/paxAuthPolicy";
 import type { AuditLog } from "../lib/auditLog";
@@ -216,8 +217,7 @@ export function registerPushRoutes(
     const identity = await paxIdentityFromRequest(req, res, body);
     if (!identity) return;
     const textBody   = String(body.body || "").trim();
-    const allowed    = new Set(["text", "location", "system", "ai_agent", "operator"]);
-    const kind       = (allowed.has(String(body.kind || "text").toLowerCase()) ? String(body.kind || "text").toLowerCase() : "text") as ChatKind;
+    const kind       = normalizeChatKind(body.kind);
     if (!paxCanSendChat(identity.claims, kind)) {
       return res.status(403).json({ ok: false, error: "chat_not_allowed_for_plan" });
     }
@@ -249,10 +249,7 @@ export function registerPushRoutes(
     if (!requireTenantAccess(req, res, tenantId)) return;
     const passengerId = String(body.passengerId || "").trim();
     const textBody = String(body.body || "").trim();
-    const allowed = new Set(["text", "location", "system", "ai_agent", "operator"]);
-    const kind = (allowed.has(String(body.kind || "text").toLowerCase())
-      ? String(body.kind || "text").toLowerCase()
-      : "text") as ChatKind;
+    const kind = normalizeChatKind(body.kind);
     if (!passengerId) return res.status(400).json({ ok: false, error: "missing_passenger" });
     if (!textBody) return res.status(400).json({ ok: false, error: "missing_body" });
     if (textBody.length > 12000) return res.status(400).json({ ok: false, error: "body_too_large" });

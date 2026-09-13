@@ -26,6 +26,8 @@ import {
 } from "./assist/navPlan";
 import { paxErrorMessage, usePaxT } from "./i18n";
 import { clientDefaultAirportId } from "../../config/client";
+import { usePeerCall } from "../media/usePeerCall";
+import { CallOverlay } from "../media/CallOverlay";
 import "./styles/pax.css";
 
 function initialAssistTab(): AssistTab {
@@ -80,8 +82,21 @@ export default function PaxAppPage() {
     liveRobotRequest,
     realtimeRef,
     sendChat,
+    sendCall,
+    registerCallHandler,
+    sendVoiceNote,
     shareLocation,
   } = usePaxRealtimeSession(session);
+
+  const call = usePeerCall({
+    selfRole: "pax",
+    send: (_pid, event) => sendCall(event),
+  });
+
+  useEffect(() => {
+    registerCallHandler((ev) => { void call.handleEvent(ev); });
+    return () => registerCallHandler(null);
+  }, [call.handleEvent, registerCallHandler]);
 
   const onLocationStatus = useCallback((text: string) => setLocationStatus(text), [setLocationStatus]);
   const nav = usePdrNavigation(session, realtimeRef, onLocationStatus, null);
@@ -282,12 +297,50 @@ export default function PaxAppPage() {
             notifications={notifications}
             unreadChat={unreadChat}
             locationStatus={locationStatus}
+            voiceAuthHeaders={{ Authorization: `Bearer ${session.token}` }}
             onClearUnread={() => setUnreadChat(false)}
             onSendChat={sendChat}
             onShareLocation={() => shareLocation(session.passenger.gateId)}
+            onStartVideo={() => void call.startCall(session.passenger.id, "video")}
+            onStartAudio={() => void call.startCall(session.passenger.id, "audio")}
+            onSendVoiceNote={sendVoiceNote}
           />
         </section>
       )}
+
+      <CallOverlay
+        call={call}
+        peerLabel={t("chat.role.admin")}
+        labels={{
+          incomingVideo: t("media.incomingVideo"),
+          incomingAudio: t("media.incomingAudio"),
+          outgoingVideo: t("media.outgoingVideo"),
+          outgoingAudio: t("media.outgoingAudio"),
+          connecting: t("media.connecting"),
+          inCall: t("media.inCall"),
+          accept: t("media.accept"),
+          reject: t("media.reject"),
+          hangup: t("media.hangup"),
+          mute: t("media.mute"),
+          unmute: t("media.unmute"),
+          cameraOff: t("media.cameraOff"),
+          cameraOn: t("media.cameraOn"),
+          permissionDenied: t("media.permissionDenied"),
+          permissionHint: t("media.permissionHint"),
+          permissionInsecure: t("media.permissionInsecure"),
+          permissionBlocked: t("media.permissionBlocked"),
+          permissionRetry: t("media.permissionRetry"),
+          permissionUnavailable: t("media.permissionUnavailable"),
+          permissionNotFound: t("media.permissionNotFound"),
+          waitingVideo: t("media.waitingVideo"),
+          cameraNeeded: t("media.cameraNeeded"),
+          cameraBlank: t("media.cameraBlank"),
+          cameraInUse: t("media.cameraInUse"),
+          callFailed: t("media.callFailed"),
+          callRejected: t("media.callRejected"),
+          callTimeout: t("media.callTimeout"),
+        }}
+      />
     </div>
   );
 }

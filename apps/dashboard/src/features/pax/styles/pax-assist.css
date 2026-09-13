@@ -402,6 +402,23 @@
   z-index: 9;
 }
 
+.pax-assist-input-area--media {
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pax-assist-media-row,
+.pax-assist-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.pax-assist-input-row {
+  flex-wrap: nowrap;
+}
+
 .pax-assist-input-area textarea {
   flex: 1;
   background: #f3f4f6;

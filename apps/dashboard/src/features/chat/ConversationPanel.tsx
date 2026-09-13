@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import type { PassengerComputed, ChatMessage, ChatMsgStatus } from "../../types/types";
+import { VoiceNoteBubble } from "../media/VoiceNoteBubble";
+import { VoiceNoteRecorder } from "../media/VoiceNoteRecorder";
 
 function formatTime(ts: number) {
   return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
@@ -52,7 +54,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
             📍 {msg.gateRef}
           </span>
         )}
-        {msg.body}
+        {msg.kind === "voice" ? <VoiceNoteBubble body={msg.body} playLabel="Play voice note" /> : msg.body}
       </div>
       {isRight && msg.from === "admin" && (
         <div style={{ display: "flex", alignItems: "center", marginTop: 2 }}>
@@ -70,6 +72,7 @@ function MessageBubble({ msg }: { msg: ChatMessage }) {
 
 export default function ConversationPanel({
   passengerId, passenger, history, onSend, onRequestLocation, onClose, isOnline, isPremium, mode = "floating",
+  onStartVideo, onStartAudio, onSendVoiceNote,
 }: {
   passengerId: string;
   passenger: PassengerComputed | null;
@@ -80,6 +83,9 @@ export default function ConversationPanel({
   isOnline: boolean;
   isPremium: boolean;
   mode?: "floating" | "docked";
+  onStartVideo?: () => void;
+  onStartAudio?: () => void;
+  onSendVoiceNote?: (blob: Blob, durationMs: number) => Promise<void>;
 }) {
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -143,6 +149,8 @@ export default function ConversationPanel({
         <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
           <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: "50%", background: isOnline ? "#34c759" : "#636366" }} />
           <span style={{ fontSize: 11, color: "#6b7280" }}>{isOnline ? "Online" : "Offline"}</span>
+          <button className="btn" type="button" title="视频通话 Video" onClick={onStartVideo} style={{ fontSize: 11, padding: "2px 8px" }}>视频 Video</button>
+          <button className="btn" type="button" title="语音通话 Voice" onClick={onStartAudio} style={{ fontSize: 11, padding: "2px 8px" }}>语音 Voice</button>
           <button className="btn" onClick={onClose} aria-label="Close conversation" style={{ fontSize: 13, padding: "2px 8px" }}>✕</button>
         </div>
       </div>
@@ -197,12 +205,36 @@ export default function ConversationPanel({
             />
             <button className="btn primary" onClick={handleSend} disabled={!input.trim()} style={{ alignSelf: "flex-end", padding: "8px 14px" }}>Send</button>
           </div>
+          {onSendVoiceNote ? (
+            <VoiceNoteRecorder
+              onSend={onSendVoiceNote}
+              labels={{
+                record: "留言 Voice note",
+                recording: (sec) => `录音中 ${sec}s`,
+                stop: "发送 Send",
+                cancel: "取消",
+                failed: "留言失败 Voice note failed",
+              }}
+            />
+          ) : null}
         </div>
       ) : (
-        <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(0,0,0,0.08)" }}>
+        <div style={{ padding: "10px 12px", borderTop: "1px solid rgba(0,0,0,0.08)", display: "grid", gap: 8 }}>
           <div style={{ fontSize: 11, opacity: 0.5, textAlign: "center" }}>
-            Free user — AI agent auto-replies. View chat history only.
+            Free user — AI agent auto-replies. Voice/video calls and voice notes still work.
           </div>
+          {onSendVoiceNote ? (
+            <VoiceNoteRecorder
+              onSend={onSendVoiceNote}
+              labels={{
+                record: "留言 Voice note",
+                recording: (sec) => `录音中 ${sec}s`,
+                stop: "发送 Send",
+                cancel: "取消",
+                failed: "留言失败 Voice note failed",
+              }}
+            />
+          ) : null}
         </div>
       )}
     </div>

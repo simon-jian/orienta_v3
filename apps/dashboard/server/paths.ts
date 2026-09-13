@@ -22,6 +22,12 @@ export const DIST_DIR = path.join(dashboardRoot, "dist");
 /** public/ directory (served directly by Vite in dev, copied to dist/ in prod). */
 export const PUBLIC_DIR = path.join(dashboardRoot, "public");
 
+/** Runtime data (chat sqlite in some deploys, voice notes, etc). */
+export const DATA_DIR = path.join(dashboardRoot, "data");
+
+/** Voice-note audio files + sidecar metadata. */
+export const VOICE_NOTES_DIR = path.join(DATA_DIR, "voice-notes");
+
 /** Local airport-map.html (repo root, used when VITE_LOCAL_AIRPORT_MAP=1). */
 export const REPO_AIRPORT_MAP_PATH = path.resolve(dashboardRoot, "../../../airport-map.html");
 

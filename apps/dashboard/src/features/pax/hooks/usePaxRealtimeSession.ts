@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { ChatKind, ChatMessage, MsgRecord } from "../../../types/types";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { CallEvent, ChatKind, ChatMessage, MsgRecord } from "../../../types/types";
 import { connectPaxRealtime, type PaxRealtime, type RobotRequestEvent } from "../../../services/realtime";
 import type { PaxSession } from "../session";
 import { postPaxApi, postPaxFallback } from "../assist/postPaxApi";
@@ -25,6 +25,7 @@ export function usePaxRealtimeSession(
   /** undefined = no WS event yet; null = cleared; object = live status */
   const [liveRobotRequest, setLiveRobotRequest] = useState<RobotRequest | null | undefined>(undefined);
   const realtimeRef = useRef<PaxRealtime | null>(null);
+  const onCallRef = useRef<((ev: CallEvent) => void) | null>(null);
   const sessionRef = useRef(session);
   sessionRef.current = session;
   const onRobotRequestRef = useRef(opts?.onRobotRequest);
@@ -65,6 +66,7 @@ export function usePaxRealtimeSession(
         if (msg.from !== "pax") setUnreadChat(true);
       },
       onChatHistory: (messages) => setChat((prev) => mergeChatHistory(prev, messages)),
+      onCall: (ev) => onCallRef.current?.(ev),
       onLocRequest: () => setLocationStatus(t("chat.locRequest")),
       onRobotRequest: (ev) => {
         const req = ev.request as RobotRequest;
@@ -189,6 +191,37 @@ export function usePaxRealtimeSession(
       });
   }
 
+  const sendCall = useCallback((event: Omit<CallEvent, "passengerId">) => {
+    realtimeRef.current?.sendCall(event);
+  }, []);
+
+  const registerCallHandler = useCallback((fn: ((ev: CallEvent) => void) | null) => {
+    onCallRef.current = fn;
+  }, []);
+
+  async function sendVoiceNote(blob: Blob, durationMs: number) {
+    const s = sessionRef.current;
+    if (!s) throw new Error("missing_session");
+    const res = await fetch(apiUrl("/api/pax/voice-note"), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${s.token}`,
+        "Content-Type": blob.type || "audio/webm",
+        "X-Voice-Duration-Ms": String(Math.round(durationMs)),
+      },
+      body: blob,
+    });
+    const data = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      message?: ChatMessage;
+      error?: string;
+    };
+    if (!res.ok || !data.ok || !data.message) {
+      throw new Error(data.error || `HTTP ${res.status}`);
+    }
+    setChat((prev) => upsertChatMessage(prev, data.message!));
+  }
+
   function shareLocation(targetGateId: string) {
     const text = `Passenger reports current target gate: ${targetGateId}`;
     const rt = realtimeRef.current;
@@ -213,6 +246,9 @@ export function usePaxRealtimeSession(
     liveRobotRequest,
     realtimeRef,
     sendChat,
+    sendCall,
+    registerCallHandler,
+    sendVoiceNote,
     shareLocation,
   };
 }

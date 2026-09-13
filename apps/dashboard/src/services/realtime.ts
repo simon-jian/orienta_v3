@@ -5,9 +5,17 @@
  */
 import type {
   MsgRecord, MsgStatus, MsgStatusEvent, ChatMessage, ChatKind,
-  PresenceEvent, PaxTrajectoryData,
+  PresenceEvent, PaxTrajectoryData, CallEvent, CallEventType,
 } from "../types/types";
 import { wsUrl } from "../config/api";
+
+const CALL_EVENT_TYPES = new Set<CallEventType>([
+  "call_invite",
+  "call_accept",
+  "call_reject",
+  "call_hangup",
+  "call_signal",
+]);
 
 export type { MsgRecord, MsgStatus, MsgStatusEvent, ChatMessage, ChatKind, PresenceEvent, PaxTrajectoryData };
 
@@ -35,6 +43,14 @@ export type RobotRequestEvent = {
 interface WsServerMsg {
   type: string;
   [key: string]: unknown;
+}
+
+function asCallEvent(m: WsServerMsg): CallEvent | null {
+  if (!CALL_EVENT_TYPES.has(m.type as CallEventType)) return null;
+  const callId = typeof m.callId === "string" ? m.callId : "";
+  const passengerId = typeof m.passengerId === "string" ? m.passengerId : "";
+  if (!callId || !passengerId) return null;
+  return m as unknown as CallEvent;
 }
 
 function safeParse(s: string): WsServerMsg | null {
@@ -94,6 +110,7 @@ export type AdminRealtime = {
   isConnected(): boolean;
   send(passengerId: string, body: string, title?: string, messageId?: string): string;
   chatSend(passengerId: string, body: string, kind?: ChatKind, gateRef?: string): void;
+  sendCall(passengerId: string, event: Omit<CallEvent, "passengerId">): void;
   requestLocation(passengerId: string): void;
   fetchHistory(passengerId: string): void;
   close(): void;
@@ -110,6 +127,7 @@ export function connectAdminRealtime(opts: {
   onPaxTrajectory?(passengerId: string, data: PaxTrajectoryData): void;
   onPaxTrajectoryClear?(passengerId: string): void;
   onRobotRequest?(ev: RobotRequestEvent): void;
+  onCall?(e: CallEvent): void;
   onConnectionChange?(up: boolean): void;
 }): AdminRealtime {
   const { tenantId } = opts;
@@ -173,6 +191,8 @@ export function connectAdminRealtime(opts: {
       ) {
         opts.onRobotRequest?.(m as unknown as RobotRequestEvent);
       }
+      const call = asCallEvent(m);
+      if (call) opts.onCall?.(call);
     };
   };
 
@@ -190,6 +210,11 @@ export function connectAdminRealtime(opts: {
     chatSend: (passengerId, body, kind = "text", gateRef) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "chat_send", tenantId, passengerId, body, kind, gateRef }));
+      }
+    },
+    sendCall: (passengerId, event) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ ...event, tenantId, passengerId }));
       }
     },
     requestLocation: (passengerId) => {
@@ -214,6 +239,7 @@ export type PaxRealtime = {
   isConnected(): boolean;
   ack(messageId: string): void;
   chatSend(body: string, kind?: ChatKind, gateRef?: string): void;
+  sendCall(event: Omit<CallEvent, "passengerId">): void;
   sendTrajectory(path: { lat: number; lng: number }[], position: { lat: number; lng: number }): void;
   markRead(messageId: string): void;
   close(): void;
@@ -234,6 +260,7 @@ export function connectPaxRealtime(opts: {
   onMarkRead?(): void;
   onLocRequest?(): void;
   onRobotRequest?(ev: RobotRequestEvent): void;
+  onCall?(e: CallEvent): void;
   onConnectionChange?(up: boolean): void;
 }): PaxRealtime {
   const { tenantId, passengerId } = opts;
@@ -310,6 +337,8 @@ export function connectPaxRealtime(opts: {
       ) {
         opts.onRobotRequest?.(m as unknown as RobotRequestEvent);
       }
+      const call = asCallEvent(m);
+      if (call) opts.onCall?.(call);
     };
   };
 
@@ -325,6 +354,11 @@ export function connectPaxRealtime(opts: {
     chatSend: (body, kind = "text", gateRef) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "chat_send", tenantId, passengerId, body, kind, gateRef }));
+      }
+    },
+    sendCall: (event) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ ...event, tenantId, passengerId }));
       }
     },
     sendTrajectory: (path, position) => {
