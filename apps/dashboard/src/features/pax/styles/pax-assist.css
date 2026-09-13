@@ -47,12 +47,12 @@
 }
 
 .pax-assist-logo {
-  height: 48px;
+  height: 68px;
   width: auto;
-  max-width: min(72px, 22vw);
+  max-width: min(148px, 42vw);
   object-fit: contain;
+  object-position: left center;
   display: block;
-  border-radius: 10px;
   background: #fff;
 }
 
@@ -807,8 +807,8 @@
 
 @media (max-width: 520px) {
   .pax-assist-logo {
-    height: 40px;
-    max-width: 56px;
+    height: 58px;
+    max-width: 124px;
   }
   .pax-robot-service-cards {
     grid-template-columns: 1fr;

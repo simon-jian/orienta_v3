@@ -25,6 +25,7 @@ import {
   type NavPlanHints,
 } from "./assist/navPlan";
 import { paxErrorMessage, usePaxT } from "./i18n";
+import { BRAND_LOGO_ALT, BRAND_WORDMARK_SRC } from "../../config/branding";
 import { clientDefaultAirportId } from "../../config/client";
 import { usePeerCall } from "../media/usePeerCall";
 import { CallOverlay } from "../media/CallOverlay";
@@ -210,7 +211,7 @@ export default function PaxAppPage() {
   return (
     <div className={`pax-shell pax-shell--assist${robotOpen ? " robot-service-mode" : ""}`}>
       <div className="pax-assist-brand">
-        <img className="pax-assist-logo" src="/orienta-logo.svg" alt="Orienta" />
+        <img className="pax-assist-logo" src={BRAND_WORDMARK_SRC} alt={BRAND_LOGO_ALT} />
         <div className="pax-assist-brand-actions">
           <a className="pax-btn secondary" href="/pax/flight" style={{ textDecoration: "none" }}>
             {t("app.flight")}

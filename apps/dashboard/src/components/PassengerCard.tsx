@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import type { Gate, Flight, PassengerComputed, MsgRecord } from "../types/types";
-import { defaultSmsTemplate } from "../utils/passenger-compute";
+import { defaultSmsTemplate, preferredGateLabel } from "../utils/passenger-compute";
 
 export default function PassengerCard(props: {
   passenger: PassengerComputed;
@@ -17,7 +17,12 @@ export default function PassengerCard(props: {
   const { passenger: p, gate, flight } = props;
   const [custom, setCustom] = useState("");
   const suggested = useMemo(
-    () => defaultSmsTemplate(p, gate?.name || "—", flight?.id || p.flightId),
+    () => defaultSmsTemplate(
+      p,
+      preferredGateLabel(gate?.name, p.gateId),
+      flight?.id || p.flightId,
+      flight?.scheduledDep,
+    ),
     [p, gate, flight]
   );
   // Guards against a double-fire from a rapid double-click sending the same

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { Gate, Flight, PassengerComputed, PaxExtStatus } from "../../types/types";
 import { statusBadge, extStatusLabel } from "../../utils/statusDisplay";
+import { defaultSmsTemplate, preferredGateLabel } from "../../utils/passenger-compute";
 import { clientDefaultAirport } from "../../config/client";
 
 export default function DashboardTab({
@@ -163,7 +164,7 @@ export default function DashboardTab({
                         <button className="tcd-action-btn" onClick={() => onOpenConversation(p.id)} title="Chat">💬</button>
                         {p.extStatus === "lost" && <button className="tcd-action-btn" onClick={() => onRequestLocation(p.id)}>📍</button>}
                         {(p.extStatus === "offline" || p.extStatus === "lost") && (
-                          <button className="tcd-action-btn" onClick={() => onSendSms(p.id, `Orienta: Your flight ${p.flightId} is at Gate ${gate?.name}. Please proceed immediately.`)}>📨</button>
+                          <button className="tcd-action-btn" onClick={() => onSendSms(p.id, defaultSmsTemplate(p, preferredGateLabel(gate?.name, p.gateId), flight?.id || p.flightId, flight?.scheduledDep))}>📨</button>
                         )}
                         {onDeletePax && (
                           <button

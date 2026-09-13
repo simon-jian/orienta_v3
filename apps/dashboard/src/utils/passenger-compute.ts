@@ -80,18 +80,111 @@ export function computePassenger(
   };
 }
 
+const UNASSIGNED_GATE = new Set(["", "—", "-", "?", "UNKNOWN", "TBD"]);
+
+/** True when a gate name or id is a real assignment, not a placeholder. */
+export function isAssignedGate(...labels: Array<string | null | undefined>): boolean {
+  return labels.some((label) => {
+    const value = (label ?? "").trim();
+    if (!value) return false;
+    return !UNASSIGNED_GATE.has(value) && !UNASSIGNED_GATE.has(value.toUpperCase());
+  });
+}
+
+/** First real gate label (name, then id). Empty when neither is assigned. */
+export function preferredGateLabel(
+  name?: string | null,
+  gateId?: string | null,
+): string {
+  if (isAssignedGate(name)) return (name ?? "").trim();
+  if (isAssignedGate(gateId)) return (gateId ?? "").trim();
+  return "";
+}
+
+function parseDepartureMs(iso?: string | null): number | null {
+  const raw = iso?.trim();
+  if (!raw) return null;
+  const ms = Date.parse(raw);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Passenger outbound time first; flight board time only if that is missing. */
+export function resolveDepartureIso(
+  outboundDep?: string | null,
+  scheduledDep?: string | null,
+): string | undefined {
+  if (parseDepartureMs(outboundDep) !== null) return outboundDep!.trim();
+  if (parseDepartureMs(scheduledDep) !== null) return scheduledDep!.trim();
+  return undefined;
+}
+
+export function formatDepartureClock(iso: string): string {
+  return new Date(iso).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+/**
+ * Real scheduled/estimated departure, or empty when the clock is unknown.
+ * Past departure: time only, no countdown. Never invents check-in or "?".
+ */
+export function formatDepartureClause(
+  iso: string | undefined | null,
+  nowMs: number = Date.now(),
+): string {
+  const depMs = parseDepartureMs(iso);
+  if (depMs === null || !iso) return "";
+  const clock = formatDepartureClock(iso.trim());
+  const mins = Math.round((depMs - nowMs) / 60_000);
+  if (mins > 0) {
+    const unit = mins === 1 ? "minute" : "minutes";
+    return `Scheduled departure is ${clock} (in about ${mins} ${unit}).`;
+  }
+  return `Scheduled departure is ${clock}.`;
+}
+
+function appendClause(text: string, clause: string): string {
+  return clause ? `${text} ${clause}` : text;
+}
+
 export function defaultSmsTemplate(
   p: PassengerComputed,
   gateName: string,
-  flightId: string
+  flightId: string,
+  scheduledDep?: string,
+  nowMs: number = Date.now(),
 ): string {
+  const assigned = isAssignedGate(gateName);
   const urgency = p.transfer?.urgency === "urgent" ? " — URGENT" : "";
-  const base = `Orienta: Your flight ${flightId} departs from Gate ${gateName}${urgency}.`;
+  const base = assigned
+    ? `Orienta: Your flight ${flightId} departs from Gate ${gateName.trim()}${urgency}.`
+    : `Orienta: Your flight ${flightId} does not have an assigned gate yet${urgency}.`;
+  const depClause = formatDepartureClause(
+    resolveDepartureIso(p.transfer?.outboundDep, scheduledDep),
+    nowMs,
+  );
+
   if (p.extStatus === "lost" || p.extStatus === "offline") {
     return `${base} We have lost your location. Please reply with your current position (e.g., "near E21 shopping area").`;
   }
+
   if (p.transfer?.urgency === "urgent" || p.status === "red" || p.status === "yellow") {
-    return `${base} Please proceed IMMEDIATELY to your gate. Do not stop.`;
+    if (assigned) {
+      return appendClause(`${base} Please proceed IMMEDIATELY to your gate. Do not stop.`, depClause);
+    }
+    return appendClause(
+      `${base} Please proceed immediately to the terminal. We will update you when a gate is posted.`,
+      depClause,
+    );
   }
-  return `${base} Please make your way to the gate. Check-in closes in approx. ${p.etaMinutes ? p.etaMinutes + 10 : "?"} minutes.`;
+
+  if (assigned) {
+    return appendClause(`${base} Please make your way to the gate.`, depClause);
+  }
+  if (depClause) {
+    return `${base} ${depClause} We will update you when a gate is posted.`;
+  }
+  return `${base} Please wait for a gate update.`;
 }
