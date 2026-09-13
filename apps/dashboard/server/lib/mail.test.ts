@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
+import { INVITE_LOGO_CID } from "./inviteLogo";
 import { INVITE_QR_CID } from "./inviteQr";
 import {
   MAIL_ERRORS,
+  brandedInviteFrom,
   extractMailAddress,
   inviteEmailHtml,
   inviteEmailSubject,
@@ -57,6 +59,8 @@ describe("readMailConfig", () => {
     expect(mailFromMismatch(cfg)).toBe(false);
     expect(mailFromMismatch({ ...cfg, from: "Orienta <other@example.com>" })).toBe(true);
     expect(extractMailAddress("Orienta <ops@example.com>")).toBe("ops@example.com");
+    expect(brandedInviteFrom("Orienta <ops@example.com>")).toBe("中国国际航空 · Orienta <ops@example.com>");
+    expect(brandedInviteFrom("ops@example.com")).toBe("中国国际航空 · Orienta <ops@example.com>");
   });
 });
 
@@ -65,12 +69,18 @@ describe("invite email body", () => {
 
   it("puts the full URL (including #t=) in both text and HTML", () => {
     expect(inviteEmailSubject("UA888")).toContain("UA888");
-    expect(inviteEmailSubject("UA888")).toContain("行程链接");
+    expect(inviteEmailSubject("UA888")).toContain("中国国际航空 · Orienta");
+    expect(inviteEmailSubject("UA888")).toContain("行程服务");
     expect(inviteEmailText(url, { name: "Siyao", flightId: "UA888" })).toContain(url);
     expect(inviteEmailText(url, { name: "Siyao", flightId: "UA888" })).toContain("UA888");
+    expect(inviteEmailText(url, { name: "Siyao", flightId: "UA888" })).toContain("Powered by Orienta");
     expect(inviteEmailHtml(url, { name: "Siyao", flightId: "UA888" })).toContain(url);
     expect(inviteEmailHtml(url)).toContain(`href="${url}"`);
     expect(inviteEmailHtml(url)).toContain("#t=secret");
+    expect(inviteEmailHtml(url, { logoCid: INVITE_LOGO_CID })).toContain(`src="cid:${INVITE_LOGO_CID}"`);
+    expect(inviteEmailHtml(url)).toContain("中国国际航空 · Orienta");
+    expect(inviteEmailHtml(url)).toContain("POWERED BY ORIENTA");
+    expect(inviteEmailHtml(url)).toContain("#E60012");
     expect(inviteEmailText(url)).toContain("二维码");
   });
 
@@ -101,12 +111,13 @@ describe("sendInviteMail", () => {
     ).resolves.toEqual({ ok: true, to: "s••••@united.com" });
     expect(captured?.to).toBe("siyao.fu@united.com");
     expect(captured?.text).toContain("#t=secret-token");
-    expect(captured?.from).toBe(config.from);
+    expect(captured?.from).toBe("中国国际航空 · Orienta <ops@example.com>");
     expect(captured?.html).toContain(`src="cid:${INVITE_QR_CID}"`);
-    expect(captured?.attachments).toHaveLength(1);
-    expect(captured?.attachments?.[0]?.cid).toBe(INVITE_QR_CID);
-    expect(captured?.attachments?.[0]?.contentType).toBe("image/png");
-    expect(captured?.attachments?.[0]?.content.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))).toBe(true);
+    expect(captured?.html).toContain(`src="cid:${INVITE_LOGO_CID}"`);
+    expect(captured?.attachments?.map((a) => a.cid)).toEqual([INVITE_LOGO_CID, INVITE_QR_CID]);
+    expect(captured?.attachments?.every((a) => a.contentType === "image/png")).toBe(true);
+    const qr = captured?.attachments?.find((a) => a.cid === INVITE_QR_CID);
+    expect(qr?.content.subarray(0, 4).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47]))).toBe(true);
   });
 
   it("refuses a localhost claim URL", async () => {

@@ -6,6 +6,7 @@
  * attached inline (cid).
  */
 import nodemailer from "nodemailer";
+import { INVITE_LOGO_CID, INVITE_LOGO_FILENAME, tryLoadInviteLogo } from "./inviteLogo";
 import { INVITE_QR_CID, INVITE_QR_FILENAME, tryRenderInviteQr, type InviteQr } from "./inviteQr";
 import { logger } from "./logger";
 import { assertInviteSmsUrl } from "./sms";
@@ -94,53 +95,92 @@ export function mailFromMismatch(config: MailConfig): boolean {
   return !from.ok || !user.ok || from.email !== user.email;
 }
 
+/** Display name in the From header; SMTP still uses the configured address. */
+export const INVITE_MAIL_FROM_NAME = "中国国际航空 · Orienta";
+
+export function brandedInviteFrom(from: string): string {
+  const addr = extractMailAddress(from);
+  return `${INVITE_MAIL_FROM_NAME} <${addr}>`;
+}
+
 export function inviteEmailSubject(flightId?: string): string {
-  return flightId ? `Orienta 行程链接 — ${flightId}` : "Orienta 行程链接";
+  return flightId
+    ? `${INVITE_MAIL_FROM_NAME} — 您的行程服务（${flightId}）`
+    : `${INVITE_MAIL_FROM_NAME} — 您的行程服务`;
 }
 
 export function inviteEmailText(url: string, opts?: { name?: string; flightId?: string }): string {
-  const hello = opts?.name ? `${opts.name}，您好。\n\n` : "您好。\n\n";
-  const flight = opts?.flightId ? `（航班 ${opts.flightId}）` : "";
+  const who = opts?.name ? `尊敬的 ${opts.name} 旅客：\n\n` : "尊敬的旅客：\n\n";
+  const flight = opts?.flightId ? `航班 ${opts.flightId} ` : "";
   return (
-    `${hello}请用这台手机打开下面的链接开始行程${flight}。` +
-    `链接只会绑定第一台打开的设备，请不要转发给他人。\n\n` +
+    `${who}您好！感谢您选择中国国际航空。\n\n` +
+    `为方便您本次出行，我们为您开通了${flight}的行程服务。` +
+    `请使用您本人的手机打开下方链接或扫描邮件中的二维码。` +
+    `该链接仅可在第一台设备上激活，请勿转发他人。\n\n` +
     `${url}\n\n` +
-    `也可以扫描邮件里的二维码打开。如果按钮打不开，请复制整段链接（必须包含 # 后面的部分）。链接 48 小时内有效。`
+    `如链接无法打开，请复制完整地址（须包含 # 后面的部分）。本链接 48 小时内有效。\n\n` +
+    `祝您旅途愉快。\n中国国际航空\n\nPowered by Orienta`
   );
 }
 
-export function inviteEmailHtml(url: string, opts?: { name?: string; flightId?: string; qrCid?: string }): string {
+export function inviteEmailHtml(url: string, opts?: { name?: string; flightId?: string; qrCid?: string; logoCid?: string }): string {
   const safeUrl = escapeAttr(url);
   const safeVisible = escapeHtml(url);
   const name = opts?.name ? escapeHtml(opts.name) : "";
   const flight = opts?.flightId ? escapeHtml(opts.flightId) : "";
-  const hello = name ? `${name}，您好。` : "您好。";
-  const flightLine = flight ? `（航班 ${flight}）` : "";
+  const greeting = name ? `尊敬的 ${name} 旅客：` : "尊敬的旅客：";
+  const flightLine = flight ? `航班 <strong>${flight}</strong> ` : "";
   const qrBlock = opts?.qrCid
-    ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.6;">也可以用手机扫描二维码打开：</p>
-    <p style="margin:0 0 20px;">
-      <img src="cid:${escapeAttr(opts.qrCid)}" width="196" height="196" alt="行程二维码" style="display:block;width:196px;height:196px;border:0;" />
-    </p>`
+    ? `<p style="margin:0 0 10px;font-size:15px;line-height:1.7;color:#333333;">您也可以使用手机扫描下方二维码打开：</p>
+              <p style="margin:0 0 22px;">
+                <img src="cid:${escapeAttr(opts.qrCid)}" width="196" height="196" alt="行程二维码" style="display:block;width:196px;height:196px;border:0;" />
+              </p>`
     : "";
   return `<!doctype html>
-<html lang="zh">
-<body style="margin:0;padding:24px;background:#f4f4f5;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#111827;">
-  <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:12px;padding:24px 24px 20px;border:1px solid #e5e7eb;">
-    <p style="margin:0 0 8px;font-size:12px;letter-spacing:0.04em;color:#047857;font-weight:700;">ORIENTA</p>
-    <p style="margin:0 0 16px;font-size:16px;line-height:1.5;">${hello}</p>
-    <p style="margin:0 0 20px;font-size:15px;line-height:1.6;">
-      请用<strong>这台手机</strong>打开链接开始行程${flightLine}。链接只会绑定第一台打开的设备，请不要转发给他人。
-    </p>
-    <p style="margin:0 0 20px;">
-      <a href="${safeUrl}" style="display:inline-block;background:#047857;color:#ffffff;padding:12px 18px;border-radius:8px;text-decoration:none;font-weight:700;">打开行程</a>
-    </p>
-    ${qrBlock}
-    <p style="margin:0 0 8px;font-size:13px;line-height:1.5;color:#4b5563;">
-      如果按钮无法打开，请复制整段链接（必须包含 <code>#</code> 后面的部分）：
-    </p>
-    <p style="margin:0;font-size:13px;line-height:1.5;word-break:break-all;">${safeVisible}</p>
-    <p style="margin:16px 0 0;font-size:12px;color:#6b7280;">链接 48 小时内有效。</p>
-  </div>
+<html lang="zh-CN">
+<body style="margin:0;padding:0;background:#f3f5f7;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f3f5f7;padding:24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#ffffff;border:1px solid #eeeeee;">
+          <tr><td style="height:4px;background:#E60012;font-size:0;line-height:0;">&nbsp;</td></tr>
+          <tr>
+            <td style="padding:22px 28px 8px;font-family:Arial,Helvetica,'Microsoft YaHei','PingFang SC',sans-serif;">
+              ${opts?.logoCid
+                ? `<img src="cid:${escapeAttr(opts.logoCid)}" width="132" height="88" alt="中国国际航空" style="display:block;width:132px;height:88px;border:0;" />
+              <div style="margin-top:10px;font-size:13px;letter-spacing:0.12em;color:#333333;">中国国际航空 · Orienta</div>`
+                : `<div style="font-size:20px;font-weight:800;letter-spacing:0.06em;color:#111111;">AIR CHINA</div>
+              <div style="margin-top:4px;font-size:13px;letter-spacing:0.14em;color:#333333;">中国国际航空 · Orienta</div>`}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 28px 24px;font-family:'Microsoft YaHei','PingFang SC',Arial,sans-serif;color:#222222;">
+              <p style="margin:16px 0 8px;font-size:16px;line-height:1.6;">${greeting}</p>
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.75;">您好！感谢您选择中国国际航空。</p>
+              <p style="margin:0 0 22px;font-size:15px;line-height:1.75;">
+                为方便您本次出行，我们为您开通了${flightLine}的行程服务。请使用<strong>您本人的手机</strong>打开下方链接。该链接仅可在第一台设备上激活，请勿转发他人。
+              </p>
+              <p style="margin:0 0 22px;">
+                <a href="${safeUrl}" style="display:inline-block;background:#E60012;color:#ffffff;padding:12px 22px;border-radius:4px;text-decoration:none;font-weight:700;font-size:15px;">查看我的行程</a>
+              </p>
+              ${qrBlock}
+              <p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#666666;">
+                如按钮无法打开，请复制完整链接（须包含 <span style="font-family:Consolas,monospace;">#</span> 后面的部分）：
+              </p>
+              <p style="margin:0 0 16px;font-size:13px;line-height:1.6;word-break:break-all;color:#333333;">${safeVisible}</p>
+              <p style="margin:0 0 20px;font-size:13px;color:#888888;">本链接 48 小时内有效。祝您旅途愉快。</p>
+              <p style="margin:0;font-size:14px;line-height:1.6;color:#333333;">中国国际航空</p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px;background:#fafafa;border-top:3px solid #E60012;text-align:center;font-family:Arial,Helvetica,sans-serif;">
+              <div style="font-size:13px;font-weight:800;letter-spacing:0.12em;color:#E60012;">POWERED BY ORIENTA</div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 </body>
 </html>`;
 }
@@ -223,7 +263,7 @@ export async function sendInviteMail(
     name?: string;
     flightId?: string;
   },
-  deps?: { config?: MailConfig | null; transport?: MailTransport; qr?: InviteQr | null },
+  deps?: { config?: MailConfig | null; transport?: MailTransport; qr?: InviteQr | null; logo?: Buffer | null },
 ): Promise<{ ok: true; to: string } | { ok: false; error: string; status: number }> {
   const config = deps?.config !== undefined ? deps.config : readMailConfig();
   if (!config) return { ok: false, error: MAIL_ERRORS.not_configured, status: 503 };
@@ -235,8 +275,28 @@ export async function sendInviteMail(
   if (!claim.ok) return { ok: false, error: claim.error, status: 400 };
 
   const qr = deps?.qr !== undefined ? deps.qr : await tryRenderInviteQr(claim.url);
+  const logo = deps?.logo !== undefined ? deps.logo : tryLoadInviteLogo();
+  const attachments: MailAttachment[] = [];
+  if (logo) {
+    attachments.push({
+      filename: INVITE_LOGO_FILENAME,
+      content: logo,
+      cid: INVITE_LOGO_CID,
+      contentType: "image/png",
+      contentDisposition: "inline",
+    });
+  }
+  if (qr) {
+    attachments.push({
+      filename: INVITE_QR_FILENAME,
+      content: qr.png,
+      cid: INVITE_QR_CID,
+      contentType: "image/png",
+      contentDisposition: "inline",
+    });
+  }
   const message: MailMessage = {
-    from: config.from,
+    from: brandedInviteFrom(config.from),
     to: parsed.email,
     subject: inviteEmailSubject(input.flightId),
     text: inviteEmailText(claim.url, { name: input.name, flightId: input.flightId }),
@@ -244,18 +304,9 @@ export async function sendInviteMail(
       name: input.name,
       flightId: input.flightId,
       qrCid: qr ? INVITE_QR_CID : undefined,
+      logoCid: logo ? INVITE_LOGO_CID : undefined,
     }),
-    attachments: qr
-      ? [
-          {
-            filename: INVITE_QR_FILENAME,
-            content: qr.png,
-            cid: INVITE_QR_CID,
-            contentType: "image/png",
-            contentDisposition: "inline",
-          },
-        ]
-      : undefined,
+    attachments: attachments.length ? attachments : undefined,
   };
   const transport = deps?.transport ?? createSmtpTransport(config);
   const sent = await transport(message);
