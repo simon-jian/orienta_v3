@@ -18,6 +18,7 @@ import { loadGates } from "../services/poi/PoiService";
 import { buildFlights } from "../services/flightService";
 import { logout as authLogout } from "../services/auth";
 import { clientDefaultAirportId, clientDefaultTenantId, clientDefaultAirport } from "../config/client";
+import { CONSOLE_TITLE } from "../config/branding";
 import { INDOOR_AIRPORTS, findIndoorAirport } from "../config/indoorAirports";
 
 type DashTab = "dashboard" | "map" | "invites";
@@ -171,7 +172,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
     <div className="app">
       <TopBar
         search={search} onSearch={setSearch}
-        title="Orienta公司后台"
+        title={CONSOLE_TITLE}
         subtitle={airportLabel}
         searchPlaceholder="搜索姓名 / ID / 航班 / 登机口…"
         gateCount={gates.length} passengerCount={passengers.length}

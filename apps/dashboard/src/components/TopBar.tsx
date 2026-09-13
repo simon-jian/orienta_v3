@@ -1,4 +1,5 @@
 import React from "react";
+import { BRAND_LOGO_ALT, BRAND_LOGO_SRC, CONSOLE_TITLE } from "../config/branding";
 
 export default function TopBar(props: {
   search: string;
@@ -23,7 +24,7 @@ export default function TopBar(props: {
 }) {
   const {
     search, onSearch,
-    title = "Orienta公司后台",
+    title = CONSOLE_TITLE,
     subtitle = "Orienta · Gate / Passenger Ops",
     searchPlaceholder = "搜索登机口（如 E21 / D06）…",
     paused, setPaused,
@@ -38,7 +39,7 @@ export default function TopBar(props: {
   return (
     <div className="topbar">
       <div className="brand">
-        <img className="logo" src="/orienta-logo.svg" alt="Orienta" />
+        <img className="logo" src={BRAND_LOGO_SRC} alt={BRAND_LOGO_ALT} />
         <div>
           <div className="title">{title}</div>
           <div className="subtitle">{subtitle}</div>

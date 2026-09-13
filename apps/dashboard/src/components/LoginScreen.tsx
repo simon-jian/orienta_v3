@@ -3,6 +3,7 @@
  * Credentials are validated server-side via POST /api/auth/login.
  */
 import React, { useState } from "react";
+import { BRAND_LOGO_ALT, BRAND_LOGO_SRC, CONSOLE_TITLE } from "../config/branding";
 
 export default function LoginScreen(props: {
   onLogin(emailOrUser: string, password: string): Promise<unknown>;
@@ -34,9 +35,9 @@ export default function LoginScreen(props: {
       <div className="loginShell">
         <div className="loginBrand">
           <div className="loginMark">
-            <img className="loginLogoImg" src="/orienta-logo.svg" alt="Orienta" />
+            <img className="loginLogoImg" src={BRAND_LOGO_SRC} alt={BRAND_LOGO_ALT} />
             <div>
-              <div className="loginTitle">Orienta公司后台</div>
+              <div className="loginTitle">{CONSOLE_TITLE}</div>
               <div className="loginSub">Gate · Passenger · Ops Console</div>
             </div>
           </div>

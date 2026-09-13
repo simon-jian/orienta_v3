@@ -19,12 +19,12 @@ describe("titleForPath", () => {
   });
 
   it("keeps the operator console title everywhere else", () => {
-    expect(titleForPath("/")).toBe("Orienta 公司后台");
-    expect(titleForPath("/dashboard")).toBe("Orienta 公司后台");
+    expect(titleForPath("/")).toBe("中国国际航空公司 · Orienta 后台");
+    expect(titleForPath("/dashboard")).toBe("中国国际航空公司 · Orienta 后台");
   });
 
   it("is case-insensitive and tolerates an empty path", () => {
     expect(titleForPath("/PAX/App")).toBe("Orienta 旅客端");
-    expect(titleForPath("")).toBe("Orienta 公司后台");
+    expect(titleForPath("")).toBe("中国国际航空公司 · Orienta 后台");
   });
 });
