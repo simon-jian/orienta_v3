@@ -24,6 +24,7 @@ import {
   type NavPlanConfirmed,
   type NavPlanHints,
 } from "./assist/navPlan";
+import { paxErrorMessage, usePaxT } from "./i18n";
 import { clientDefaultAirportId } from "../../config/client";
 import "./styles/pax.css";
 
@@ -57,6 +58,7 @@ function hintsFromUrlAndStorage(session: PaxSession | null): NavPlanHints {
 }
 
 export default function PaxAppPage() {
+  const t = usePaxT();
   const [session, setSession] = useState<PaxSession | null>(() => getStoredPaxSession());
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
@@ -118,7 +120,7 @@ export default function PaxAppPage() {
     const stored = getStoredPaxSession();
     if (!stored?.token) {
       setChecking(false);
-      setError("missing_session");
+      setError(paxErrorMessage(t, "missing_session"));
       return;
     }
     fetchPaxSession(stored.token)
@@ -151,7 +153,7 @@ export default function PaxAppPage() {
         });
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "session_invalid");
+        if (!cancelled) setError(paxErrorMessage(t, err instanceof Error ? err.message : "session_invalid"));
       })
       .finally(() => {
         if (!cancelled) setChecking(false);
@@ -159,7 +161,7 @@ export default function PaxAppPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   function logout() {
     nav.stop();
@@ -171,7 +173,7 @@ export default function PaxAppPage() {
   if (checking) {
     return (
       <div className="pax-shell pax-shell--assist" style={{ display: "grid", placeItems: "center" }}>
-        Loading passenger session…
+        {t("app.loading")}
       </div>
     );
   }
@@ -180,10 +182,10 @@ export default function PaxAppPage() {
     return (
       <div className="pax-shell pax-shell--assist" style={{ display: "grid", placeItems: "center", padding: 24 }}>
         <div className="pax-card" style={{ maxWidth: 460, width: "100%" }}>
-          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Session required</h1>
-          <p className="pax-lead">Please start from the passenger entry page. Error: {error || "missing_session"}</p>
+          <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>{t("app.sessionTitle")}</h1>
+          <p className="pax-lead">{t("app.sessionHint", { error: error || paxErrorMessage(t, "missing_session") })}</p>
           <a className="pax-btn" href="/pax" style={{ textAlign: "center", textDecoration: "none", display: "inline-block" }}>
-            Go to /pax
+            {t("app.goPax")}
           </a>
         </div>
       </div>
@@ -196,15 +198,15 @@ export default function PaxAppPage() {
         <img className="pax-assist-logo" src="/orienta-logo.svg" alt="Orienta" />
         <div className="pax-assist-brand-actions">
           <a className="pax-btn secondary" href="/pax/flight" style={{ textDecoration: "none" }}>
-            航班
+            {t("app.flight")}
           </a>
           <button type="button" className="pax-btn secondary" onClick={logout}>
-            退出
+            {t("app.logout")}
           </button>
         </div>
       </div>
 
-      <div className="pax-assist-tabs" role="tablist" aria-label="主视图">
+      <div className="pax-assist-tabs" role="tablist" aria-label={t("app.tabsAria")}>
         <button
           type="button"
           role="tab"
@@ -212,7 +214,7 @@ export default function PaxAppPage() {
           className={`pax-assist-tab${tab === "assist" ? " active" : ""}`}
           onClick={() => setTab("assist")}
         >
-          智能服务助手
+          {t("app.tabAssist")}
         </button>
         <button
           type="button"
@@ -221,7 +223,7 @@ export default function PaxAppPage() {
           className={`pax-assist-tab${tab === "nav" ? " active" : ""}`}
           onClick={() => setTab("nav")}
         >
-          室内导航
+          {t("app.tabNav")}
         </button>
       </div>
 
@@ -255,9 +257,9 @@ export default function PaxAppPage() {
           <div className="pax-assist-hdr">
             <span className={`pax-assist-dot${linkUp ? " online" : ""}`} />
             <div>
-              <div className="pax-assist-hdr-title">{session.passenger.name || "Guest"}</div>
+              <div className="pax-assist-hdr-title">{session.passenger.name || t("app.guest")}</div>
               <div className="pax-assist-hdr-sub">
-                ({session.passenger.id}) · {session.plan === "premium" ? "Premium" : "Free"}
+                ({session.passenger.id}) · {session.plan === "premium" ? t("app.planPremium") : t("app.planFree")}
               </div>
             </div>
           </div>

@@ -3,6 +3,7 @@ import type { PaxRealtime } from "../../../services/realtime";
 import type { PaxSession } from "../session";
 import { postPaxApi } from "../assist/postPaxApi";
 import { fmtAssistTime } from "../assist/assistTypes";
+import { usePaxI18n } from "../i18n";
 
 /**
  * Relays live positions from the embedded pedestrian_dead_reckoning page to the
@@ -42,6 +43,7 @@ export function usePdrTelemetryRelay(opts: {
   onStatus: (text: string) => void;
 }): { frameRef: MutableRefObject<HTMLIFrameElement | null> } {
   const { session, realtimeRef, wsUp, onStatus } = opts;
+  const { t, intlLocale } = usePaxI18n();
   const frameRef = useRef<HTMLIFrameElement | null>(null);
 
   const wsUpRef = useRef(wsUp);
@@ -112,9 +114,9 @@ export function usePdrTelemetryRelay(opts: {
         // #endregion
         if (degradedRef.current) {
           degradedRef.current = false;
-          report(`位置实时同步已恢复 · ${fmtAssistTime(Date.now())}`, true);
+          report(t("nav.posRestored", { time: fmtAssistTime(Date.now(), intlLocale) }), true);
         } else {
-          report(`位置已同步 · ${fmtAssistTime(Date.now())}`, false);
+          report(t("nav.posSynced", { time: fmtAssistTime(Date.now(), intlLocale) }), false);
         }
         return;
       }
@@ -122,7 +124,7 @@ export function usePdrTelemetryRelay(opts: {
       pendingRef.current = sample;
       if (!degradedRef.current) {
         degradedRef.current = true;
-        report("实时通道断开，位置改用低频上传", true);
+        report(t("nav.wsDown"), true);
         // #region agent log
         dbgLog("websocket down, buffering for http fallback", { wsUp: wsUpRef.current });
         // #endregion
@@ -155,8 +157,8 @@ export function usePdrTelemetryRelay(opts: {
           nextHttpAtRef.current = Date.now() + backoffMsRef.current;
           report(
             res.status === 429
-              ? `位置上传被限流，${Math.round(backoffMsRef.current / 1000)}s 后重试`
-              : `位置上传失败（${res.status}），稍后重试`,
+              ? t("nav.posRateLimited", { sec: Math.round(backoffMsRef.current / 1000) })
+              : t("nav.posUploadFailed", { status: res.status }),
             true,
           );
         })
@@ -174,7 +176,7 @@ export function usePdrTelemetryRelay(opts: {
       window.removeEventListener("message", onMessage);
       window.clearInterval(timer);
     };
-  }, [session, realtimeRef]);
+  }, [session, realtimeRef, t, intlLocale]);
 
   return { frameRef };
 }

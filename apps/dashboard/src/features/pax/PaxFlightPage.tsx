@@ -16,6 +16,7 @@ import { IndoorMapEmbed, type MapLeg } from "./flight/IndoorMapEmbed";
 import { FlightCard, placeholderFlight } from "./flight/FlightCard";
 import { shortLocalClock, formatUtcClock, type BoardsDoors } from "./flight/flightCardHelpers";
 import { JourneySheets } from "./flight/JourneySheets";
+import { paxErrorMessage, usePaxI18n } from "./i18n";
 import { clientDefaultAirportId } from "../../config/client";
 import "./styles/pax.css";
 
@@ -46,7 +47,14 @@ function usableAirport(value: string | undefined | null): string {
   return c;
 }
 
+function tripIntentLabel(intent: string, t: ReturnType<typeof usePaxI18n>["t"]): string {
+  if (intent === "arrive") return t("flight.intentArrive");
+  if (intent === "transfer") return t("flight.intentTransfer");
+  return t("flight.intentDepart");
+}
+
 export default function PaxFlightPage() {
+  const { t, intlLocale } = usePaxI18n();
   const navigate = useNavigate();
   const [session, setSession] = useState<PaxSession | null>(() => getStoredPaxSession());
   const [checking, setChecking] = useState(true);
@@ -69,7 +77,7 @@ export default function PaxFlightPage() {
     const stored = getStoredPaxSession();
     if (!stored?.token) {
       setChecking(false);
-      setError("missing_session");
+      setError(paxErrorMessage(t, "missing_session"));
       return;
     }
     fetchPaxSession(stored.token)
@@ -77,7 +85,7 @@ export default function PaxFlightPage() {
         if (!cancelled) setSession(s);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "session_invalid");
+        if (!cancelled) setError(paxErrorMessage(t, err instanceof Error ? err.message : "session_invalid"));
       })
       .finally(() => {
         if (!cancelled) setChecking(false);
@@ -85,7 +93,7 @@ export default function PaxFlightPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     if (!session || !trip) return;
@@ -119,7 +127,7 @@ export default function PaxFlightPage() {
           setMapLeg(leg);
         }
       } catch (err) {
-        if (!cancelled) setLoadError(err instanceof Error ? err.message : "flight_load_failed");
+        if (!cancelled) setLoadError(paxErrorMessage(t, err instanceof Error ? err.message : "flight_load_failed"));
       } finally {
         if (!cancelled) setLoadingFlight(false);
       }
@@ -128,7 +136,7 @@ export default function PaxFlightPage() {
     return () => {
       cancelled = true;
     };
-  }, [session, trip]);
+  }, [session, trip, t]);
 
   const liveInstance =
     trip?.intent === "transfer" && transfer
@@ -180,7 +188,7 @@ export default function PaxFlightPage() {
           null;
         const boards =
           shortLocalClock(boardingLocal) ||
-          formatUtcClock(boardingUtc, tz) ||
+          formatUtcClock(boardingUtc, tz, intlLocale) ||
           undefined;
         if (boards) setBoardsDoors({ boards });
       })
@@ -190,12 +198,12 @@ export default function PaxFlightPage() {
     return () => {
       cancelled = true;
     };
-  }, [session?.token, gateFlight, gateDate, trip?.intent, liveInstance?.origin_timezone]);
+  }, [session?.token, gateFlight, gateDate, trip?.intent, liveInstance?.origin_timezone, intlLocale]);
 
   if (checking) {
     return (
       <div className="pax-shell">
-        <div className="pax-wrap">Loading…</div>
+        <div className="pax-wrap">{t("common.loading")}</div>
       </div>
     );
   }
@@ -204,9 +212,9 @@ export default function PaxFlightPage() {
     return (
       <div className="pax-shell">
         <div className="pax-wrap">
-          <p className="pax-error">{error || "missing_session"}</p>
+          <p className="pax-error">{error || paxErrorMessage(t, "missing_session")}</p>
           <Link className="pax-btn" to="/pax/login" style={{ display: "inline-block", marginTop: 12, textDecoration: "none" }}>
-            去登录
+            {t("flight.goLogin")}
           </Link>
         </div>
       </div>
@@ -223,9 +231,7 @@ export default function PaxFlightPage() {
         : trip.flight || session.passenger.flightId,
       session.passenger.gateId,
     );
-  const flightNotice = loadError
-    ? "实时航班数据暂不可用。仍可使用 Time to Gate / Exit 与地图导航。"
-    : undefined;
+  const flightNotice = loadError ? t("flight.noticeUnavailable") : undefined;
 
   const exitFlight =
     trip.intent === "transfer"
@@ -265,13 +271,13 @@ export default function PaxFlightPage() {
         : depGate;
 
   const gateSubtitle = `${displayInstance.dep_iata} ${displayInstance.dep_terminal || ""} → ${displayInstance.dep_gate || "—"}`;
-  const exitSubtitle = `${displayInstance.arr_iata} ${displayInstance.arr_gate || "—"} → Terminal exit`;
+  const exitSubtitle = `${displayInstance.arr_iata} ${displayInstance.arr_gate || "—"} → ${t("flight.terminalExit")}`;
 
   return (
     <div className="pax-shell pax-shell--flight">
       <div className="pax-flight-screen">
         <div className="pax-flight-toolbar">
-          <span className="pax-chip ok">{trip.intent}</span>
+          <span className="pax-chip ok">{tripIntentLabel(trip.intent, t)}</span>
           <button
             type="button"
             className="pax-btn secondary"
@@ -280,7 +286,7 @@ export default function PaxFlightPage() {
               navigate("/pax/login", { replace: true });
             }}
           >
-            退出
+            {t("flight.logout")}
           </button>
         </div>
 
@@ -301,7 +307,7 @@ export default function PaxFlightPage() {
                       }
                     }}
                   >
-                    抵达段
+                    {t("flight.legArrival")}
                   </button>
                   <button
                     type="button"
@@ -315,12 +321,12 @@ export default function PaxFlightPage() {
                       }
                     }}
                   >
-                    出发段
+                    {t("flight.legDeparture")}
                   </button>
                 </div>
               ) : null}
 
-              {loadingFlight ? <p className="pax-flight-loading">查询航班…</p> : null}
+              {loadingFlight ? <p className="pax-flight-loading">{t("flight.querying")}</p> : null}
 
               <FlightCard
                 instance={displayInstance}

@@ -1,4 +1,5 @@
 import { Link, Navigate } from "react-router-dom";
+import { usePaxT } from "./i18n";
 import { getStoredPaxSession } from "./session";
 import "./styles/pax.css";
 
@@ -6,6 +7,7 @@ import "./styles/pax.css";
  * Branded passenger entry (robots `/pax?full=1` treatment) — personal service only.
  */
 export default function PaxEntryPage() {
+  const t = usePaxT();
   if (getStoredPaxSession()?.token) {
     return <Navigate to="/pax/app" replace />;
   }
@@ -13,19 +15,15 @@ export default function PaxEntryPage() {
   return (
     <div className="pax-shell">
       <div className="pax-wrap">
-        <p className="pax-chip ok" style={{ marginBottom: 16 }}>Orienta Passenger</p>
+        <p className="pax-chip ok" style={{ marginBottom: 16 }}>{t("entry.chip")}</p>
         <h1 className="pax-brand">Orienta</h1>
-        <p className="pax-lead">
-          个人机场导航与行程助手。扫登机牌或登录后，获取到登机口/出口时间与室内导航。
-        </p>
+        <p className="pax-lead">{t("entry.lead")}</p>
 
         <section className="pax-card">
-          <h2>个人服务</h2>
-          <p>
-            使用手机领取航班绑定会话，查看行程估计，开始室内导航。
-          </p>
+          <h2>{t("entry.serviceTitle")}</h2>
+          <p>{t("entry.serviceBody")}</p>
           <Link className="pax-btn" to="/pax/login" style={{ display: "inline-block", textDecoration: "none" }}>
-            继续
+            {t("entry.continue")}
           </Link>
         </section>
       </div>

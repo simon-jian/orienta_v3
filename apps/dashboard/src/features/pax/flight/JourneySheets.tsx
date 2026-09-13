@@ -5,6 +5,7 @@ import {
   patchJourneyPreferences,
   type JourneyPreferences,
 } from "../api/journeyApi";
+import { paxErrorMessage, usePaxT, type PaxTranslate } from "../i18n";
 import { ArrivalShareControls } from "./ArrivalShareControls";
 import type { PaxSession } from "../session";
 
@@ -22,12 +23,12 @@ type Props = {
   exitSubtitle: string;
 };
 
-function rangeText(value: unknown): string {
+function rangeText(value: unknown, t: PaxTranslate): string {
   if (!value || typeof value !== "object") return "—";
   const r = value as { min?: number; max?: number; start?: string; end?: string };
   if (typeof r.start === "string" && typeof r.end === "string") return `${r.start} – ${r.end}`;
   if (typeof r.min === "number" && typeof r.max === "number") {
-    return `${Math.round(r.min)}–${Math.round(r.max)} min`;
+    return t("common.rangeMin", { min: Math.round(r.min), max: Math.round(r.max) });
   }
   return "—";
 }
@@ -68,6 +69,7 @@ export function JourneySheets({
   gateSubtitle,
   exitSubtitle,
 }: Props) {
+  const t = usePaxT();
   const [gateData, setGateData] = useState<Record<string, unknown> | null>(null);
   const [exitData, setExitData] = useState<Record<string, unknown> | null>(null);
   const [error, setError] = useState("");
@@ -100,11 +102,11 @@ export function JourneySheets({
         setExitData(await getTimeToExit(session.token, exitFlight, exitDate));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "journey_failed");
+      setError(paxErrorMessage(t, err instanceof Error ? err.message : "journey_failed"));
     } finally {
       setBusy(false);
     }
-  }, [open, session.token, gateFlight, gateDate, exitFlight, exitDate, bags, security, destination, immigration]);
+  }, [open, session.token, gateFlight, gateDate, exitFlight, exitDate, bags, security, destination, immigration, t]);
 
   useEffect(() => {
     void refresh();
@@ -115,12 +117,12 @@ export function JourneySheets({
   const isGate = open === "gate";
   const data = isGate ? gateData : exitData;
   const headline = isGate
-    ? rangeText(data?.terminalEntryRange) !== "—"
-      ? rangeText(data?.terminalEntryRange)
-      : rangeText(data?.range ?? data?.totalRange)
-    : rangeText(data?.destinationExpectedRange) !== "—"
-      ? rangeText(data?.destinationExpectedRange)
-      : rangeText(data?.range ?? data?.remainingMinutes);
+    ? rangeText(data?.terminalEntryRange, t) !== "—"
+      ? rangeText(data?.terminalEntryRange, t)
+      : rangeText(data?.range ?? data?.totalRange, t)
+    : rangeText(data?.destinationExpectedRange, t) !== "—"
+      ? rangeText(data?.destinationExpectedRange, t)
+      : rangeText(data?.range ?? data?.remainingMinutes, t);
 
   return (
     <div className="pax-sheet-backdrop" role="presentation" onClick={onClose}>
@@ -133,10 +135,10 @@ export function JourneySheets({
       >
         <div className="pax-sheet__head">
           <div>
-            <h2 id="pax-sheet-title">{isGate ? "Time to Gate" : "Time to Exit"}</h2>
+            <h2 id="pax-sheet-title">{isGate ? t("flight.timeToGate") : t("flight.timeToExit")}</h2>
             <p>{isGate ? gateSubtitle : exitSubtitle}</p>
           </div>
-          <button type="button" className="pax-sheet__close" onClick={onClose} aria-label="Close">
+          <button type="button" className="pax-sheet__close" onClick={onClose} aria-label={t("common.close")}>
             ×
           </button>
         </div>
@@ -146,70 +148,70 @@ export function JourneySheets({
           {isGate ? (
             <>
               <div>
-                <span>Target gate arrival</span>
+                <span>{t("sheet.targetGate")}</span>
                 <b>{String(data?.targetGateArrivalLocal || data?.targetGateArrival || "—")}</b>
               </div>
               <div>
-                <span>Estimated airport processing</span>
-                <b>{rangeText(data?.range ?? data?.totalRange)}</b>
+                <span>{t("sheet.airportProcessing")}</span>
+                <b>{rangeText(data?.range ?? data?.totalRange, t)}</b>
               </div>
             </>
           ) : (
             <>
               <div>
-                <span>Airport exit time</span>
-                <b>{rangeText(data?.range ?? data?.remainingMinutes)}</b>
+                <span>{t("sheet.airportExitTime")}</span>
+                <b>{rangeText(data?.range ?? data?.remainingMinutes, t)}</b>
               </div>
               <div>
-                <span>Destination</span>
-                <b>{String(data?.destinationLabel || "Exit")}</b>
+                <span>{t("sheet.destination")}</span>
+                <b>{String(data?.destinationLabel || t("arrival.exit"))}</b>
               </div>
             </>
           )}
         </div>
 
         <Seg
-          label="Checked bags"
+          label={t("sheet.checkedBags")}
           value={bags}
           options={[
-            { id: "no", label: "No" },
-            { id: "yes", label: "Yes" },
-            { id: "unknown", label: "Not sure" },
+            { id: "no", label: t("sheet.bagsNo") },
+            { id: "yes", label: t("sheet.bagsYes") },
+            { id: "unknown", label: t("sheet.bagsUnknown") },
           ]}
           onChange={setBags}
         />
         {isGate ? (
           <Seg
-            label="Security method"
+            label={t("sheet.security")}
             value={security}
             options={[
-              { id: "standard", label: "Standard" },
-              { id: "priority", label: "Priority" },
-              { id: "trusted", label: "Pre✓" },
+              { id: "standard", label: t("sheet.secStandard") },
+              { id: "priority", label: t("sheet.secPriority") },
+              { id: "trusted", label: t("sheet.secTrusted") },
             ]}
             onChange={setSecurity}
           />
         ) : (
           <>
             <Seg
-              label="Destination"
+              label={t("sheet.destination")}
               value={destination}
               options={[
-                { id: "unknown", label: "Exit" },
-                { id: "curbside", label: "Pickup" },
-                { id: "rideshare", label: "Rideshare" },
-                { id: "parking", label: "Parking" },
-                { id: "transit", label: "Transit" },
+                { id: "unknown", label: t("sheet.destExit") },
+                { id: "curbside", label: t("sheet.destPickup") },
+                { id: "rideshare", label: t("sheet.destRideshare") },
+                { id: "parking", label: t("sheet.destParking") },
+                { id: "transit", label: t("sheet.destTransit") },
               ]}
               onChange={setDestination}
             />
             <Seg
-              label="Immigration"
+              label={t("sheet.immigration")}
               value={immigration}
               options={[
-                { id: "not-required", label: "Not required" },
-                { id: "visitor", label: "Required" },
-                { id: "unknown", label: "Not sure" },
+                { id: "not-required", label: t("sheet.immNotRequired") },
+                { id: "visitor", label: t("sheet.immRequired") },
+                { id: "unknown", label: t("sheet.immUnknown") },
               ]}
               onChange={setImmigration}
             />
@@ -217,11 +219,11 @@ export function JourneySheets({
         )}
 
         <button type="button" className="pax-btn secondary" style={{ width: "100%", marginTop: 10 }} onClick={() => void refresh()} disabled={busy}>
-          {busy ? "Updating…" : "Update estimate"}
+          {busy ? t("sheet.updating") : t("sheet.updateEstimate")}
         </button>
 
         <button type="button" className="pax-link" onClick={() => setShowBasis((v) => !v)}>
-          {showBasis ? "▾ Hide calculation basis" : "▸ View calculation basis"}
+          {showBasis ? t("sheet.hideBasis") : t("sheet.viewBasis")}
         </button>
         {showBasis ? (
           <pre className="pax-basis">{JSON.stringify(data?.breakdown || data?.assumptions || data || {}, null, 2)}</pre>

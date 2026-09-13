@@ -6,6 +6,7 @@ import { postPaxApi, postPaxFallback } from "../assist/postPaxApi";
 import { mergeChatHistory, upsertChatMessage } from "../assist/chatMerge";
 import type { RobotRequest } from "../assist/assistTypes";
 import { apiUrl } from "../../../config/api";
+import { usePaxT } from "../i18n";
 
 const PRESENCE_OK_TTL_MS = 20_000;
 const CHAT_POLL_MS = 4_000;
@@ -14,12 +15,13 @@ export function usePaxRealtimeSession(
   session: PaxSession | null,
   opts?: { onRobotRequest?: (ev: RobotRequestEvent) => void },
 ) {
+  const t = usePaxT();
   const [rtUp, setRtUp] = useState(false);
   const [presenceOk, setPresenceOk] = useState(false);
   const [chat, setChat] = useState<ChatMessage[]>([]);
   const [notifications, setNotifications] = useState<MsgRecord[]>([]);
   const [unreadChat, setUnreadChat] = useState(false);
-  const [locationStatus, setLocationStatus] = useState("Location: —");
+  const [locationStatus, setLocationStatus] = useState(() => t("chat.locationIdle"));
   /** undefined = no WS event yet; null = cleared; object = live status */
   const [liveRobotRequest, setLiveRobotRequest] = useState<RobotRequest | null | undefined>(undefined);
   const realtimeRef = useRef<PaxRealtime | null>(null);
@@ -63,7 +65,7 @@ export function usePaxRealtimeSession(
         if (msg.from !== "pax") setUnreadChat(true);
       },
       onChatHistory: (messages) => setChat((prev) => mergeChatHistory(prev, messages)),
-      onLocRequest: () => setLocationStatus("Operator requested your current location."),
+      onLocRequest: () => setLocationStatus(t("chat.locRequest")),
       onRobotRequest: (ev) => {
         const req = ev.request as RobotRequest;
         if (ev.type === "robot_request_cleared" || req.status === "cancelled") {
@@ -80,7 +82,7 @@ export function usePaxRealtimeSession(
       realtimeRef.current = null;
       setRtUp(false);
     };
-  }, [sessionToken, passengerId, tenantId, displayName, plan, flightId, gateId]);
+  }, [sessionToken, passengerId, tenantId, displayName, plan, flightId, gateId, t]);
 
   useEffect(() => {
     if (!sessionToken) return;
@@ -183,7 +185,7 @@ export function usePaxRealtimeSession(
       })
       .catch(() => {
         setChat((prev) => prev.filter((m) => m.id !== localId));
-        setLocationStatus("消息发送失败：请检查网络后重试。");
+        setLocationStatus(t("chat.sendFailed"));
       });
   }
 
@@ -195,9 +197,7 @@ export function usePaxRealtimeSession(
     } else {
       void sendChatHttp(text, "location", targetGateId).catch(() => {});
     }
-    setLocationStatus(
-      `Location share requested near ${targetGateId}. Live map position will update automatically when available.`,
-    );
+    setLocationStatus(t("chat.shareRequested", { gate: targetGateId }));
   }
 
   return {

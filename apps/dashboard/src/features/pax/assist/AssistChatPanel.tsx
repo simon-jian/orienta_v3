@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ChatMessage, MsgRecord } from "../../../types/types";
+import { usePaxI18n, type PaxMessageKey } from "../i18n";
 import { fmtAssistTime } from "./assistTypes";
 
 function MessageList({
@@ -9,14 +10,13 @@ function MessageList({
   messages: ChatMessage[];
   plan: "free" | "premium";
 }) {
+  const { t, intlLocale } = usePaxI18n();
   if (!messages.length) {
     return (
       <div className="pax-assist-watermark">
-        Orienta 智能中转 · Transfer Assist
+        {t("chat.watermark")}
         <span>
-          {plan === "premium"
-            ? "Premium：可与运营助手对话。"
-            : "Free：由 AI agent 协助。可收通知并分享位置。"}
+          {plan === "premium" ? t("chat.watermarkPremium") : t("chat.watermarkFree")}
         </span>
       </div>
     );
@@ -27,10 +27,12 @@ function MessageList({
         const own = m.from === "pax";
         const role =
           m.from === "pax" ? "pax" : m.from === "system" ? "system" : m.from === "agent" ? "agent" : "admin";
+        const roleKey = `chat.role.${role}` as PaxMessageKey;
+        const fromLabel = own ? t("chat.you") : role === "pax" ? t("chat.you") : t(roleKey);
         return (
           <div key={m.id} className={`pax-assist-msg ${own ? "right" : "left"}`}>
             <div className="pax-assist-msg-meta">
-              {own ? "You" : m.from} · {fmtAssistTime(m.createdAt)}
+              {fromLabel} · {fmtAssistTime(m.createdAt, intlLocale)}
             </div>
             <div className={`pax-assist-bubble ${role}`}>{m.body}</div>
           </div>
@@ -65,6 +67,7 @@ export function AssistChatPanel({
   onSendChat,
   onShareLocation,
 }: Props) {
+  const t = usePaxI18n().t;
   const [input, setInput] = useState("");
   const [dismissedNotify, setDismissedNotify] = useState<Set<string>>(() => new Set());
   const msgsRef = useRef<HTMLDivElement | null>(null);
@@ -91,8 +94,8 @@ export function AssistChatPanel({
   return (
     <div className="pax-assist-chat">
       <div className="pax-assist-chat-head">
-        <span>与 Orienta Agent 交互</span>
-        {unreadChat ? <span className="pax-assist-unread-dot" aria-label="unread" /> : null}
+        <span>{t("chat.head")}</span>
+        {unreadChat ? <span className="pax-assist-unread-dot" aria-label={t("chat.unread")} /> : null}
       </div>
 
       {visibleBanners.map((n) => (
@@ -100,7 +103,7 @@ export function AssistChatPanel({
           <button
             type="button"
             className="dismiss"
-            aria-label="Dismiss"
+            aria-label={t("chat.dismiss")}
             onClick={() => setDismissedNotify((prev) => new Set(prev).add(n.messageId))}
           >
             ×
@@ -113,8 +116,8 @@ export function AssistChatPanel({
       {unreadChat ? (
         <button type="button" className="pax-assist-chat-alert" onClick={focusChat}>
           <span className="pax-assist-chat-alert-dot" />
-          <span>客服新消息</span>
-          <span className="pax-assist-chat-alert-action">查看消息</span>
+          <span>{t("chat.newMessage")}</span>
+          <span className="pax-assist-chat-alert-action">{t("chat.viewMessage")}</span>
         </button>
       ) : null}
 
@@ -125,7 +128,7 @@ export function AssistChatPanel({
       <div className="pax-assist-status-row">
         <span>{locationStatus}</span>
         <button type="button" className="pax-assist-loc-btn" disabled={!canShareLocation} onClick={onShareLocation}>
-          Share Location
+          {t("chat.shareLocation")}
         </button>
       </div>
 
@@ -140,15 +143,15 @@ export function AssistChatPanel({
                 send();
               }
             }}
-            placeholder={plan === "premium" ? "给运营助手发消息…" : "给 AI 助手发消息…"}
+            placeholder={plan === "premium" ? t("chat.placeholderPremium") : t("chat.placeholderFree")}
           />
           <button type="button" className="pax-assist-send" disabled={!input.trim()} onClick={send}>
-            Send
+            {t("chat.send")}
           </button>
         </div>
       ) : (
         <div className="pax-assist-input-area pax-assist-input-area--disabled">
-          <div className="pax-assist-free-note">会话无效，请重新登录旅客端。</div>
+          <div className="pax-assist-free-note">{t("chat.invalidSession")}</div>
         </div>
       )}
     </div>

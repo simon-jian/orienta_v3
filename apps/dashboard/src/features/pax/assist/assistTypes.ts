@@ -54,6 +54,10 @@ export function robotStatusLabel(status: RobotRequestStatus | "idle"): string {
   }
 }
 
-export function fmtAssistTime(ts: number): string {
-  return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+export function fmtAssistTime(ts: number, locale?: string): string {
+  try {
+    return new Date(ts).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
 }

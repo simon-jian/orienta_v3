@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { PaxSession } from "../session";
 import { cancelRobotRequest, fetchRobotRequest, submitRobotRequest } from "../api/robotApi";
+import { paxErrorMessage, usePaxT, type PaxMessageKey } from "../i18n";
 import {
   ROBOT_SERVICES,
-  robotStatusLabel,
   type RobotRequest,
   type RobotServiceType,
 } from "./assistTypes";
@@ -24,12 +24,13 @@ export function RobotBookingPanel({
   onFocusChat,
   onOpenChange,
 }: Props) {
+  const t = usePaxT();
   const [open, setOpen] = useState(false);
   const [serviceType, setServiceType] = useState<RobotServiceType>("follow");
   const [partySize, setPartySize] = useState(1);
-  const [origin, setOrigin] = useState("旅客当前位置");
-  const [destination, setDestination] = useState(
-    session.passenger.gateId ? `Gate ${session.passenger.gateId}` : "出发登机口",
+  const [origin, setOrigin] = useState(() => t("robot.originDefault"));
+  const [destination, setDestination] = useState(() =>
+    session.passenger.gateId ? t("robot.destGate", { gate: session.passenger.gateId }) : t("robot.destDefault"),
   );
   const [note, setNote] = useState("");
   const [request, setRequest] = useState<RobotRequest | null>(null);
@@ -79,7 +80,7 @@ export function RobotBookingPanel({
       setRequest(created);
       setOpen(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "submit_failed");
+      setError(paxErrorMessage(t, err instanceof Error ? err.message : "submit_failed"));
     } finally {
       setBusy(false);
     }
@@ -94,7 +95,7 @@ export function RobotBookingPanel({
       setRequest(null);
       setNote("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "cancel_failed");
+      setError(paxErrorMessage(t, err instanceof Error ? err.message : "cancel_failed"));
     } finally {
       setBusy(false);
     }
@@ -110,26 +111,26 @@ export function RobotBookingPanel({
           aria-expanded={open}
         >
           <span className="pax-robot-booking-main-label">
-            {tracking ? "机器人服务进行中" : "预约机器人服务"}
+            {tracking ? t("robot.tracking") : t("robot.book")}
           </span>
           <span className={`pax-robot-state-pill${tracking ? " is-live" : ""}`}>
-            {robotStatusLabel(phase)}
+            {t(`robot.status.${phase}` as PaxMessageKey)}
           </span>
         </button>
         <div className="pax-robot-booking-head-actions">
           {unreadChat ? (
             <button type="button" className="pax-robot-chat-alert" onClick={onFocusChat}>
-              客服
+              {t("robot.support")}
             </button>
           ) : null}
           <button type="button" className="pax-robot-booking-toggle" onClick={() => setOpen((v) => !v)}>
-            {open ? "收起" : tracking ? "详情" : "预约"}
+            {open ? t("robot.collapse") : tracking ? t("robot.details") : t("robot.bookShort")}
           </button>
         </div>
       </div>
 
       {!open && tracking ? (
-        <div className="pax-robot-tracking-compact">调度确认后会更新状态 · 可继续在下方发消息</div>
+        <div className="pax-robot-tracking-compact">{t("robot.compactHint")}</div>
       ) : null}
       {error ? <div className="pax-robot-error">{error}</div> : null}
 
@@ -138,9 +139,9 @@ export function RobotBookingPanel({
           {!tracking ? (
             <div className="pax-robot-form">
               <p className="pax-robot-booking-sub">
-                提交后由调度确认并分配机器人；对话输入框始终可用。
+                {t("robot.formLead")}
               </p>
-              <div className="pax-robot-service-cards" role="radiogroup" aria-label="机器人服务类型">
+              <div className="pax-robot-service-cards" role="radiogroup" aria-label={t("robot.serviceAria")}>
                 {ROBOT_SERVICES.map((s) => (
                   <button
                     key={s.id}
@@ -148,14 +149,14 @@ export function RobotBookingPanel({
                     className={`pax-robot-service-card${serviceType === s.id ? " active" : ""}`}
                     onClick={() => setServiceType(s.id)}
                   >
-                    <b>{s.title}</b>
-                    <span>{s.blurb}</span>
+                    <b>{t(`robot.svc.${s.id}.title` as PaxMessageKey)}</b>
+                    <span>{t(`robot.svc.${s.id}.blurb` as PaxMessageKey)}</span>
                   </button>
                 ))}
               </div>
               <div className="pax-robot-route-row">
                 <label>
-                  人数
+                  {t("robot.party")}
                   <input
                     type="number"
                     min={1}
@@ -165,24 +166,24 @@ export function RobotBookingPanel({
                   />
                 </label>
                 <label>
-                  当前位置 / 接应点
+                  {t("robot.origin")}
                   <input value={origin} onChange={(e) => setOrigin(e.target.value)} />
                 </label>
                 <label>
-                  目的地
+                  {t("robot.destination")}
                   <input value={destination} onChange={(e) => setDestination(e.target.value)} />
                 </label>
               </div>
               <label>
-                补充说明
+                {t("robot.note")}
                 <textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="例如：需要轮椅、行动不便、随身行李较多等"
+                  placeholder={t("robot.notePlaceholder")}
                 />
               </label>
               <button type="button" className="pax-btn" disabled={busy} onClick={() => void onSubmit()}>
-                {busy ? "提交中…" : "提交预约"}
+                {busy ? t("robot.submitting") : t("robot.submit")}
               </button>
             </div>
           ) : request ? (
@@ -194,14 +195,14 @@ export function RobotBookingPanel({
                   const done = i <= activeIdx;
                   return (
                     <div key={step} className={`pax-robot-track-step${done ? " done" : ""}`}>
-                      {robotStatusLabel(step)}
+                      {t(`robot.status.${step}` as PaxMessageKey)}
                     </div>
                   );
                 })}
               </div>
-              <p className="pax-robot-booking-sub">状态更新后会同步；也可继续在下方与助手沟通。</p>
+              <p className="pax-robot-booking-sub">{t("robot.trackingLead")}</p>
               <button type="button" className="pax-btn secondary" disabled={busy} onClick={() => void onCancel()}>
-                取消 / 重新预约
+                {t("robot.cancel")}
               </button>
             </div>
           ) : null}

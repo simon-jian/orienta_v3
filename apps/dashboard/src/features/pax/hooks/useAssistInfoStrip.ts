@@ -3,6 +3,7 @@ import { fetchClosestFlight, fetchTransfer } from "../api/flightApi";
 import { localCalendarDate, type PaxSession } from "../session";
 import { baseInfoStrip, flightLabel, resolveAssistTrip } from "../assist/assistTrip";
 import type { AssistInfoStrip } from "../assist/assistTypes";
+import { usePaxT } from "../i18n";
 
 /** Hold "connected" through brief WS flaps (common on trycloudflare / mobile Safari). */
 const OFFLINE_GRACE_MS = 8_000;
@@ -13,6 +14,7 @@ export function useAssistInfoStrip(
   /** True when HTTP presence heartbeat recently succeeded (tunnel-friendly). */
   presenceOk = false,
 ): AssistInfoStrip {
+  const t = usePaxT();
   const trip = useMemo(() => (session ? resolveAssistTrip(session) : null), [session]);
   const [enrichment, setEnrichment] = useState<{
     inboundLabel?: string;
@@ -91,7 +93,7 @@ export function useAssistInfoStrip(
     if (!session || !trip) {
       return { inbound: "—", outbound: "—", gate: "—", status: "—" };
     }
-    const status = !linkUp ? "Offline" : session.plan === "free" ? "Assisted" : "Connected";
+    const status = !linkUp ? t("strip.offline") : session.plan === "free" ? t("strip.assisted") : t("strip.connected");
     return baseInfoStrip(session, trip, { ...enrichment, status });
-  }, [session, trip, enrichment, linkUp]);
+  }, [session, trip, enrichment, linkUp, t]);
 }

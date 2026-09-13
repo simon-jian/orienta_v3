@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { redeemInvite } from "./api/paxSessionApi";
 import { readClaimToken } from "./claimToken";
+import { paxErrorMessage, usePaxT } from "./i18n";
 import "./styles/pax.css";
 
 /**
@@ -15,21 +16,8 @@ import "./styles/pax.css";
  * the session, so there is no form on this page at all.
  */
 
-const ERROR_MESSAGES: Record<string, string> = {
-  device_mismatch:
-    "该链接已绑定到另一台设备。为保护你的行程信息，只有首次打开链接的设备可以使用。请联系工作人员重置绑定。",
-  expired: "链接已过期，请联系工作人员重新发送。",
-  revoked: "链接已失效，请联系工作人员重新发送。",
-  invalid_link: "链接无效或不完整，请确认从原始短信或邮件中直接打开。",
-  missing_device_id: "无法生成设备标识，请关闭无痕模式后重试。",
-  rate_limit_exceeded: "尝试次数过多，请稍后再试。",
-};
-
-function messageFor(code: string): string {
-  return ERROR_MESSAGES[code] || "领取失败，请稍后重试或联系工作人员。";
-}
-
 export default function PaxClaimPage() {
+  const t = usePaxT();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const [error, setError] = useState("");
@@ -44,7 +32,7 @@ export default function PaxClaimPage() {
     const token = readClaimToken(window.location.search, window.location.hash);
     if (!inviteId || !token) {
       setBusy(false);
-      setError(messageFor("invalid_link"));
+      setError(paxErrorMessage(t, "invalid_link"));
       return;
     }
     setBusy(true);
@@ -55,11 +43,11 @@ export default function PaxClaimPage() {
       window.history.replaceState(null, "", "/pax/claim");
       navigate("/pax/flight", { replace: true });
     } catch (err) {
-      setError(messageFor(err instanceof Error ? err.message : ""));
+      setError(paxErrorMessage(t, err instanceof Error ? err.message : ""));
     } finally {
       setBusy(false);
     }
-  }, [inviteId, navigate]);
+  }, [inviteId, navigate, t]);
 
   useEffect(() => {
     if (startedRef.current) return;
@@ -70,22 +58,22 @@ export default function PaxClaimPage() {
   return (
     <div className="pax-shell">
       <div className="pax-wrap">
-        <p className="pax-chip ok" style={{ marginBottom: 16 }}>Orienta Passenger</p>
+        <p className="pax-chip ok" style={{ marginBottom: 16 }}>{t("claim.chip")}</p>
         <h1 className="pax-brand">Orienta</h1>
 
         {busy && (
           <section className="pax-card">
-            <h2>正在打开你的行程…</h2>
-            <p>正在核对链接并加载航班信息，请稍候。</p>
+            <h2>{t("claim.openingTitle")}</h2>
+            <p>{t("claim.openingBody")}</p>
           </section>
         )}
 
         {!busy && error && (
           <section className="pax-card">
-            <h2>无法打开链接</h2>
+            <h2>{t("claim.errorTitle")}</h2>
             <p>{error}</p>
             <Link className="pax-btn" to="/pax" style={{ display: "inline-block", textDecoration: "none" }}>
-              返回首页
+              {t("claim.backHome")}
             </Link>
           </section>
         )}

@@ -1,5 +1,6 @@
 import { useEffect, type MutableRefObject } from "react";
 import type { PaxSession } from "../session";
+import { usePaxT } from "../i18n";
 import { AssistNavPlanPanel } from "./AssistNavPlanPanel";
 import type { NavPlanConfirmed, NavPlanHints } from "./navPlan";
 
@@ -62,6 +63,7 @@ export function AssistNavPanel({
   pdrBackendOk,
   onRetryPdr,
 }: Props) {
+  const t = usePaxT();
   // #region agent log
   useEffect(() => {
     dbgNav("AssistNavPanel mounted", { hasPlan: !!plan, pdrBackendOk });
@@ -78,16 +80,14 @@ export function AssistNavPanel({
     return (
       <section className="pax-assist-nav-panel">
         <div className="pax-assist-nav-hint">
-          步行导航需要本机 PDR 服务（端口 8000）。当前探测不到，请在电脑上运行
-          <code> npm run pdr:dev </code>
-          后再点重试。
+          {t("nav.pdrMissing")}
           {onRetryPdr ? (
             <button type="button" className="pax-assist-nav-replan" onClick={onRetryPdr} style={{ marginLeft: 8 }}>
-              重试
+              {t("nav.retry")}
             </button>
           ) : null}
           <button type="button" className="pax-assist-nav-replan" onClick={onChangePlan} style={{ marginLeft: 8 }}>
-            重新选路
+            {t("nav.replan")}
           </button>
         </div>
       </section>
@@ -104,18 +104,16 @@ export function AssistNavPanel({
             {plan.airport}: {plan.fromLabel} → {plan.toLabel}
           </strong>
           <button type="button" className="pax-assist-nav-replan" onClick={onChangePlan}>
-            重新选路
+            {t("nav.replan")}
           </button>
         </div>
-        <div>
-          下方为完整 Pedestrian Dead Reckoning 导航页：等路线出现后点 <b>Start</b>，授权 IMU，走动即可计步；位置会同步到后台地图。
-        </div>
+        <div>{t("nav.pdrHint")}</div>
         {telemetryStatus ? <div className="pax-assist-nav-telemetry">{telemetryStatus}</div> : null}
       </div>
       <div className="pax-assist-nav-frame pax-assist-nav-frame--pdr">
         <iframe
           ref={frameRef}
-          title="Pedestrian dead reckoning navigation"
+          title={t("nav.iframeTitle")}
           src={src}
           allow="accelerometer; gyroscope; magnetometer; clipboard-read; clipboard-write; geolocation"
         />

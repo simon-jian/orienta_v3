@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef } from "react";
 import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../../config/indoorMap";
 import { clientDefaultAirportId } from "../../../config/client";
 import type { PaxSession } from "../session";
+import { usePaxT } from "../i18n";
 import { buildStartNavHref, gateHintsForLeg, prepareStartNavigation } from "../assist/navPlan";
 
 export type MapLeg = "dep" | "arr";
@@ -47,6 +48,7 @@ export function IndoorMapEmbed({
   onMapLegChange,
   showLegToggle = false,
 }: Props) {
+  const t = usePaxT();
   const from = usableGate(gateFrom) || usableGate(session.passenger.gateId);
   const to = usableGate(gateTo) || from;
   const airportCode = usableAirport(airport) || clientDefaultAirportId();
@@ -104,7 +106,7 @@ export function IndoorMapEmbed({
   return (
     <div className="pax-map-shell">
       {showLegToggle && onMapLegChange ? (
-        <div className="pax-map-controls-left" role="group" aria-label="Map leg">
+        <div className="pax-map-controls-left" role="group" aria-label={t("map.legAria")}>
           <div className="pax-map-seg">
             <button
               type="button"
@@ -112,7 +114,7 @@ export function IndoorMapEmbed({
               aria-pressed={mapLeg === "dep"}
               onClick={() => onMapLegChange("dep")}
             >
-              出发地图{depAirportLabel ? ` · ${depAirportLabel}` : ""}
+              {depAirportLabel ? t("map.depAirport", { airport: depAirportLabel }) : t("map.dep")}
             </button>
             <button
               type="button"
@@ -120,7 +122,7 @@ export function IndoorMapEmbed({
               aria-pressed={mapLeg === "arr"}
               onClick={() => onMapLegChange("arr")}
             >
-              抵达地图{arrAirportLabel ? ` · ${arrAirportLabel}` : ""}
+              {arrAirportLabel ? t("map.arrAirport", { airport: arrAirportLabel }) : t("map.arr")}
             </button>
           </div>
         </div>
@@ -129,7 +131,7 @@ export function IndoorMapEmbed({
         key={src}
         ref={iframeRef}
         className="pax-map-frame"
-        title={`机场地图 ${airportCode}`}
+        title={t("map.iframeTitle", { airport: airportCode })}
         src={src}
         allow="geolocation"
       />
@@ -142,7 +144,7 @@ export function IndoorMapEmbed({
           window.location.href = prepareStartNavigation(hints);
         }}
       >
-        开始导航
+        {t("map.startNav")}
       </a>
     </div>
   );

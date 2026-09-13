@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createArrivalShare, flightDateToday } from "../api/journeyApi";
+import { paxErrorMessage, usePaxT } from "../i18n";
 import type { PaxSession } from "../session";
 
 const SHARE_STORAGE_PREFIX = "orienta_arrival_share:";
@@ -22,6 +23,7 @@ function storageKey(flight: string, date: string) {
 }
 
 export function ArrivalShareControls({ session, flightOverride, dateOverride }: Props) {
+  const t = usePaxT();
   const flight = flightOverride || session.passenger.flightId;
   const date = dateOverride || flightDateToday();
   const [share, setShare] = useState<StoredShare | null>(() => {
@@ -52,10 +54,10 @@ export function ArrivalShareControls({ session, flightOverride, dateOverride }: 
       sessionStorage.setItem(storageKey(flight, date), JSON.stringify(next));
       setShare(next);
       if (navigator.share) {
-        await navigator.share({ title: "Arrival plan", url: next.url }).catch(() => {});
+        await navigator.share({ title: t("share.navTitle"), url: next.url }).catch(() => {});
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "share_failed");
+      setError(paxErrorMessage(t, err instanceof Error ? err.message : "share_failed"));
     } finally {
       setBusy(false);
     }
@@ -63,11 +65,11 @@ export function ArrivalShareControls({ session, flightOverride, dateOverride }: 
 
   return (
     <section className="pax-card" style={{ marginTop: 0 }}>
-      <h2>Choose Arrival Plan</h2>
-      <p>生成带 token 的公开链接，方便接机方查看预计到达出口时间。</p>
+      <h2>{t("share.title")}</h2>
+      <p>{t("share.body")}</p>
       <div className="pax-row">
         <button type="button" className="pax-btn" disabled={busy} onClick={() => void createShare()}>
-          {busy ? "生成中…" : share ? "刷新 / 分享链接" : "创建分享链接"}
+          {busy ? t("share.creating") : share ? t("share.refresh") : t("share.create")}
         </button>
         {share ? (
           <button
@@ -75,7 +77,7 @@ export function ArrivalShareControls({ session, flightOverride, dateOverride }: 
             className="pax-btn secondary"
             onClick={() => void navigator.clipboard.writeText(share.url)}
           >
-            复制链接
+            {t("share.copy")}
           </button>
         ) : null}
       </div>

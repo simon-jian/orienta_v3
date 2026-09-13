@@ -7,6 +7,7 @@ import {
   matchPoiByGateHint,
   type NavPoi,
 } from "./navPoiApi";
+import { paxErrorMessage, usePaxT, type PaxMessageKey } from "../i18n";
 import type { NavPlanConfirmed, NavPlanHints } from "./navPlan";
 
 type Props = {
@@ -24,7 +25,14 @@ function groupPois(pois: NavPoi[]): Array<{ category: string; items: NavPoi[] }>
   return Array.from(map.entries()).map(([category, items]) => ({ category, items }));
 }
 
+function poiGroupLabel(category: string, t: ReturnType<typeof usePaxT>): string {
+  const key = `poi.${category}` as PaxMessageKey;
+  const label = t(key);
+  return label === key ? categoryLabel(category) : label;
+}
+
 export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
+  const t = usePaxT();
   const defaultAirport =
     findNavAirport(hints.airport)?.code || NAV_AIRPORTS[0]?.code || "PEK";
   const [airportCode, setAirportCode] = useState(defaultAirport);
@@ -57,7 +65,7 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
         if (from && from.id !== to?.id) setFromId(from.id);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "poi_load_failed");
+        if (!cancelled) setError(paxErrorMessage(t, err instanceof Error ? err.message : "poi_load_failed"));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -65,7 +73,7 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [airport, hints.fromGateHint, hints.toGateHint]);
+  }, [airport, hints.fromGateHint, hints.toGateHint, t]);
 
   const canConfirm = !!fromId && !!toId && fromId !== toId && !!airport;
 
@@ -88,15 +96,15 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
   return (
     <section className="pax-nav-plan">
       <div className="pax-nav-plan-head">
-        <h2>规划步行路线</h2>
+        <h2>{t("nav.planTitle")}</h2>
         <p>
-          参考 Pedestrian Dead Reckoning：先选机场与起终点，确认后再进入室内导航并显示路线。
-          {hints.flightId ? ` 航班 ${hints.flightId} 已预填登机口提示。` : ""}
+          {t("nav.planLead")}
+          {hints.flightId ? t("nav.planFlightHint", { flight: hints.flightId }) : ""}
         </p>
       </div>
 
       <label className="pax-nav-plan-field">
-        机场 Airport
+        {t("nav.airport")}
         <select value={airportCode} onChange={(e) => setAirportCode(e.target.value)}>
           {NAV_AIRPORTS.map((a) => (
             <option key={a.code} value={a.code}>
@@ -107,11 +115,11 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       </label>
 
       <label className="pax-nav-plan-field">
-        起点 From
+        {t("nav.from")}
         <select value={fromId} onChange={(e) => setFromId(e.target.value)} disabled={loading || !pois.length}>
-          <option value="">{loading ? "加载 POI…" : "选择起点…"}</option>
+          <option value="">{loading ? t("nav.loadingPoi") : t("nav.selectFrom")}</option>
           {groups.map((g) => (
-            <optgroup key={g.category} label={categoryLabel(g.category)}>
+            <optgroup key={g.category} label={poiGroupLabel(g.category, t)}>
               {g.items.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -124,11 +132,11 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       </label>
 
       <label className="pax-nav-plan-field">
-        终点 To
+        {t("nav.to")}
         <select value={toId} onChange={(e) => setToId(e.target.value)} disabled={loading || !pois.length}>
-          <option value="">{loading ? "加载 POI…" : "选择终点…"}</option>
+          <option value="">{loading ? t("nav.loadingPoi") : t("nav.selectTo")}</option>
           {groups.map((g) => (
-            <optgroup key={g.category} label={categoryLabel(g.category)}>
+            <optgroup key={g.category} label={poiGroupLabel(g.category, t)}>
               {g.items.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
@@ -141,15 +149,15 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       </label>
 
       {fromId && toId && fromId === toId ? (
-        <div className="pax-nav-plan-error">起点和终点不能相同。</div>
+        <div className="pax-nav-plan-error">{t("nav.samePoint")}</div>
       ) : null}
-      {error ? <div className="pax-nav-plan-error">无法加载 POI：{error}</div> : null}
+      {error ? <div className="pax-nav-plan-error">{t("nav.poiFailed", { error })}</div> : null}
       {!loading && !error && !pois.length ? (
-        <div className="pax-nav-plan-error">该机场暂无可用 POI，请检查室内地图 API。</div>
+        <div className="pax-nav-plan-error">{t("nav.noPoi")}</div>
       ) : null}
 
       <button type="button" className="pax-btn pax-nav-plan-confirm" disabled={!canConfirm} onClick={confirm}>
-        确认并开始导航
+        {t("nav.confirm")}
       </button>
     </section>
   );

@@ -4,6 +4,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { titleForPath } from "./documentTitle";
+import { PaxI18nProvider, usePaxLocale } from "../features/pax/i18n";
 import LoginScreen from "../components/LoginScreen";
 import PaxEntryPage from "../features/pax/PaxEntryPage";
 import PaxLoginPage from "../features/pax/PaxLoginPage";
@@ -23,9 +24,10 @@ const ArrivalPlanPage = lazy(() => import("../features/pax/ArrivalPlanPage"));
 /** Keeps the tab title in step with the route. Must live inside the router. */
 function DocumentTitle() {
   const { pathname } = useLocation();
+  const locale = usePaxLocale();
   useEffect(() => {
-    document.title = titleForPath(pathname);
-  }, [pathname]);
+    document.title = titleForPath(pathname, locale);
+  }, [pathname, locale]);
   return null;
 }
 
@@ -75,39 +77,41 @@ export default function App({ configDegraded = false }: { configDegraded?: boole
 
   return (
     <BrowserRouter>
-      <DocumentTitle />
-      {configDegraded && <ConfigDegradedBanner />}
-      <Suspense fallback={<RouteLoading />}>
-        <Routes>
-          <Route path="/pax"  element={<PaxEntryPage />} />
-          <Route path="/pax/" element={<PaxEntryPage />} />
-          <Route path="/pax/login" element={<PaxLoginPage />} />
-          <Route path="/pax/claim" element={<PaxClaimPage />} />
-          <Route path="/pax/flight" element={<PaxFlightPage />} />
-          <Route path="/pax/app" element={<PaxAppPage />} />
-          <Route path="/arrival/:shareId" element={<ArrivalPlanPage />} />
+      <PaxI18nProvider>
+        <DocumentTitle />
+        {configDegraded && <ConfigDegradedBanner />}
+        <Suspense fallback={<RouteLoading />}>
+          <Routes>
+            <Route path="/pax"  element={<PaxEntryPage />} />
+            <Route path="/pax/" element={<PaxEntryPage />} />
+            <Route path="/pax/login" element={<PaxLoginPage />} />
+            <Route path="/pax/claim" element={<PaxClaimPage />} />
+            <Route path="/pax/flight" element={<PaxFlightPage />} />
+            <Route path="/pax/app" element={<PaxAppPage />} />
+            <Route path="/arrival/:shareId" element={<ArrivalPlanPage />} />
 
-          <Route
-            path="*"
-            element={
-              session ? (
-                <Dashboard
-                  session={session}
-                  onLogout={() => { authLogout(); setSession(null); }}
-                />
-              ) : (
-                <LoginScreen
-                  onLogin={async (email, password) => {
-                    const s = await loginWithCredentials(email, password);
-                    if (s) setSession(s);
-                    return s;
-                  }}
-                />
-              )
-            }
-          />
-        </Routes>
-      </Suspense>
+            <Route
+              path="*"
+              element={
+                session ? (
+                  <Dashboard
+                    session={session}
+                    onLogout={() => { authLogout(); setSession(null); }}
+                  />
+                ) : (
+                  <LoginScreen
+                    onLogin={async (email, password) => {
+                      const s = await loginWithCredentials(email, password);
+                      if (s) setSession(s);
+                      return s;
+                    }}
+                  />
+                )
+              }
+            />
+          </Routes>
+        </Suspense>
+      </PaxI18nProvider>
     </BrowserRouter>
   );
 }

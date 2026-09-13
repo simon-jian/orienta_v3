@@ -1,10 +1,12 @@
 import type { ReactNode } from "react";
 import type { FlightInstance } from "../api/flightApi";
 import type { AirportWeather } from "../api/weatherApi";
+import { usePaxI18n } from "../i18n";
 import { WeatherIcon } from "./WeatherIcon";
 import {
   boardsAndDoors,
   durationText,
+  localizeFlightStatus,
   primaryTime,
   progressForStatus,
   scheduleStatus,
@@ -32,20 +34,24 @@ function TerminalGate({
   terminal,
   gate,
   align = "left",
+  terminalLabel,
+  gateLabel,
 }: {
   terminal?: string;
   gate?: string;
   align?: "left" | "right";
+  terminalLabel: string;
+  gateLabel: string;
 }) {
   return (
     <div className={`fdc-tg${align === "right" ? " right" : ""}`}>
       <span className="fdc-tg-item">
-        <span className="fdc-tg-label">Terminal</span>
+        <span className="fdc-tg-label">{terminalLabel}</span>
         <span className="fdc-tg-term">{usable(terminal) ? terminal : "—"}</span>
       </span>
       <span className="fdc-tg-sep">-</span>
       <span className="fdc-tg-item">
-        <span className="fdc-tg-label">Gate</span>
+        <span className="fdc-tg-label">{gateLabel}</span>
         <span className="fdc-tg-gate">{usable(gate) ? gate : "—"}</span>
       </span>
     </div>
@@ -84,34 +90,44 @@ export function FlightCard({
   weather,
   boardsDoors: boardsDoorsOverride,
 }: Props) {
-  const status = (badgeLabel || instance.status || "SCHEDULED").toUpperCase();
-  const dep = primaryTime(instance, "dep");
-  const arr = primaryTime(instance, "arr");
-  const depStatus = scheduleStatus(instance, "dep");
-  const arrStatus = scheduleStatus(instance, "arr");
-  const { boards, doors } = boardsAndDoors(instance, boardsDoorsOverride);
-  const bag = usable(instance.baggage_claim) ? String(instance.baggage_claim) : "N/A";
+  const { t, intlLocale } = usePaxI18n();
+  const statusRaw = (badgeLabel || instance.status || "SCHEDULED").toUpperCase();
+  const status = localizeFlightStatus(statusRaw, t);
+  const dep = primaryTime(instance, "dep", t, intlLocale);
+  const arr = primaryTime(instance, "arr", t, intlLocale);
+  const depStatus = scheduleStatus(instance, "dep", t);
+  const arrStatus = scheduleStatus(instance, "arr", t);
+  const { boards, doors } = boardsAndDoors(instance, boardsDoorsOverride, intlLocale);
+  const na = t("common.na");
+  const bag = usable(instance.baggage_claim) ? String(instance.baggage_claim) : na;
   const weatherText =
-    weather?.available ? `${weather.temperature}°${weather.temperature_unit}` : "N/A";
-  const progress = progressForStatus(status);
+    weather?.available ? `${weather.temperature}°${weather.temperature_unit}` : na;
+  const progress = progressForStatus(statusRaw);
+  const boardsLabel = boards === "N/A" ? na : boards;
+  const doorsLabel = doors === "N/A" ? na : doors;
 
   return (
     <section className="flight-data-card">
       <div className="fdc-head">
         <div className="fdc-flight">{instance.flight_iata || "—"}</div>
-        <div className={`fdc-status ${statusTone(status)}`}>{status}</div>
+        <div className={`fdc-status ${statusTone(statusRaw)}`}>{status}</div>
       </div>
 
       <div className="fdc-route-visual">
         <div className="fdc-airport">
           <div className="fdc-airport-code">{instance.dep_iata || "—"}</div>
           <div className="fdc-airport-name">
-            {usable(instance.dep_airport_name) ? instance.dep_airport_name : "出发机场"}
+            {usable(instance.dep_airport_name) ? instance.dep_airport_name : t("flight.depAirport")}
           </div>
-          <TerminalGate terminal={instance.dep_terminal} gate={instance.dep_gate} />
+          <TerminalGate
+            terminal={instance.dep_terminal}
+            gate={instance.dep_gate}
+            terminalLabel={t("flight.terminal")}
+            gateLabel={t("flight.gate")}
+          />
         </div>
         <div className="fdc-route-mid">
-          <div className="fdc-duration">{durationText(instance.duration_minutes)}</div>
+          <div className="fdc-duration">{durationText(instance.duration_minutes, t)}</div>
           <div className="fdc-flight-path" aria-hidden="true">
             <div className="fdc-flight-track" />
             <div className="fdc-flight-progress" style={{ width: `${progress}%` }} />
@@ -123,9 +139,15 @@ export function FlightCard({
         <div className="fdc-airport right">
           <div className="fdc-airport-code">{instance.arr_iata || "—"}</div>
           <div className="fdc-airport-name">
-            {usable(instance.arr_airport_name) ? instance.arr_airport_name : "抵达机场"}
+            {usable(instance.arr_airport_name) ? instance.arr_airport_name : t("flight.arrAirport")}
           </div>
-          <TerminalGate terminal={instance.arr_terminal} gate={instance.arr_gate} align="right" />
+          <TerminalGate
+            terminal={instance.arr_terminal}
+            gate={instance.arr_gate}
+            align="right"
+            terminalLabel={t("flight.terminal")}
+            gateLabel={t("flight.gate")}
+          />
         </div>
       </div>
 
@@ -145,8 +167,8 @@ export function FlightCard({
               <div className={`fdc-time-status ${depStatus.cssClass}`}>{depStatus.text}</div>
             </div>
             <div className="fdc-meta-stack">
-              <MetaRow label="Boards" value={boards} pending={boards === "N/A"} />
-              <MetaRow label="Doors" value={doors} pending={doors === "N/A"} />
+              <MetaRow label={t("flight.boards")} value={boardsLabel} pending={boards === "N/A"} />
+              <MetaRow label={t("flight.doors")} value={doorsLabel} pending={doors === "N/A"} />
             </div>
           </div>
         </div>
@@ -165,8 +187,8 @@ export function FlightCard({
               <div className={`fdc-time-status ${arrStatus.cssClass}`}>{arrStatus.text}</div>
             </div>
             <div className="fdc-meta-stack">
-              <MetaRow label="Bag" value={bag} pending={bag === "N/A"} />
-              <MetaRow label="Weather" value={weatherText} pending={!weather?.available}>
+              <MetaRow label={t("flight.bag")} value={bag} pending={bag === na} />
+              <MetaRow label={t("flight.weather")} value={weatherText} pending={!weather?.available}>
                 {weather?.available ? <WeatherIcon iconKey={weather.icon_key} /> : null}
               </MetaRow>
             </div>
@@ -176,12 +198,12 @@ export function FlightCard({
 
       {notice ? <p className="fdc-notice">{notice}</p> : null}
 
-      <div className="fdc-actions" aria-label="Airport journey times">
+      <div className="fdc-actions" aria-label={t("flight.journeyAria")}>
         <button type="button" className="fdc-action" onClick={onOpenGate}>
-          Time to Gate
+          {t("flight.timeToGate")}
         </button>
         <button type="button" className="fdc-action" onClick={onOpenExit}>
-          Time to Exit
+          {t("flight.timeToExit")}
         </button>
       </div>
     </section>
