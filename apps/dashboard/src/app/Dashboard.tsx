@@ -181,7 +181,7 @@ export default function Dashboard({ session, onLogout }: { session: AdminSession
         dataSource={`${clientDefaultAirport().defaultTerminal}/I→I`}
         userLabel={`${session.user.displayName} · ${session.user.org}`}
         onLogout={() => { authLogout(); onLogout(); }}
-        onPaxClick={() => { setMapViewMode("all"); setSelectedPaxId(null); setOpenConvPaxId(null); setTab("map"); }}
+        onPaxClick={() => { setMapViewMode("single"); setSelectedPaxId(null); setOpenConvPaxId(null); setTab("map"); }}
         onUrgentClick={() => { setMapViewMode("urgent"); setSelectedPaxId(null); setOpenConvPaxId(null); setTab("map"); }}
         mapViewFilter={mapViewMode}
         extraRight={

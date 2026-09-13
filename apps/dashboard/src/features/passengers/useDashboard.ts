@@ -133,7 +133,7 @@ export function useDashboard(opts: {
     if (!pekPoiReady) return;
     setPassengersRaw(null);
     setSelectedPaxId(null);
-    setMapViewMode("all");
+    setMapViewMode("single");
     setChatHistory({});
     setPresence({});
     setPaxTrajectories({});
@@ -358,7 +358,7 @@ export function useDashboard(opts: {
   const [selectedPaxId, setSelectedPaxId] = useState<string | null>(null);
   const [hoverPaxId,    setHoverPaxId]    = useState<string | null>(null);
   const [search,        setSearch]        = useState("");
-  const [mapViewMode,   setMapViewMode]   = useState<"all" | "single" | "urgent">("all");
+  const [mapViewMode,   setMapViewMode]   = useState<"all" | "single" | "urgent">("single");
   const [openConvPaxId, setOpenConvPaxId] = useState<string | null>(null);
 
   const passengersFilteredByGate = useMemo(() => {
@@ -424,18 +424,14 @@ export function useDashboard(opts: {
     const livePassengers = passengers.filter((p) => liveIds.includes(p.id));
     for (const lp of livePassengers) byId.set(lp.id, lp);
 
-    if (mapViewMode === "single" && selectedPaxId) {
-      const out: typeof base = [];
+    if (mapViewMode === "single") {
+      if (!selectedPaxId) return [];
       const sel = byId.get(selectedPaxId);
-      if (sel) out.push(sel);
-      for (const lp of livePassengers) { if (!out.some((x) => x.id === lp.id)) out.push(lp); }
-      return out;
+      return sel ? [sel] : [];
     }
     if (mapViewMode === "urgent") {
       const urgentIds = new Set(priorityList.map((p) => p.id));
-      const out = Array.from(byId.values()).filter((p) => urgentIds.has(p.id));
-      for (const lp of livePassengers) { if (!out.some((x) => x.id === lp.id)) out.push(lp); }
-      return out;
+      return Array.from(byId.values()).filter((p) => urgentIds.has(p.id));
     }
     return Array.from(byId.values());
   }, [passengersFilteredByGate, mapViewMode, selectedPaxId, priorityList, paxTrajectories, passengers]);
