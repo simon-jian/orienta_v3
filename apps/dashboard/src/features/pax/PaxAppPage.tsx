@@ -27,6 +27,12 @@ import {
 import { paxErrorMessage, usePaxT } from "./i18n";
 import { BRAND_LOGO_ALT, BRAND_WORDMARK_SRC } from "../../config/branding";
 import { clientDefaultAirportId } from "../../config/client";
+import { isAssignedGate } from "../../utils/passenger-compute";
+import {
+  loadDepartureNavFromFlight,
+  mergeLiveDepartureHints,
+  readUrlNavPins,
+} from "./assist/navFlightHints";
 import { usePeerCall } from "../media/usePeerCall";
 import { CallOverlay } from "../media/CallOverlay";
 import "./styles/pax.css";
@@ -55,7 +61,10 @@ function hintsFromUrlAndStorage(session: PaxSession | null): NavPlanHints {
   return {
     airport: urlHints.airport || stored.airport || clientDefaultAirportId(),
     fromGateHint: urlHints.fromGateHint || stored.fromGateHint,
-    toGateHint: urlHints.toGateHint || stored.toGateHint || session?.passenger.gateId,
+    toGateHint:
+      urlHints.toGateHint ||
+      stored.toGateHint ||
+      (isAssignedGate(session?.passenger.gateId) ? session?.passenger.gateId : undefined),
     flightId: stored.flightId || session?.passenger.flightId,
   };
 }
@@ -121,6 +130,23 @@ export default function PaxAppPage() {
         flightId: prev.flightId || next.flightId,
       };
     });
+  }, [session]);
+
+  useEffect(() => {
+    if (!session) return;
+    const pins = readUrlNavPins();
+    let cancelled = false;
+    loadDepartureNavFromFlight(session)
+      .then((live) => {
+        if (cancelled) return;
+        setNavHints((prev) => mergeLiveDepartureHints(prev, live, pins));
+      })
+      .catch(() => {
+        /* Keep URL / session hints when live flight lookup fails. */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [session]);
   const strip = useAssistInfoStrip(session, rtUp, presenceOk);
   const linkUp = rtUp || presenceOk;

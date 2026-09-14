@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { INDOOR_MAP_API_BASE } from "../../../config/indoorMap";
 import { NAV_AIRPORTS, findNavAirport } from "./navAirports";
 import {
+  applyNavPlanPrefill,
   categoryLabel,
   fetchAirportPois,
-  matchPoiByGateHint,
   type NavPoi,
 } from "./navPoiApi";
 import { paxErrorMessage, usePaxT, type PaxMessageKey } from "../i18n";
@@ -41,9 +41,16 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
   const [toId, setToId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const airportTouchedRef = useRef(false);
 
   const airport = useMemo(() => findNavAirport(airportCode), [airportCode]);
   const groups = useMemo(() => groupPois(pois), [pois]);
+
+  useEffect(() => {
+    if (airportTouchedRef.current) return;
+    const next = findNavAirport(hints.airport)?.code;
+    if (next && next !== airportCode) setAirportCode(next);
+  }, [hints.airport, airportCode]);
 
   useEffect(() => {
     if (!airport) return;
@@ -56,13 +63,9 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       .then((list) => {
         if (cancelled) return;
         setPois(list);
-        const from = matchPoiByGateHint(list, hints.fromGateHint);
-        const to = matchPoiByGateHint(list, hints.toGateHint);
-        // Destination first: the gate a passenger is walking toward is the half
-        // worth prefilling, and when both hints land on the same POI only one
-        // of them may be kept (start and end must differ to confirm a route).
-        if (to) setToId(to.id);
-        if (from && from.id !== to?.id) setFromId(from.id);
+        const prefill = applyNavPlanPrefill(list, hints);
+        setToId(prefill.toId);
+        setFromId(prefill.fromId);
       })
       .catch((err) => {
         if (!cancelled) setError(paxErrorMessage(t, err instanceof Error ? err.message : "poi_load_failed"));
@@ -105,7 +108,13 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
 
       <label className="pax-nav-plan-field">
         {t("nav.airport")}
-        <select value={airportCode} onChange={(e) => setAirportCode(e.target.value)}>
+        <select
+          value={airportCode}
+          onChange={(e) => {
+            airportTouchedRef.current = true;
+            setAirportCode(e.target.value);
+          }}
+        >
           {NAV_AIRPORTS.map((a) => (
             <option key={a.code} value={a.code}>
               {a.label}

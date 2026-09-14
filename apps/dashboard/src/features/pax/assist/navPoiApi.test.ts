@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { matchPoiByGateHint, type NavPoi } from "./navPoiApi";
+import {
+  applyNavPlanPrefill,
+  matchPoiByGateHint,
+  matchSecurityPoi,
+  type NavPoi,
+} from "./navPoiApi";
 
 function gate(name: string, id = name): NavPoi {
   return { id, name, category: "gate", terminal: "International", floor: "" };
@@ -45,5 +50,63 @@ describe("matchPoiByGateHint", () => {
     expect(matchPoiByGateHint(sfo, "—")).toBeNull();
     expect(matchPoiByGateHint(sfo, "")).toBeNull();
     expect(matchPoiByGateHint(sfo, "Z99")).toBeNull();
+  });
+
+  it("prefers a departure gate over an arrival door with the same code", () => {
+    const pois: NavPoi[] = [
+      { id: "arr", name: "E19 到达口", category: "arrival", terminal: "T3E", floor: "L3" },
+      { id: "dep", name: "E19 登机口", category: "gate", terminal: "T3E", floor: "L2" },
+    ];
+    expect(matchPoiByGateHint(pois, "E19", { preferCategory: "gate" })?.id).toBe("dep");
+  });
+});
+
+function poi(partial: Partial<NavPoi> & Pick<NavPoi, "id" | "name" | "category">): NavPoi {
+  return { terminal: "", floor: "", ...partial };
+}
+
+describe("matchSecurityPoi", () => {
+  const pois: NavPoi[] = [
+    poi({ id: "s-l2", name: "安检1", category: "security", terminal: "T3E", floor: "L2" }),
+    poi({ id: "s-l3", name: "安检2", category: "security", terminal: "T3E", floor: "L3" }),
+    poi({ id: "s-other", name: "安检区G", category: "security", terminal: "International", floor: "L3" }),
+  ];
+
+  it("prefers the same terminal and floor as the destination gate", () => {
+    const gate = poi({ id: "g", name: "E19 登机口", category: "gate", terminal: "T3E", floor: "L2" });
+    expect(matchSecurityPoi(pois, gate)?.id).toBe("s-l2");
+  });
+
+  it("falls back to the same terminal when the floor does not match", () => {
+    const gate = poi({ id: "g", name: "E01 登机口", category: "gate", terminal: "T3E", floor: "L4" });
+    expect(matchSecurityPoi(pois, gate)?.id).toBe("s-l2");
+  });
+});
+
+describe("applyNavPlanPrefill", () => {
+  const pois: NavPoi[] = [
+    poi({ id: "sec", name: "安检区G", category: "security", terminal: "International", floor: "L3" }),
+    poi({ id: "g8", name: "G08 登机口", category: "gate", terminal: "International", floor: "L3" }),
+    poi({ id: "g1", name: "G01 登机口", category: "gate", terminal: "International", floor: "L3" }),
+    poi({ id: "e21", name: "E21", category: "gate", terminal: "T3E", floor: "L2" }),
+  ];
+
+  it("fills destination with the gate and origin with security", () => {
+    expect(applyNavPlanPrefill(pois, { toGateHint: "G8" })).toEqual({
+      fromId: "sec",
+      toId: "g8",
+    });
+  });
+
+  it("keeps both ends of a transfer and does not force security", () => {
+    expect(applyNavPlanPrefill(pois, { fromGateHint: "E21", toGateHint: "G8" })).toEqual({
+      fromId: "e21",
+      toId: "g8",
+    });
+  });
+
+  it("leaves both ends empty when no gate is assigned", () => {
+    expect(applyNavPlanPrefill(pois, {})).toEqual({ fromId: "", toId: "" });
+    expect(applyNavPlanPrefill(pois, { toGateHint: "UNKNOWN" })).toEqual({ fromId: "", toId: "" });
   });
 });

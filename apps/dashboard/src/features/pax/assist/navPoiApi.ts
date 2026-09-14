@@ -98,12 +98,24 @@ function sameGate(a: GateToken, b: GateToken): boolean {
   return a.prefix === b.prefix && a.number === b.number && a.suffix === b.suffix;
 }
 
+function rankGatePool(pois: NavPoi[], preferCategory?: string): NavPoi[] {
+  if (!preferCategory) return pois;
+  return [...pois].sort((a, b) =>
+    Number(b.category.toLowerCase() === preferCategory.toLowerCase()) -
+    Number(a.category.toLowerCase() === preferCategory.toLowerCase()),
+  );
+}
+
 /** Prefill From/To from flight gate codes (E21, Gate E21, G8 ↔ "G08 登机口", …). */
-export function matchPoiByGateHint(pois: NavPoi[], gateHint: string | undefined | null): NavPoi | null {
+export function matchPoiByGateHint(
+  pois: NavPoi[],
+  gateHint: string | undefined | null,
+  opts?: { preferCategory?: string },
+): NavPoi | null {
   const hint = normalizeGateToken(gateHint || "");
   if (!hint || hint === "—" || hint === "-") return null;
   const gates = pois.filter((p) => /gate|arrival|departure/i.test(p.category));
-  const pool = gates.length ? gates : pois;
+  const pool = rankGatePool(gates.length ? gates : pois, opts?.preferCategory);
 
   const exact = pool.find((p) => normalizeGateToken(p.name) === hint);
   if (exact) return exact;
@@ -123,4 +135,45 @@ export function matchPoiByGateHint(pois: NavPoi[], gateHint: string | undefined 
   if (/^\d+$/.test(hint)) return null;
 
   return pool.find((p) => normalizeGateToken(p.name).includes(hint) || hint.includes(normalizeGateToken(p.name))) || null;
+}
+
+function sameToken(a: string, b: string): boolean {
+  const left = a.trim().toUpperCase();
+  const right = b.trim().toUpperCase();
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+/** Security checkpoint closest to a known gate (same terminal/floor first). */
+export function matchSecurityPoi(pois: NavPoi[], near?: NavPoi | null): NavPoi | null {
+  const list = pois.filter((p) => p.category.toLowerCase() === "security");
+  if (!list.length) return null;
+  if (!near) return list[0] ?? null;
+  const sameTermFloor = list.find((p) => sameToken(p.terminal, near.terminal) && sameToken(p.floor, near.floor));
+  if (sameTermFloor) return sameTermFloor;
+  const sameTerm = list.find((p) => sameToken(p.terminal, near.terminal));
+  if (sameTerm) return sameTerm;
+  const sameFloor = list.find((p) => sameToken(p.floor, near.floor));
+  return sameFloor ?? list[0] ?? null;
+}
+
+/**
+ * Departure walk: destination = assigned gate, origin = security.
+ * A real two-ended transfer keeps both gate hints and does not force 安检.
+ */
+export function applyNavPlanPrefill(
+  pois: NavPoi[],
+  hints: { fromGateHint?: string; toGateHint?: string },
+): { fromId: string; toId: string } {
+  const to = matchPoiByGateHint(pois, hints.toGateHint, { preferCategory: "gate" });
+  const fromExplicit = matchPoiByGateHint(pois, hints.fromGateHint);
+  const toId = to?.id || "";
+  if (fromExplicit && fromExplicit.id !== to?.id) {
+    return { fromId: fromExplicit.id, toId };
+  }
+  if (to) {
+    const security = matchSecurityPoi(pois, to);
+    if (security && security.id !== to.id) return { fromId: security.id, toId };
+  }
+  return { fromId: "", toId };
 }
