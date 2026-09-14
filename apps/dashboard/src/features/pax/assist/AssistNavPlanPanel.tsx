@@ -63,7 +63,7 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       .then((list) => {
         if (cancelled) return;
         setPois(list);
-        const prefill = applyNavPlanPrefill(list, hints);
+        const prefill = applyNavPlanPrefill(list, { ...hints, airport: airport.code });
         setToId(prefill.toId);
         setFromId(prefill.fromId);
       })

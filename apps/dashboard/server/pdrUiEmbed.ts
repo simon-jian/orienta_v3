@@ -30,7 +30,12 @@ try{
         if(!res || !res.ok) return res;
         return res.json().then(function(data){
           data=data||{};
-          data.airport_map_url=location.origin+'/indoor-map/airport-map.html';
+          var floor=new URLSearchParams(location.search).get('floor');
+          var mapUrl=location.origin+'/indoor-map/airport-map.html';
+          if(floor){
+            mapUrl+='?navFloor='+encodeURIComponent(floor)+'&navFloors='+encodeURIComponent(floor);
+          }
+          data.airport_map_url=mapUrl;
           data.airport_map_api_base=location.origin+'/indoor-map-api';
           return new Response(JSON.stringify(data), {status:200, headers:{'content-type':'application/json'}});
         }).catch(function(){ return res; });

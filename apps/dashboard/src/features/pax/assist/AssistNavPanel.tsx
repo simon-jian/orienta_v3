@@ -1,23 +1,8 @@
-import { useEffect, type MutableRefObject } from "react";
+import type { MutableRefObject } from "react";
 import type { PaxSession } from "../session";
 import { usePaxT } from "../i18n";
 import { AssistNavPlanPanel } from "./AssistNavPlanPanel";
 import type { NavPlanConfirmed, NavPlanHints } from "./navPlan";
-
-// #region agent log
-function dbgNav(message: string, data: Record<string, unknown>): void {
-  fetch("/api/debug-log", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    keepalive: true,
-    body: JSON.stringify({
-      runId: "pre-fix", hypothesisId: "B",
-      location: "src/features/pax/assist/AssistNavPanel.tsx",
-      message, data, timestamp: Date.now(),
-    }),
-  }).catch(() => {});
-}
-// #endregion
 
 type Props = {
   session: PaxSession;
@@ -44,6 +29,7 @@ function buildPdrUiSrc(session: PaxSession, plan: NavPlanConfirmed): string {
   u.searchParams.set("airport", plan.airport);
   u.searchParams.set("from", plan.fromPoiId);
   u.searchParams.set("to", plan.toPoiId);
+  if (plan.airport === "PEK") u.searchParams.set("floor", "L2");
   u.searchParams.set("ui", "minimal");
   u.searchParams.set("orientaBackend", window.location.origin);
   u.searchParams.set("tenantId", session.passenger.tenantId);
@@ -64,13 +50,6 @@ export function AssistNavPanel({
   onRetryPdr,
 }: Props) {
   const t = usePaxT();
-  // #region agent log
-  useEffect(() => {
-    dbgNav("AssistNavPanel mounted", { hasPlan: !!plan, pdrBackendOk });
-    return () => dbgNav("AssistNavPanel unmounted (pdr iframe destroyed)", { hasPlan: !!plan });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- debug instrumentation
-  }, []);
-  // #endregion
 
   if (!plan) {
     return <AssistNavPlanPanel hints={hints} onConfirm={onConfirmPlan} />;

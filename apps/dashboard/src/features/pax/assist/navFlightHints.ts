@@ -40,9 +40,15 @@ export function mergeLiveDepartureHints(
   const pinnedTo = usableNavGate(pins.to);
   const liveGate = usableNavGate(live.gate);
   const pinnedFrom = (pins.from || "").trim();
+  const airport = pinnedAirport || liveAirport || current.airport;
+  const airportChanged =
+    !!(pinnedAirport && current.airport && pinnedAirport !== current.airport) ||
+    !!(liveAirport && !pinnedAirport && current.airport && liveAirport !== current.airport);
   return {
-    airport: pinnedAirport || liveAirport || current.airport,
-    fromGateHint: pinnedFrom || current.fromGateHint,
+    airport,
+    // A new departure airport is a new walk — drop the previous airport's
+    // start (e.g. SFO 安检区G) or PEK looks like a transfer and skips 安检1.
+    fromGateHint: pinnedFrom || (pinnedAirport || airportChanged ? undefined : current.fromGateHint),
     toGateHint: pinnedTo || liveGate || current.toGateHint,
     flightId: current.flightId,
   };

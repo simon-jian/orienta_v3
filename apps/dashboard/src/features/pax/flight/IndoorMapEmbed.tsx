@@ -62,13 +62,17 @@ export function IndoorMapEmbed({
     u.searchParams.set("apiBase", INDOOR_MAP_API_BASE);
     if (from) u.searchParams.set("gateFrom", from);
     if (to) u.searchParams.set("gateTo", to);
+    if (airportCode === "PEK" && mapLeg === "dep") {
+      u.searchParams.set("navFloor", "L2");
+      u.searchParams.set("navFloors", "L2");
+    }
     u.searchParams.set("dep", session.passenger.flightId || "");
     u.searchParams.set("pax", session.passenger.id);
     u.searchParams.set("parentOrigin", window.location.origin);
     // Bust cache when airport/gates change so the map re-inits.
-    u.searchParams.set("_v", `${airportCode}-${from}-${to}`);
+    u.searchParams.set("_v", `${airportCode}-${from}-${to}-${mapLeg}`);
     return u.toString();
-  }, [airportCode, from, to, session.passenger.tenantId, session.passenger.flightId, session.passenger.id]);
+  }, [airportCode, from, to, mapLeg, session.passenger.tenantId, session.passenger.flightId, session.passenger.id]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -84,6 +88,9 @@ export function IndoorMapEmbed({
         /* ignore */
       }
       win.postMessage({ type: "orienta-indoor-set-airport", airport: airportCode }, origin);
+      if (airportCode === "PEK" && mapLeg === "dep") {
+        win.postMessage({ type: "orienta-indoor-set-floor", floor: "L2" }, origin);
+      }
     };
 
     const onLoad = () => {
@@ -95,7 +102,7 @@ export function IndoorMapEmbed({
 
     iframe.addEventListener("load", onLoad);
     return () => iframe.removeEventListener("load", onLoad);
-  }, [src, airportCode]);
+  }, [src, airportCode, mapLeg]);
 
   const hints = {
     airport: airportCode,

@@ -157,17 +157,44 @@ export function matchSecurityPoi(pois: NavPoi[], near?: NavPoi | null): NavPoi |
   return sameFloor ?? list[0] ?? null;
 }
 
+export function isPekAirport(code?: string | null): boolean {
+  return String(code || "").trim().toUpperCase() === "PEK";
+}
+
+/** PEK departure landside start: 安检1 on T3E L2. */
+export function matchPekAnjian1(pois: NavPoi[]): NavPoi | null {
+  const list = pois.filter((p) => p.category.toLowerCase() === "security");
+  const exact = list.find((p) => p.name.replace(/\s+/g, "") === "安检1");
+  if (exact) return exact;
+  return list.find((p) => sameToken(p.terminal, "T3E") && sameToken(p.floor, "L2")) ?? null;
+}
+
 /**
  * Departure walk: destination = assigned gate, origin = security.
- * A real two-ended transfer keeps both gate hints and does not force 安检.
+ * PEK departures always start at 安检1 (L2). A real two-ended transfer keeps
+ * both gate hints and does not force 安检.
  */
 export function applyNavPlanPrefill(
   pois: NavPoi[],
-  hints: { fromGateHint?: string; toGateHint?: string },
+  hints: { fromGateHint?: string; toGateHint?: string; airport?: string },
 ): { fromId: string; toId: string } {
   const to = matchPoiByGateHint(pois, hints.toGateHint, { preferCategory: "gate" });
   const fromExplicit = matchPoiByGateHint(pois, hints.fromGateHint);
   const toId = to?.id || "";
+  const transfer =
+    !!fromExplicit &&
+    !!to &&
+    fromExplicit.id !== to.id &&
+    !!hints.fromGateHint &&
+    !!hints.toGateHint &&
+    hints.fromGateHint !== hints.toGateHint;
+
+  if (isPekAirport(hints.airport) && !transfer) {
+    const anjian1 = matchPekAnjian1(pois);
+    const fromId = anjian1 && anjian1.id !== toId ? anjian1.id : "";
+    return { fromId, toId };
+  }
+
   if (fromExplicit && fromExplicit.id !== to?.id) {
     return { fromId: fromExplicit.id, toId };
   }

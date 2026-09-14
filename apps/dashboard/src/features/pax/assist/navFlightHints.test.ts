@@ -43,6 +43,36 @@ describe("mergeLiveDepartureHints", () => {
     });
   });
 
+  it("drops a leftover start when live data switches airport", () => {
+    expect(
+      mergeLiveDepartureHints(
+        { airport: "SFO", fromGateHint: "安检区G", toGateHint: "G6", flightId: "UA888" },
+        { airport: "PEK", gate: "E19" },
+        {},
+      ),
+    ).toEqual({
+      airport: "PEK",
+      fromGateHint: undefined,
+      toGateHint: "E19",
+      flightId: "UA888",
+    });
+  });
+
+  it("drops a leftover start when the URL pins a different airport", () => {
+    expect(
+      mergeLiveDepartureHints(
+        { airport: "SFO", fromGateHint: "安检区G", toGateHint: "G6", flightId: "UA888" },
+        {},
+        { airport: "PEK", to: "E19" },
+      ),
+    ).toEqual({
+      airport: "PEK",
+      fromGateHint: undefined,
+      toGateHint: "E19",
+      flightId: "UA888",
+    });
+  });
+
   it("keeps the current gate when the live flight has none yet", () => {
     expect(mergeLiveDepartureHints(current, { airport: "PEK", gate: "" }, {})).toEqual({
       airport: "PEK",

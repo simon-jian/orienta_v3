@@ -109,4 +109,25 @@ describe("applyNavPlanPrefill", () => {
     expect(applyNavPlanPrefill(pois, {})).toEqual({ fromId: "", toId: "" });
     expect(applyNavPlanPrefill(pois, { toGateHint: "UNKNOWN" })).toEqual({ fromId: "", toId: "" });
   });
+
+  it("for PEK departures starts at 安检1 and ends at the departure gate", () => {
+    const pek: NavPoi[] = [
+      poi({ id: "s1", name: "安检1", category: "security", terminal: "T3E", floor: "L2" }),
+      poi({ id: "s2", name: "安检2", category: "security", terminal: "T3E", floor: "L3" }),
+      poi({ id: "e19", name: "E19 登机口", category: "gate", terminal: "T3E", floor: "L2" }),
+      poi({ id: "e01", name: "E01 登机口", category: "gate", terminal: "T3E", floor: "L3" }),
+    ];
+    expect(applyNavPlanPrefill(pek, { airport: "PEK", toGateHint: "E19" })).toEqual({
+      fromId: "s1",
+      toId: "e19",
+    });
+    expect(applyNavPlanPrefill(pek, { airport: "PEK", toGateHint: "E01" })).toEqual({
+      fromId: "s1",
+      toId: "e01",
+    });
+    expect(applyNavPlanPrefill(pek, { airport: "PEK" })).toEqual({
+      fromId: "s1",
+      toId: "",
+    });
+  });
 });

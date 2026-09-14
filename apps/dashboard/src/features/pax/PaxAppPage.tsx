@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   clearPaxSession,
   fetchPaxSession,
@@ -71,6 +72,7 @@ function hintsFromUrlAndStorage(session: PaxSession | null): NavPlanHints {
 
 export default function PaxAppPage() {
   const t = usePaxT();
+  const [searchParams] = useSearchParams();
   const [session, setSession] = useState<PaxSession | null>(() => getStoredPaxSession());
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
@@ -124,13 +126,27 @@ export default function PaxAppPage() {
     setNavHints((prev) => {
       const next = hintsFromUrlAndStorage(session);
       return {
-        airport: prev.airport || next.airport,
-        fromGateHint: prev.fromGateHint || next.fromGateHint,
-        toGateHint: prev.toGateHint || next.toGateHint,
-        flightId: prev.flightId || next.flightId,
+        airport: next.airport || prev.airport,
+        fromGateHint: next.fromGateHint || prev.fromGateHint,
+        toGateHint: next.toGateHint || prev.toGateHint,
+        flightId: next.flightId || prev.flightId,
       };
     });
   }, [session]);
+
+  useEffect(() => {
+    const pins = readUrlNavPins();
+    if (!pins.airport && !pins.from && !pins.to) return;
+    setNavHints((prev) => mergeLiveDepartureHints(prev, {}, pins));
+  }, [searchParams]);
+
+  useEffect(() => {
+    if (!navPlan) return;
+    const next = (navHints.airport || "").trim().toUpperCase();
+    if (!next || next === navPlan.airport) return;
+    clearConfirmedNavPlan();
+    setNavPlan(null);
+  }, [navHints.airport, navPlan]);
 
   useEffect(() => {
     if (!session) return;
