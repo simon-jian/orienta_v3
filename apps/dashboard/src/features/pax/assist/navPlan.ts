@@ -9,6 +9,7 @@ export type NavPlanHints = {
   fromGateHint?: string;
   toGateHint?: string;
   flightId?: string;
+  activeLeg?: "arr" | "dep";
 };
 
 /** Confirmed selection — same handoff as PDR index.html → pdr.html. */
@@ -112,6 +113,7 @@ export function buildStartNavHref(hints: NavPlanHints): string {
   if (hints.airport) q.set("airport", hints.airport);
   if (hints.fromGateHint) q.set("from", hints.fromGateHint);
   if (hints.toGateHint) q.set("to", hints.toGateHint);
+  if (hints.flightId) q.set("flight", hints.flightId);
   return `/pax/app?${q.toString()}`;
 }
 

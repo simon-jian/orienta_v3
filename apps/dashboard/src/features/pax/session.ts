@@ -1,6 +1,7 @@
 import { apiUrl } from "../../config/api";
 
 export type PaxTripIntent = "depart" | "arrive" | "transfer";
+export type PaxTripLeg = "arr" | "dep";
 
 export type PaxTripContext = {
   intent: PaxTripIntent;
@@ -10,6 +11,8 @@ export type PaxTripContext = {
   departureFlight?: string;
   arrivalDate?: string;
   departureDate?: string;
+  /** Which transfer/single-flight tab the passenger last opened. */
+  activeLeg?: PaxTripLeg;
 };
 
 export type PaxSession = {
@@ -125,6 +128,28 @@ export function savePaxTrip(trip: PaxTripContext): void {
   writeStore(TRIP_KEY, JSON.stringify(trip));
 }
 
+export function resolveActiveLeg(trip?: PaxTripContext | null): PaxTripLeg {
+  if (!trip) return "dep";
+  if (trip.intent === "transfer") return trip.activeLeg === "dep" ? "dep" : "arr";
+  return trip.intent === "arrive" ? "arr" : "dep";
+}
+
+export function persistActiveLeg(trip: PaxTripContext, activeLeg: PaxTripLeg): PaxTripContext {
+  const next = { ...trip, activeLeg };
+  savePaxTrip(next);
+  try {
+    const raw = readStore(STORAGE_KEY);
+    if (raw) {
+      const session = JSON.parse(raw) as PaxSession;
+      session.trip = next;
+      writeStore(STORAGE_KEY, JSON.stringify(session));
+    }
+  } catch {
+    /* trip is already on TRIP_KEY */
+  }
+  return next;
+}
+
 export function getStoredPaxTrip(): PaxTripContext | null {
   try {
     const raw = readStore(TRIP_KEY);
@@ -139,10 +164,8 @@ export function getStoredPaxSession(): PaxSession | null {
     const raw = readStore(STORAGE_KEY);
     if (!raw) return null;
     const session = JSON.parse(raw) as PaxSession;
-    if (!session.trip) {
-      const trip = getStoredPaxTrip();
-      if (trip) session.trip = trip;
-    }
+    const trip = getStoredPaxTrip();
+    if (trip) session.trip = trip;
     return session;
   } catch {
     return null;

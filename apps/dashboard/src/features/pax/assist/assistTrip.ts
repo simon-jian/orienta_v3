@@ -15,11 +15,21 @@ export function resolveAssistTrip(session: PaxSession): PaxTripContext {
   );
 }
 
+export function transferFlightIds(session: PaxSession, trip: PaxTripContext): {
+  arrival: string;
+  departure: string;
+} {
+  return {
+    arrival: trip.arrivalFlight || "",
+    departure: trip.departureFlight || session.passenger.flightId || "",
+  };
+}
+
 /** Flight ids for the info strip — enriched later with FA airport/gate labels. */
 export function baseInfoStrip(
   session: PaxSession,
   trip: PaxTripContext,
-  extras?: { inboundLabel?: string; outboundLabel?: string; status?: string },
+  extras?: { inboundLabel?: string; outboundLabel?: string; status?: string; gate?: string },
 ): AssistInfoStrip {
   let inbound = "—";
   let outbound = "—";
@@ -34,8 +44,14 @@ export function baseInfoStrip(
   return {
     inbound: extras?.inboundLabel || inbound,
     outbound: extras?.outboundLabel || outbound,
-    gate: session.passenger.gateId || "—",
+    gate: extras?.gate !== undefined ? extras.gate || "—" : session.passenger.gateId || "—",
     status: extras?.status || "—",
+    active:
+      trip.intent === "transfer"
+        ? trip.activeLeg === "dep"
+          ? "outbound"
+          : "inbound"
+        : undefined,
   };
 }
 

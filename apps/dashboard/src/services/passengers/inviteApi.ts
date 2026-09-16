@@ -36,6 +36,8 @@ export type PaxInvite = {
   passengerName: string;
   flightId: string;
   flightDate: string;
+  inboundFlight?: string;
+  inboundDate?: string;
   leg: InviteLeg;
   flight: InviteFlightSnapshot;
   deviceBound: boolean;
@@ -94,6 +96,8 @@ export function createInvite(input: {
   flightId: string;
   flightDate: string;
   leg: InviteLeg;
+  arrivalFlight?: string;
+  arrivalDate?: string;
   phone?: string;
   email?: string;
 }): Promise<{
@@ -106,6 +110,7 @@ export function createInvite(input: {
   emailFromWarning?: boolean;
   sms?: InviteDeliveryResult;
   email?: InviteDeliveryResult;
+  hubWarning?: { arrivalAirport: string; departureAirport: string };
 }> {
   return request("/api/pax/invites", {
     method: "POST",

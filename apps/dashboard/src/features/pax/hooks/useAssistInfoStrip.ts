@@ -19,6 +19,8 @@ export function useAssistInfoStrip(
   const [enrichment, setEnrichment] = useState<{
     inboundLabel?: string;
     outboundLabel?: string;
+    inboundGate?: string;
+    outboundGate?: string;
   }>({});
   const [linkUp, setLinkUp] = useState(false);
 
@@ -42,7 +44,10 @@ export function useAssistInfoStrip(
           const arr = trip.arrivalFlight || "";
           const dep = trip.departureFlight || session.passenger.flightId;
           if (!arr || !dep) return;
-          const data = await fetchTransfer(arr, dep);
+          const data = await fetchTransfer(arr, dep, {
+            arrivalDate: trip.arrivalDate,
+            departureDate: trip.departureDate,
+          });
           if (cancelled) return;
           setEnrichment({
             inboundLabel: flightLabel(
@@ -55,6 +60,8 @@ export function useAssistInfoStrip(
               data.departure.dep_iata || data.hub_airport,
               data.departure.dep_gate || data.to_gate,
             ),
+            inboundGate: data.arrival.arr_gate || data.from_gate,
+            outboundGate: data.departure.dep_gate || data.to_gate,
           });
           return;
         }
@@ -94,6 +101,12 @@ export function useAssistInfoStrip(
       return { inbound: "—", outbound: "—", gate: "—", status: "—" };
     }
     const status = !linkUp ? t("strip.offline") : session.plan === "free" ? t("strip.assisted") : t("strip.connected");
-    return baseInfoStrip(session, trip, { ...enrichment, status });
+    const gate =
+      trip.intent === "transfer"
+        ? trip.activeLeg === "dep"
+          ? enrichment.outboundGate || session.passenger.gateId
+          : enrichment.inboundGate || "—"
+        : undefined;
+    return baseInfoStrip(session, trip, { ...enrichment, status, gate });
   }, [session, trip, enrichment, linkUp, t]);
 }

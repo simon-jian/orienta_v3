@@ -77,7 +77,17 @@ function deviceLabel(invite: PaxInvite): string {
   return [os, d.browser, kind].filter(Boolean).join(" · ");
 }
 
+function isTransferInvite(invite: PaxInvite): boolean {
+  const inbound = (invite.inboundFlight || "").trim().toUpperCase();
+  const outbound = (invite.flightId || "").trim().toUpperCase();
+  return !!inbound && !!outbound && inbound !== outbound;
+}
+
 function route(invite: PaxInvite): string {
+  if (isTransferInvite(invite)) {
+    const hub = invite.flight.depIata || invite.flight.arrIata || "?";
+    return `${invite.inboundFlight} → ${hub} → ${invite.flightId}`;
+  }
   const { depIata, arrIata } = invite.flight;
   if (!depIata && !arrIata) return "航班信息待刷新";
   return `${depIata || "?"} → ${arrIata || "?"}`;
@@ -111,11 +121,15 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
 
   const [passengerId, setPassengerId] = useState("");
   const [name, setName] = useState("");
+  const [itinerary, setItinerary] = useState<"single" | "transfer">("single");
   const [flightId, setFlightId] = useState("");
   const [flightDate, setFlightDate] = useState(todayLocal());
+  const [arrivalFlight, setArrivalFlight] = useState("");
+  const [arrivalDate, setArrivalDate] = useState(todayLocal());
   const [leg, setLeg] = useState<InviteLeg>("outbound");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
+  const [hubWarning, setHubWarning] = useState("");
 
   const refresh = useCallback(async () => {
     try {
@@ -154,13 +168,16 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
       setEmailTo("");
       setSmsError("");
       setEmailError("");
-      const { invite, url, qrDataUrl, publicOrigin: origin, smsConfigured: smsOn, emailConfigured: mailOn, emailFromWarning: fromWarn, sms, email: mail } = await createInvite({
+      setHubWarning("");
+      const { invite, url, qrDataUrl, publicOrigin: origin, smsConfigured: smsOn, emailConfigured: mailOn, emailFromWarning: fromWarn, sms, email: mail, hubWarning: hubs } = await createInvite({
         tenantId,
         passengerId: passengerId.trim(),
         name: name.trim() || undefined,
         flightId: flightId.trim(),
         flightDate,
-        leg,
+        leg: itinerary === "transfer" ? "outbound" : leg,
+        arrivalFlight: itinerary === "transfer" ? arrivalFlight.trim() : undefined,
+        arrivalDate: itinerary === "transfer" ? arrivalDate : undefined,
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,
       });
@@ -179,6 +196,12 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
       setPassengerId("");
       setName("");
       setFlightId("");
+      setArrivalFlight("");
+      if (hubs) {
+        setHubWarning(
+          `两班不在同一机场：到达 ${hubs.arrivalAirport}，出发 ${hubs.departureAirport}。链接已签发，旅客端仍按同一中转机场处理。`,
+        );
+      }
     });
   }
 
@@ -233,7 +256,10 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
     a.click();
   }
 
-  const canIssue = Boolean(passengerId.trim() && flightId.trim() && flightDate) && !busy;
+  const canIssue =
+    Boolean(passengerId.trim() && flightId.trim() && flightDate) &&
+    (itinerary === "single" || Boolean(arrivalFlight.trim() && arrivalDate && arrivalFlight.trim().toUpperCase() !== flightId.trim().toUpperCase())) &&
+    !busy;
 
   return (
     <div style={{ display: "grid", gap: 16, padding: 16, overflow: "auto" }}>
@@ -258,6 +284,16 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
         </div>
 
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <label style={{ display: "grid", gap: 4, flex: "0 1 130px" }}>
+            <span className="small">行程类型</span>
+            <select
+              value={itinerary}
+              onChange={(e) => setItinerary(e.target.value === "transfer" ? "transfer" : "single")}
+            >
+              <option value="single">单程</option>
+              <option value="transfer">中转</option>
+            </select>
+          </label>
           <label style={{ display: "grid", gap: 4, flex: "1 1 220px" }}>
             <span className="small">旅客 UUID</span>
             <input value={passengerId} onChange={(e) => setPassengerId(e.target.value)} placeholder="航司提供的唯一标识" />
@@ -266,21 +302,44 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
             <span className="small">姓名</span>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Siyao Fu" />
           </label>
-          <label style={{ display: "grid", gap: 4, flex: "0 1 140px" }}>
-            <span className="small">航班号</span>
-            <input value={flightId} onChange={(e) => setFlightId(e.target.value)} placeholder="UA888" />
-          </label>
-          <label style={{ display: "grid", gap: 4, flex: "0 1 160px" }}>
-            <span className="small">航班日期</span>
-            <input type="date" value={flightDate} onChange={(e) => setFlightDate(e.target.value)} />
-          </label>
-          <label style={{ display: "grid", gap: 4, flex: "0 1 130px" }}>
-            <span className="small">行程段</span>
-            <select value={leg} onChange={(e) => setLeg(e.target.value === "inbound" ? "inbound" : "outbound")}>
-              <option value="outbound">出港</option>
-              <option value="inbound">进港</option>
-            </select>
-          </label>
+          {itinerary === "transfer" ? (
+            <>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 140px" }}>
+                <span className="small">到达航班</span>
+                <input value={arrivalFlight} onChange={(e) => setArrivalFlight(e.target.value)} placeholder="CA836" />
+              </label>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 160px" }}>
+                <span className="small">到达日期</span>
+                <input type="date" value={arrivalDate} onChange={(e) => setArrivalDate(e.target.value)} />
+              </label>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 140px" }}>
+                <span className="small">出发航班</span>
+                <input value={flightId} onChange={(e) => setFlightId(e.target.value)} placeholder="CA837" />
+              </label>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 160px" }}>
+                <span className="small">出发日期</span>
+                <input type="date" value={flightDate} onChange={(e) => setFlightDate(e.target.value)} />
+              </label>
+            </>
+          ) : (
+            <>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 140px" }}>
+                <span className="small">航班号</span>
+                <input value={flightId} onChange={(e) => setFlightId(e.target.value)} placeholder="UA888" />
+              </label>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 160px" }}>
+                <span className="small">航班日期</span>
+                <input type="date" value={flightDate} onChange={(e) => setFlightDate(e.target.value)} />
+              </label>
+              <label style={{ display: "grid", gap: 4, flex: "0 1 130px" }}>
+                <span className="small">行程段</span>
+                <select value={leg} onChange={(e) => setLeg(e.target.value === "inbound" ? "inbound" : "outbound")}>
+                  <option value="outbound">出港</option>
+                  <option value="inbound">进港</option>
+                </select>
+              </label>
+            </>
+          )}
           <label style={{ display: "grid", gap: 4, flex: "1 1 200px" }}>
             <span className="small">手机号（短信，可选）</span>
             <input
@@ -386,6 +445,7 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
           </div>
         )}
 
+        {hubWarning && <div className="small" style={{ color: "#b45309" }}>{hubWarning}</div>}
         {error && <div className="small" style={{ color: "#c8102e" }}>{error}</div>}
       </div>
 
@@ -429,7 +489,9 @@ export default function InvitesPanel({ tenantId }: { tenantId: string }) {
                 <span className="small" style={{ fontWeight: 700, color: status.color }}>{status.text}</span>
               </div>
               <div className="small">
-                {invite.flightId} · {invite.flightDate} · {invite.leg === "inbound" ? "进港" : "出港"} · {route(invite)}
+                {isTransferInvite(invite)
+                  ? `${invite.inboundFlight} / ${invite.flightId} · ${invite.inboundDate || "?"} → ${invite.flightDate} · 中转 · ${route(invite)}`
+                  : `${invite.flightId} · ${invite.flightDate} · ${invite.leg === "inbound" ? "进港" : "出港"} · ${route(invite)}`}
               </div>
               <div className="small" style={{ opacity: 0.75 }}>
                 {gateLabel(invite)} · 打开 {invite.redeemCount} 次 · 最近 {formatTime(invite.lastSeenAt)}

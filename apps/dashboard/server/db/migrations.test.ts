@@ -102,6 +102,25 @@ describe("runMigrations", () => {
     expect(columns).toContain("device_is_mobile");
   });
 
+  it("adds inbound flight columns to a pax_invites table predating them", async () => {
+    const db = await newDb();
+    await db.exec(`
+      CREATE TABLE pax_invites (
+        invite_id TEXT NOT NULL PRIMARY KEY,
+        flight_id TEXT NOT NULL,
+        flight_date TEXT NOT NULL
+      );
+    `);
+
+    const { migrations } = await import("./migrationList");
+    const inbound = migrations.find((m) => m.id === "2026_09_pax_invites_inbound_flight")!;
+    await runMigrations(db, [inbound]);
+
+    const columns = (await db.all<{ name: string }>("PRAGMA table_info(pax_invites)")).map((c) => c.name);
+    expect(columns).toContain("inbound_flight");
+    expect(columns).toContain("inbound_date");
+  });
+
   it(
     "the chat_messages composite-PK migration preserves existing rows and widens the conflict target",
     async () => {

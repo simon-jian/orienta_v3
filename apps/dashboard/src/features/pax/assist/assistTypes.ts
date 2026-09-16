@@ -33,6 +33,7 @@ export type AssistInfoStrip = {
   outbound: string;
   gate: string;
   status: string;
+  active?: "inbound" | "outbound";
 };
 
 export function robotStatusLabel(status: RobotRequestStatus | "idle"): string {

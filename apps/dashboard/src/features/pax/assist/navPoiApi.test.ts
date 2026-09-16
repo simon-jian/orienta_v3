@@ -96,18 +96,26 @@ describe("applyNavPlanPrefill", () => {
       fromId: "sec",
       toId: "g8",
     });
-  });
-
-  it("keeps both ends of a transfer and does not force security", () => {
-    expect(applyNavPlanPrefill(pois, { fromGateHint: "E21", toGateHint: "G8" })).toEqual({
-      fromId: "e21",
+    expect(applyNavPlanPrefill(pois, { airport: "SFO", toGateHint: "G7", activeLeg: "arr" })).toEqual({
+      fromId: "sec",
+      toId: "",
+    });
+    expect(applyNavPlanPrefill(pois, { airport: "SFO", toGateHint: "G8", activeLeg: "arr" })).toEqual({
+      fromId: "sec",
       toId: "g8",
     });
   });
 
-  it("leaves both ends empty when no gate is assigned", () => {
-    expect(applyNavPlanPrefill(pois, {})).toEqual({ fromId: "", toId: "" });
-    expect(applyNavPlanPrefill(pois, { toGateHint: "UNKNOWN" })).toEqual({ fromId: "", toId: "" });
+  it("still uses security → gate when a leftover start hint is present", () => {
+    expect(applyNavPlanPrefill(pois, { fromGateHint: "E21", toGateHint: "G8" })).toEqual({
+      fromId: "sec",
+      toId: "g8",
+    });
+  });
+
+  it("still prefills security when the boarding gate is unknown", () => {
+    expect(applyNavPlanPrefill(pois, {})).toEqual({ fromId: "sec", toId: "" });
+    expect(applyNavPlanPrefill(pois, { toGateHint: "UNKNOWN" })).toEqual({ fromId: "sec", toId: "" });
   });
 
   it("for PEK departures starts at 安检1 and ends at the departure gate", () => {
@@ -128,6 +136,30 @@ describe("applyNavPlanPrefill", () => {
     expect(applyNavPlanPrefill(pek, { airport: "PEK" })).toEqual({
       fromId: "s1",
       toId: "",
+    });
+  });
+
+  it("keeps 安检1 → gate on PEK even if the arrival tab or a connection hint is set", () => {
+    const pek: NavPoi[] = [
+      poi({ id: "s1", name: "安检1", category: "security", terminal: "T3E", floor: "L2" }),
+      poi({ id: "e19a", name: "E19 到达口", category: "arrival", terminal: "T3E", floor: "L3" }),
+      poi({ id: "e19", name: "E19 登机口", category: "gate", terminal: "T3E", floor: "L2" }),
+      poi({ id: "e21", name: "E21 登机口", category: "gate", terminal: "T3E", floor: "L2" }),
+    ];
+    expect(applyNavPlanPrefill(pek, { airport: "PEK", fromGateHint: "E19", activeLeg: "arr" })).toEqual({
+      fromId: "s1",
+      toId: "",
+    });
+    expect(
+      applyNavPlanPrefill(pek, {
+        airport: "PEK",
+        fromGateHint: "E19",
+        toGateHint: "E21",
+        activeLeg: "dep",
+      }),
+    ).toEqual({
+      fromId: "s1",
+      toId: "e21",
     });
   });
 });

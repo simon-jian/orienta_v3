@@ -12,6 +12,7 @@ import {
   normalizeFlight,
   normalizeFlightDate,
   fetchFlightAware,
+  unavailableFlightResult,
 } from "../services/flightAware";
 import { getAirport } from "../../src/config/airports/registry";
 import { logger } from "../lib/logger";
@@ -133,10 +134,29 @@ export function registerFlightRoutes(router: Router, aeroApiRateLimit?: RequestH
     const arrDate = normalizeFlightDate(body.arrDate || body.arrivalDate);
     const depDate = normalizeFlightDate(body.depDate || body.departureDate);
     try {
-      const [arrInst, depInst] = await Promise.all([
+      const [arrOutcome, depOutcome] = await Promise.allSettled([
         fetchFlightAware(arrIdent, { date: arrDate, intent: "arrive" }),
         fetchFlightAware(depIdent, { date: depDate, intent: "depart" }),
       ]);
+      if (arrOutcome.status === "rejected" && depOutcome.status === "rejected") {
+        return respondProviderError(res, "transfer", arrOutcome.reason);
+      }
+      if (arrOutcome.status === "rejected") {
+        logger.warn("flightaware_lookup_failed", {
+          context: "transfer_arrival",
+          error: arrOutcome.reason instanceof Error ? arrOutcome.reason.message : String(arrOutcome.reason),
+        });
+      }
+      if (depOutcome.status === "rejected") {
+        logger.warn("flightaware_lookup_failed", {
+          context: "transfer_departure",
+          error: depOutcome.reason instanceof Error ? depOutcome.reason.message : String(depOutcome.reason),
+        });
+      }
+      const arrInst =
+        arrOutcome.status === "fulfilled" ? arrOutcome.value : unavailableFlightResult(arrIdent);
+      const depInst =
+        depOutcome.status === "fulfilled" ? depOutcome.value : unavailableFlightResult(depIdent);
       const hub      = (arrInst.arr_iata || depInst.dep_iata || "").toUpperCase();
       const fromGate = arrInst.arr_gate || "—";
       const toGate   = depInst.dep_gate || "—";

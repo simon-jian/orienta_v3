@@ -1,11 +1,15 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
   clearPaxSession,
   fetchPaxSession,
   getStoredPaxSession,
+  persistActiveLeg,
+  resolveActiveLeg,
   type PaxSession,
+  type PaxTripLeg,
 } from "./session";
+import { PaxFlightLegTabs } from "./PaxFlightLegTabs";
 import { usePaxPush } from "./hooks/usePaxPush";
 import { usePaxRealtimeSession } from "./hooks/usePaxRealtimeSession";
 import { usePdrNavigation } from "./hooks/usePdrNavigation";
@@ -28,11 +32,13 @@ import {
 import { paxErrorMessage, usePaxT } from "./i18n";
 import { BRAND_LOGO_ALT, BRAND_WORDMARK_SRC } from "../../config/branding";
 import { clientDefaultAirportId } from "../../config/client";
-import { isAssignedGate } from "../../utils/passenger-compute";
 import {
+  currentTripFlightId,
   loadDepartureNavFromFlight,
   mergeLiveDepartureHints,
   readUrlNavPins,
+  sameFlightId,
+  selectNavHintsForFlight,
 } from "./assist/navFlightHints";
 import { usePeerCall } from "../media/usePeerCall";
 import { CallOverlay } from "../media/CallOverlay";
@@ -48,31 +54,27 @@ function initialAssistTab(): AssistTab {
 
 function hintsFromUrlAndStorage(session: PaxSession | null): NavPlanHints {
   const stored = getNavHints() || {};
-  let urlHints: NavPlanHints = {};
   try {
     const q = new URLSearchParams(window.location.search);
-    urlHints = {
-      airport: q.get("airport") || undefined,
-      fromGateHint: q.get("from") || undefined,
-      toGateHint: q.get("to") || undefined,
-    };
+    return selectNavHintsForFlight(
+      session,
+      {
+        airport: q.get("airport") || undefined,
+        from: q.get("from") || undefined,
+        to: q.get("to") || undefined,
+        flight: q.get("flight") || undefined,
+      },
+      stored,
+      clientDefaultAirportId(),
+    );
   } catch {
-    /* ignore */
+    return selectNavHintsForFlight(session, {}, stored, clientDefaultAirportId());
   }
-  return {
-    airport: urlHints.airport || stored.airport || clientDefaultAirportId(),
-    fromGateHint: urlHints.fromGateHint || stored.fromGateHint,
-    toGateHint:
-      urlHints.toGateHint ||
-      stored.toGateHint ||
-      (isAssignedGate(session?.passenger.gateId) ? session?.passenger.gateId : undefined),
-    flightId: stored.flightId || session?.passenger.flightId,
-  };
 }
 
 export default function PaxAppPage() {
   const t = usePaxT();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [session, setSession] = useState<PaxSession | null>(() => getStoredPaxSession());
   const [checking, setChecking] = useState(true);
   const [error, setError] = useState("");
@@ -121,24 +123,63 @@ export default function PaxAppPage() {
     onStatus: onLocationStatus,
   });
 
+  const lastNavLegRef = useRef<string | undefined>(undefined);
+
   useEffect(() => {
     if (!session) return;
     setNavHints((prev) => {
       const next = hintsFromUrlAndStorage(session);
+      if (prev.flightId && next.flightId && !sameFlightId(prev.flightId, next.flightId)) {
+        return next;
+      }
       return {
         airport: next.airport || prev.airport,
         fromGateHint: next.fromGateHint || prev.fromGateHint,
         toGateHint: next.toGateHint || prev.toGateHint,
         flightId: next.flightId || prev.flightId,
+        activeLeg: next.activeLeg || prev.activeLeg,
       };
     });
-  }, [session]);
+  }, [session?.passenger.id, session?.passenger.flightId]);
+
+  useEffect(() => {
+    if (!session?.trip) return;
+    const leg = resolveActiveLeg(session.trip);
+    const flightId = currentTripFlightId(session);
+    setNavHints((prev) => {
+      if (prev.activeLeg === leg && sameFlightId(prev.flightId, flightId)) return prev;
+      const flightChanged = !!(prev.flightId && flightId && !sameFlightId(prev.flightId, flightId));
+      return {
+        airport: flightChanged ? undefined : prev.airport,
+        fromGateHint: flightChanged ? undefined : prev.fromGateHint,
+        toGateHint: flightChanged ? undefined : prev.toGateHint,
+        flightId,
+        activeLeg: leg,
+      };
+    });
+    if (lastNavLegRef.current && lastNavLegRef.current !== leg) {
+      clearConfirmedNavPlan();
+      setNavPlan(null);
+    }
+    lastNavLegRef.current = leg;
+  }, [session?.trip?.activeLeg, session?.trip?.intent, session?.trip?.arrivalFlight, session?.trip?.departureFlight]);
 
   useEffect(() => {
     const pins = readUrlNavPins();
-    if (!pins.airport && !pins.from && !pins.to) return;
+    if (!pins.airport && !pins.from && !pins.to && !pins.flight) return;
     setNavHints((prev) => mergeLiveDepartureHints(prev, {}, pins));
-  }, [searchParams]);
+    setSearchParams((prev) => {
+      if (!prev.has("airport") && !prev.has("from") && !prev.has("to") && !prev.has("flight")) {
+        return prev;
+      }
+      const next = new URLSearchParams(prev);
+      next.delete("airport");
+      next.delete("from");
+      next.delete("to");
+      next.delete("flight");
+      return next;
+    }, { replace: true });
+  }, [searchParams, setSearchParams]);
 
   useEffect(() => {
     if (!navPlan) return;
@@ -163,7 +204,7 @@ export default function PaxAppPage() {
     return () => {
       cancelled = true;
     };
-  }, [session]);
+  }, [session, session?.trip?.activeLeg, session?.trip?.arrivalFlight, session?.trip?.departureFlight]);
   const strip = useAssistInfoStrip(session, rtUp, presenceOk);
   const linkUp = rtUp || presenceOk;
 
@@ -205,7 +246,7 @@ export default function PaxAppPage() {
             ) {
               return prev;
             }
-            return { ...prev, ...s, trip: prev.trip || s.trip, capabilities: s.capabilities || prev.capabilities || [] };
+            return { ...prev, ...s, trip: s.trip || prev.trip, capabilities: s.capabilities || prev.capabilities || [] };
           }
           return s;
         });
@@ -263,6 +304,20 @@ export default function PaxAppPage() {
           </button>
         </div>
       </div>
+
+      {session.trip?.intent === "transfer" && (session.trip.arrivalFlight || session.trip.departureFlight) ? (
+        <div className="pax-assist-flight-tabs">
+          <PaxFlightLegTabs
+            arrivalFlight={session.trip.arrivalFlight || t("flight.legArrival")}
+            departureFlight={session.trip.departureFlight || session.passenger.flightId || t("flight.legDeparture")}
+            activeLeg={resolveActiveLeg(session.trip)}
+            onChange={(leg: PaxTripLeg) => {
+              const next = persistActiveLeg(session.trip!, leg);
+              setSession({ ...session, trip: next });
+            }}
+          />
+        </div>
+      ) : null}
 
       <div className="pax-assist-tabs" role="tablist" aria-label={t("app.tabsAria")}>
         <button

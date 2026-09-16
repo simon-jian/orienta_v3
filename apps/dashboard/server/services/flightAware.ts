@@ -8,6 +8,7 @@
 import { FLIGHTAWARE_API_KEY } from "../config";
 import { logger } from "../lib/logger";
 import { canonicalFlightId } from "../lib/canonicalize";
+import { aeroApiIdentCandidates } from "./airlineIdents";
 
 export type FlightLookupIntent = "depart" | "arrive";
 
@@ -122,6 +123,42 @@ function addUtcDays(date: string, days: number): string {
   const parsed = new Date(`${date}T00:00:00Z`);
   parsed.setUTCDate(parsed.getUTCDate() + days);
   return parsed.toISOString().slice(0, 10);
+}
+
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * AeroAPI `start`/`end` compare `scheduled_out` in UTC. Date-only values
+ * become 00:00:00Z; `end` is exclusive. A PEK 00:05 local departure on date
+ * D is (D-1) 16:05Z, so `start=D-1` (00:00Z) drops the previous local day's
+ * red-eye — the instance FlightAware's website is usually showing.
+ *
+ * Provider limits: start/end no further than 10 days back or 2 days ahead.
+ */
+export function aeroApiSearchWindow(
+  selectedDate: string | undefined,
+  now: Date = new Date(),
+): { start: string; end: string } {
+  const nowMs = now.getTime();
+  const minStart = new Date(nowMs - 10 * MS_PER_DAY);
+  const maxEnd = new Date(nowMs + 2 * MS_PER_DAY);
+
+  let start: Date;
+  let end: Date;
+  if (selectedDate) {
+    start = new Date(`${addUtcDays(selectedDate, -2)}T00:00:00Z`);
+    end = new Date(`${addUtcDays(selectedDate, 2)}T00:00:00Z`);
+  } else {
+    start = new Date(nowMs - 2 * MS_PER_DAY);
+    end = new Date(nowMs + 2 * MS_PER_DAY);
+  }
+
+  if (start < minStart) start = minStart;
+  if (start > maxEnd) start = new Date(nowMs);
+  if (end > maxEnd) end = maxEnd;
+  if (end <= start) end = maxEnd;
+
+  return { start: start.toISOString(), end: end.toISOString() };
 }
 
 function parseFlightInstant(value: unknown): number | null {
@@ -319,6 +356,57 @@ function mapFlightAwareFlight(
   };
 }
 
+/** Card-shaped stub when AeroAPI has no row for this ident. */
+export function unavailableFlightResult(flightIdent: string): FlightResult {
+  const ident = normalizeFlight(flightIdent) || flightIdent;
+  return {
+    flight_iata: ident,
+    dep_iata: "—",
+    arr_iata: "—",
+    dep_airport_code: "—",
+    arr_airport_code: "—",
+    dep_time_local: "—",
+    arr_time_local: "—",
+    dep_estimated_local: "—",
+    arr_estimated_local: "—",
+    dep_actual_local: "—",
+    arr_actual_local: "—",
+    dep_scheduled_iso: null,
+    arr_scheduled_iso: null,
+    dep_terminal: "—",
+    dep_gate: "—",
+    arr_terminal: "—",
+    arr_gate: "—",
+    baggage_claim: "—",
+    duration_minutes: null,
+    departure_delay_minutes: null,
+    arrival_delay_minutes: null,
+    fa_flight_id: "",
+    dep_airport_name: "",
+    arr_airport_name: "",
+    selected_date: undefined,
+    status: "Unavailable",
+    scheduled_out_utc: null,
+    estimated_out_utc: null,
+    actual_out_utc: null,
+    scheduled_off_utc: null,
+    estimated_off_utc: null,
+    actual_off_utc: null,
+    scheduled_on_utc: null,
+    estimated_on_utc: null,
+    actual_on_utc: null,
+    scheduled_in_utc: null,
+    estimated_in_utc: null,
+    actual_in_utc: null,
+    origin_timezone: null,
+    destination_timezone: null,
+    origin_country: null,
+    destination_country: null,
+    boarding_time_utc: null,
+    boarding_time_source: null,
+  };
+}
+
 export async function fetchFlightAware(
   flightIdent: string,
   options: FetchFlightAwareOptions = {},
@@ -328,27 +416,11 @@ export async function fetchFlightAware(
   return fetchFlightAwareUncached(flightIdent, options);
 }
 
-async function fetchFlightAwareUncached(
-  flightIdent: string,
-  options: FetchFlightAwareOptions = {},
-): Promise<FlightResult> {
-  const selectedDate = normalizeFlightDate(options.date);
-  const intent: FlightLookupIntent = options.intent === "arrive" ? "arrive" : "depart";
-  const utc = new Date();
-  const defaultStart = new Date(utc);
-  defaultStart.setDate(defaultStart.getDate() - 2);
-  const defaultEnd = new Date(utc);
-  defaultEnd.setDate(defaultEnd.getDate() + 2);
-  const providerMaxEnd = defaultEnd.toISOString().slice(0, 10);
-  const selectedEnd = selectedDate ? addUtcDays(selectedDate, 1) : providerMaxEnd;
-
-  const params = new URLSearchParams({
-    start: selectedDate ? addUtcDays(selectedDate, -1) : defaultStart.toISOString().slice(0, 10),
-    end: selectedEnd > providerMaxEnd ? providerMaxEnd : selectedEnd,
-    max_pages: "1",
-  });
-
-  const url = `https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(flightIdent)}?${params}`;
+async function queryAeroApiFlights(
+  ident: string,
+  params: URLSearchParams,
+): Promise<Record<string, unknown>[]> {
+  const url = `https://aeroapi.flightaware.com/aeroapi/flights/${encodeURIComponent(ident)}?${params}`;
   let res: Response;
   try {
     res = await fetch(url, {
@@ -364,18 +436,65 @@ async function fetchFlightAwareUncached(
     const err = await res.text();
     throw new Error(`FlightAware ${res.status}: ${err.slice(0, 200)}`);
   }
-
   const j = (await res.json()) as Record<string, unknown>;
-  const flights = Array.isArray(j.flights) ? (j.flights as Record<string, unknown>[]) : [];
+  return Array.isArray(j.flights) ? (j.flights as Record<string, unknown>[]) : [];
+}
+
+async function fetchFlightAwareUncached(
+  flightIdent: string,
+  options: FetchFlightAwareOptions = {},
+): Promise<FlightResult> {
+  const selectedDate = normalizeFlightDate(options.date);
+  const intent: FlightLookupIntent = options.intent === "arrive" ? "arrive" : "depart";
+  const window = aeroApiSearchWindow(selectedDate);
+  const params = new URLSearchParams({
+    start: window.start,
+    end: window.end,
+    max_pages: "1",
+    ident_type: "designator",
+  });
+
+  const candidates = aeroApiIdentCandidates(normalizeFlight(flightIdent) || flightIdent);
+  let flights: Record<string, unknown>[] = [];
+  let usedIdent = candidates[0];
+  for (const ident of candidates) {
+    const page = await queryAeroApiFlights(ident, params);
+    if (page.length > 0) {
+      flights = page;
+      usedIdent = ident;
+      if (ident !== candidates[0]) {
+        logger.info("flightaware_ident_fallback", { requested: flightIdent, used: ident });
+      }
+      break;
+    }
+  }
   if (flights.length === 0) {
     recordSuccess();
+    logger.warn("flightaware_empty", {
+      flightIdent,
+      candidates,
+      start: window.start,
+      end: window.end,
+      date: selectedDate,
+    });
     throw new Error(`No flights found for ${flightIdent}`);
   }
+  if (usedIdent !== flightIdent) {
+    logger.info("flightaware_ident_resolved", { requested: flightIdent, used: usedIdent });
+  }
 
-  const f = pickBestFlightAwareFlight(flights, { date: selectedDate, intent });
+  const dated = pickBestFlightAwareFlight(flights, { date: selectedDate, intent });
+  const f = dated ?? (selectedDate ? pickBestFlightAwareFlight(flights, { intent }) : null);
   if (!f) {
     recordSuccess();
     throw new Error(`No flights found for ${flightIdent}${selectedDate ? ` on ${selectedDate}` : ""}`);
+  }
+  if (selectedDate && !dated) {
+    logger.warn("flightaware_date_fallback", {
+      flightIdent,
+      requestedDate: selectedDate,
+      usedDate: flightLocalDate(f, intent),
+    });
   }
 
   recordSuccess();

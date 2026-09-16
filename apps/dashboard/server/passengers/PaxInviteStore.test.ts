@@ -220,6 +220,23 @@ describe("PaxInviteStore", () => {
     expect(await store.removeAllForPassenger("airchina", "PAX-NONE")).toBe(0);
   });
 
+  it("stores an inbound flight on a transfer invite", async () => {
+    const store = await newStore();
+    const { invite } = await store.create({
+      ...baseInput,
+      flightId: "CA837",
+      flightDate: "2026-09-14",
+      leg: "outbound",
+      inboundFlight: "CA836",
+      inboundDate: "2026-09-13",
+    });
+    expect(invite.inboundFlight).toBe("CA836");
+    expect(invite.inboundDate).toBe("2026-09-13");
+    expect(invite.flightId).toBe("CA837");
+    const listed = await store.list("airchina");
+    expect(listed[0]?.inboundFlight).toBe("CA836");
+  });
+
   it("lists only revoked or expired invites", async () => {
     const store = await newStore();
     const live = await store.create(baseInput);

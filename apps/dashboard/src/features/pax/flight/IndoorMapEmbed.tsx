@@ -3,7 +3,8 @@ import { INDOOR_MAP_API_BASE, INDOOR_MAP_URL } from "../../../config/indoorMap";
 import { clientDefaultAirportId } from "../../../config/client";
 import type { PaxSession } from "../session";
 import { usePaxT } from "../i18n";
-import { buildStartNavHref, gateHintsForLeg, prepareStartNavigation } from "../assist/navPlan";
+import { buildStartNavHref, prepareStartNavigation } from "../assist/navPlan";
+import { indoorMapFloor, indoorMapGateLabel, usableMapGate } from "./indoorMapParams";
 
 export type MapLeg = "dep" | "arr";
 
@@ -15,6 +16,10 @@ type Props = {
   /** Labels for the dep/arr map toggle (IATA). */
   depAirportLabel?: string;
   arrAirportLabel?: string;
+  /** Departure airport + boarding gate for Start navigation (安检 → 登机口). */
+  navAirport?: string;
+  navGate?: string;
+  navFlightId?: string;
   /** @deprecated Prefer flight-derived href from gates; kept for overrides. */
   startNavTo?: string;
   mapLeg?: MapLeg;
@@ -22,11 +27,6 @@ type Props = {
   showLegToggle?: boolean;
 };
 
-function usableGate(value: string | undefined): string {
-  const g = (value || "").trim();
-  if (!g || g === "—") return "";
-  return g;
-}
 
 function usableAirport(value: string | undefined | null): string {
   const c = String(value || "")
@@ -43,16 +43,27 @@ export function IndoorMapEmbed({
   airport,
   depAirportLabel,
   arrAirportLabel,
+  navAirport,
+  navGate,
+  navFlightId,
   startNavTo,
   mapLeg = "dep",
   onMapLegChange,
   showLegToggle = false,
 }: Props) {
   const t = usePaxT();
-  const from = usableGate(gateFrom) || usableGate(session.passenger.gateId);
-  const to = usableGate(gateTo) || from;
   const airportCode = usableAirport(airport) || clientDefaultAirportId();
+  // Arrival must not fall back to the passenger's outbound boarding gate.
+  const rawFrom =
+    usableMapGate(gateFrom) ||
+    (mapLeg === "dep" && airportCode === clientDefaultAirportId()
+      ? usableMapGate(session.passenger.gateId)
+      : "");
+  const rawTo = usableMapGate(gateTo) || rawFrom;
+  const from = indoorMapGateLabel(airportCode, rawFrom, mapLeg);
+  const to = indoorMapGateLabel(airportCode, rawTo, mapLeg);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const floor = indoorMapFloor(airportCode, mapLeg);
 
   const src = useMemo(() => {
     const u = new URL(INDOOR_MAP_URL, window.location.origin);
@@ -62,17 +73,17 @@ export function IndoorMapEmbed({
     u.searchParams.set("apiBase", INDOOR_MAP_API_BASE);
     if (from) u.searchParams.set("gateFrom", from);
     if (to) u.searchParams.set("gateTo", to);
-    if (airportCode === "PEK" && mapLeg === "dep") {
-      u.searchParams.set("navFloor", "L2");
-      u.searchParams.set("navFloors", "L2");
+    if (floor) {
+      u.searchParams.set("navFloor", floor);
+      u.searchParams.set("navFloors", floor);
     }
     u.searchParams.set("dep", session.passenger.flightId || "");
     u.searchParams.set("pax", session.passenger.id);
     u.searchParams.set("parentOrigin", window.location.origin);
     // Bust cache when airport/gates change so the map re-inits.
-    u.searchParams.set("_v", `${airportCode}-${from}-${to}-${mapLeg}`);
+    u.searchParams.set("_v", `${airportCode}-${from}-${to}-${mapLeg}-${floor || ""}`);
     return u.toString();
-  }, [airportCode, from, to, mapLeg, session.passenger.tenantId, session.passenger.flightId, session.passenger.id]);
+  }, [airportCode, from, to, mapLeg, floor, session.passenger.tenantId, session.passenger.flightId, session.passenger.id]);
 
   useEffect(() => {
     const iframe = iframeRef.current;
@@ -88,8 +99,8 @@ export function IndoorMapEmbed({
         /* ignore */
       }
       win.postMessage({ type: "orienta-indoor-set-airport", airport: airportCode }, origin);
-      if (airportCode === "PEK" && mapLeg === "dep") {
-        win.postMessage({ type: "orienta-indoor-set-floor", floor: "L2" }, origin);
+      if (floor) {
+        win.postMessage({ type: "orienta-indoor-set-floor", floor }, origin);
       }
     };
 
@@ -102,12 +113,12 @@ export function IndoorMapEmbed({
 
     iframe.addEventListener("load", onLoad);
     return () => iframe.removeEventListener("load", onLoad);
-  }, [src, airportCode, mapLeg]);
+  }, [src, airportCode, floor]);
 
   const hints = {
-    airport: airportCode,
-    ...gateHintsForLeg(from, to, mapLeg),
-    flightId: session.passenger.flightId,
+    airport: usableAirport(navAirport) || airportCode,
+    toGateHint: usableMapGate(navGate),
+    flightId: navFlightId || session.passenger.flightId,
   };
 
   return (

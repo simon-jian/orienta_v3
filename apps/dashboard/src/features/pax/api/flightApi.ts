@@ -77,11 +77,31 @@ export async function fetchClosestFlight(flight: string, date?: string, intent?:
   return readOkData<ClosestFlightResult>(res);
 }
 
-export async function fetchTransfer(arrivalFlight: string, departureFlight: string) {
-  const res = await fetch(apiUrl("/api/transfer"), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ arrFlight: arrivalFlight, depFlight: departureFlight }),
+const transferInflight = new Map<string, Promise<TransferResult>>();
+
+export async function fetchTransfer(
+  arrivalFlight: string,
+  departureFlight: string,
+  dates?: { arrivalDate?: string; departureDate?: string },
+) {
+  const key = `${arrivalFlight}|${departureFlight}|${dates?.arrivalDate || ""}|${dates?.departureDate || ""}`;
+  const pending = transferInflight.get(key);
+  if (pending) return pending;
+  const request = (async () => {
+    const res = await fetch(apiUrl("/api/transfer"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        arrFlight: arrivalFlight,
+        depFlight: departureFlight,
+        arrDate: dates?.arrivalDate,
+        depDate: dates?.departureDate,
+      }),
+    });
+    return readOkData<TransferResult>(res);
+  })().finally(() => {
+    transferInflight.delete(key);
   });
-  return readOkData<TransferResult>(res);
+  transferInflight.set(key, request);
+  return request;
 }

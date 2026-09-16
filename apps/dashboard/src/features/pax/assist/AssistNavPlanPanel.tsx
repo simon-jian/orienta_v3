@@ -47,10 +47,14 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
   const groups = useMemo(() => groupPois(pois), [pois]);
 
   useEffect(() => {
+    airportTouchedRef.current = false;
+  }, [hints.flightId]);
+
+  useEffect(() => {
     if (airportTouchedRef.current) return;
-    const next = findNavAirport(hints.airport)?.code;
+    const next = findNavAirport(hints.airport)?.code || NAV_AIRPORTS[0]?.code;
     if (next && next !== airportCode) setAirportCode(next);
-  }, [hints.airport, airportCode]);
+  }, [hints.airport, hints.flightId, airportCode]);
 
   useEffect(() => {
     if (!airport) return;
@@ -63,7 +67,11 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
       .then((list) => {
         if (cancelled) return;
         setPois(list);
-        const prefill = applyNavPlanPrefill(list, { ...hints, airport: airport.code });
+        const prefill = applyNavPlanPrefill(list, {
+          ...hints,
+          airport: airport.code,
+          activeLeg: hints.activeLeg,
+        });
         setToId(prefill.toId);
         setFromId(prefill.fromId);
       })
@@ -76,7 +84,7 @@ export function AssistNavPlanPanel({ hints, onConfirm }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [airport, hints.fromGateHint, hints.toGateHint, t]);
+  }, [airport, hints.fromGateHint, hints.toGateHint, hints.activeLeg, hints.flightId, t]);
 
   const canConfirm = !!fromId && !!toId && fromId !== toId && !!airport;
 

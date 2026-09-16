@@ -49,6 +49,12 @@ import {
 import { buildInviteClaimUrl } from "../lib/inviteClaimUrl";
 import { tryRenderInviteQr, type InviteQr } from "../lib/inviteQr";
 import { mailFromMismatch, readMailConfig, sendInviteMail } from "../lib/mail";
+import {
+  inviteFlightLabel,
+  isTransferInvite,
+  transferHubWarning,
+  tripFromInvite,
+} from "../passengers/inviteItinerary";
 
 /** Links outlive a delayed flight but not the trip; long enough to send by SMS a day ahead. */
 const INVITE_LIFETIME_MS = 48 * 60 * 60_000;
@@ -263,20 +269,32 @@ export function registerPaxInviteRoutes(
     const passengerId = String(body.passengerId || body.passenger_id || "").trim().slice(0, MAX_PASSENGER_ID_LEN);
     const flightId = canonicalFlightId(body.flightId || body.flight_id);
     const flightDate = normalizeDate(body.flightDate || body.flight_date) || todayUtc();
-    const leg: InviteLeg = body.leg === "inbound" ? "inbound" : "outbound";
+    const arrivalFlight = canonicalFlightId(body.arrivalFlight || body.inboundFlight || body.arrival_flight);
+    const arrivalDate = normalizeDate(body.arrivalDate || body.inboundDate || body.arrival_date);
+    const transfer = !!(arrivalFlight && arrivalFlight !== flightId);
+    const leg: InviteLeg = transfer ? "outbound" : body.leg === "inbound" ? "inbound" : "outbound";
     const name = String(body.name || "").trim();
 
     if (!passengerId) return res.status(400).json({ ok: false, error: "missing_passengerId" });
     if (!flightId) return res.status(400).json({ ok: false, error: "missing_flightId" });
 
     const airportId = airportForTenant(tenantId);
-    const resolved = await resolveInviteFlight(
-      flightId,
-      flightDate,
-      leg,
-      airportId,
-      canonicalGateId(body.gateId || body.gate_id) || undefined,
-    );
+    const gateHint = canonicalGateId(body.gateId || body.gate_id) || undefined;
+    const inboundDate = arrivalDate || flightDate;
+
+    const [arrResolved, depResolved] = transfer
+      ? await Promise.all([
+          resolveInviteFlight(arrivalFlight, inboundDate, "inbound", airportId),
+          resolveInviteFlight(flightId, flightDate, "outbound", airportId, gateHint),
+        ])
+      : [undefined, await resolveInviteFlight(flightId, flightDate, leg, airportId, gateHint)];
+
+    const resolved = depResolved;
+    if (!resolved) return res.status(502).json({ ok: false, error: "flight_resolve_failed" });
+    const hubWarning =
+      transfer && arrResolved
+        ? transferHubWarning(arrResolved.snapshot.arrIata, resolved.snapshot.depIata)
+        : undefined;
 
     // Pre-create the registry row so the passenger shows up in the operator
     // list before they ever open the link.
@@ -287,11 +305,24 @@ export function registerPaxInviteRoutes(
       plan: body.plan === "free" ? "free" : "premium",
       flightId,
       gateId: resolved.gateId,
-      inboundFlightId: leg === "inbound" ? flightId : undefined,
-      inboundFrom: leg === "inbound" ? resolved.snapshot.depIata || undefined : undefined,
-      outboundTo: leg === "outbound" ? resolved.snapshot.arrIata || undefined : undefined,
+      inboundFlightId: transfer ? arrivalFlight : leg === "inbound" ? flightId : undefined,
+      inboundFrom: transfer
+        ? arrResolved?.snapshot.depIata || undefined
+        : leg === "inbound"
+          ? resolved.snapshot.depIata || undefined
+          : undefined,
+      outboundTo: transfer || leg === "outbound" ? resolved.snapshot.arrIata || undefined : undefined,
       source: "api_import",
     });
+    if (transfer && arrivalFlight) {
+      await registry.applyTrip(tenantId, passengerId, {
+        flightId,
+        gateId: resolved.gateId,
+        inboundFlight: arrivalFlight,
+        inboundFrom: arrResolved?.snapshot.depIata || undefined,
+        outboundTo: resolved.snapshot.arrIata || undefined,
+      });
+    }
 
     const { invite, token } = await invites.create({
       tenantId,
@@ -300,6 +331,8 @@ export function registerPaxInviteRoutes(
       flightId,
       flightDate,
       leg,
+      inboundFlight: transfer ? arrivalFlight : undefined,
+      inboundDate: transfer ? inboundDate : undefined,
       flight: resolved.snapshot,
       expiresAt: Date.now() + INVITE_LIFETIME_MS,
       createdBy: adminEmailFromRequest(req),
@@ -310,7 +343,9 @@ export function registerPaxInviteRoutes(
       action: "pax_invite_create",
       tenantId,
       passengerId,
-      detail: `${flightId}/${flightDate}/${leg}`,
+      detail: transfer
+        ? `${arrivalFlight}/${inboundDate}+${flightId}/${flightDate}`
+        : `${flightId}/${flightDate}/${leg}`,
     });
 
     const url = inviteUrl(req, invite.inviteId, token);
@@ -325,7 +360,7 @@ export function registerPaxInviteRoutes(
         url,
         inviteId: invite.inviteId,
         expectedOrigin: origin,
-        flightId,
+        flightId: inviteFlightLabel(invite),
       });
       if (sms.sent) {
         void auditLog?.record({
@@ -346,7 +381,7 @@ export function registerPaxInviteRoutes(
         inviteId: invite.inviteId,
         expectedOrigin: origin,
         name: name || undefined,
-        flightId,
+        flightId: inviteFlightLabel(invite),
         qr,
       });
       if (emailResult.sent) {
@@ -370,6 +405,7 @@ export function registerPaxInviteRoutes(
       ...emailStatus(),
       sms,
       email: emailResult,
+      hubWarning,
     });
   });
 
@@ -432,7 +468,7 @@ export function registerPaxInviteRoutes(
       url: String(body.url || ""),
       inviteId: invite.inviteId,
       expectedOrigin: publicOrigin(req),
-      flightId: invite.flightId,
+      flightId: inviteFlightLabel(invite),
     });
     if (!sms.sent) return res.status(sms.status).json({ ok: false, error: sms.error });
 
@@ -466,7 +502,7 @@ export function registerPaxInviteRoutes(
       inviteId: invite.inviteId,
       expectedOrigin: publicOrigin(req),
       name: invite.passengerName || undefined,
-      flightId: invite.flightId,
+      flightId: inviteFlightLabel(invite),
     });
     if (!sent.sent) return res.status(sent.status).json({ ok: false, error: sent.error });
 
@@ -576,7 +612,16 @@ export function registerPaxInviteRoutes(
     const airportId = airportForTenant(invite.tenantId);
     // Gate assignments move, and AeroAPI only publishes them close to the
     // flight, so the snapshot taken at issue time is treated as a hint only.
-    const resolved = await resolveInviteFlight(invite.flightId, invite.flightDate, invite.leg, airportId);
+    const transfer = isTransferInvite(invite);
+    const inboundDate = invite.inboundDate || invite.flightDate;
+    const [arrResolved, depResolved] = transfer && invite.inboundFlight
+      ? await Promise.all([
+          resolveInviteFlight(invite.inboundFlight, inboundDate, "inbound", airportId),
+          resolveInviteFlight(invite.flightId, invite.flightDate, "outbound", airportId),
+        ])
+      : [undefined, await resolveInviteFlight(invite.flightId, invite.flightDate, invite.leg, airportId)];
+    const resolved = depResolved;
+    if (!resolved) return res.status(502).json({ ok: false, error: "flight_resolve_failed" });
     const snapshot = resolved.snapshot;
     const gateId =
       resolved.gateId ||
@@ -590,9 +635,17 @@ export function registerPaxInviteRoutes(
       plan: "premium",
       flightId: invite.flightId,
       gateId,
-      inboundFlightId: invite.leg === "inbound" ? invite.flightId : undefined,
-      inboundFrom: invite.leg === "inbound" ? snapshot.depIata || undefined : undefined,
-      outboundTo: invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
+      inboundFlightId: transfer
+        ? invite.inboundFlight
+        : invite.leg === "inbound"
+          ? invite.flightId
+          : undefined,
+      inboundFrom: transfer
+        ? arrResolved?.snapshot.depIata || undefined
+        : invite.leg === "inbound"
+          ? snapshot.depIata || undefined
+          : undefined,
+      outboundTo: transfer || invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
       source: "api_import",
     });
     // getOrCreate is a no-op for the row the issue step already created, so the
@@ -601,17 +654,29 @@ export function registerPaxInviteRoutes(
       (await registry.applyTrip(invite.tenantId, invite.passengerId, {
         flightId: invite.flightId,
         gateId,
-        inboundFlight: invite.leg === "inbound" ? invite.flightId : undefined,
-        inboundFrom: invite.leg === "inbound" ? snapshot.depIata || undefined : undefined,
-        outboundTo: invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
+        inboundFlight: transfer
+          ? invite.inboundFlight
+          : invite.leg === "inbound"
+            ? invite.flightId
+            : undefined,
+        inboundFrom: transfer
+          ? arrResolved?.snapshot.depIata || undefined
+          : invite.leg === "inbound"
+            ? snapshot.depIata || undefined
+            : undefined,
+        outboundTo: transfer || invite.leg === "outbound" ? snapshot.arrIata || undefined : undefined,
       })) ?? created;
+
+    const expiryMs = transfer && arrResolved
+      ? Math.max(resolved.referenceTimeMs, arrResolved.referenceTimeMs)
+      : resolved.referenceTimeMs;
 
     const session = await createSessionResponse({
       passenger: { ...passenger, gateId: gateId || passenger.gateId },
       tenantId: invite.tenantId,
       accountType: "temporary",
       plan: "premium",
-      expiresAt: temporaryExpiryFromDeparture(resolved.referenceTimeMs),
+      expiresAt: temporaryExpiryFromDeparture(expiryMs),
     });
 
     void auditLog?.record({
@@ -619,20 +684,16 @@ export function registerPaxInviteRoutes(
       action: result.boundNow ? "pax_invite_device_bound" : "pax_invite_redeem",
       tenantId: invite.tenantId,
       passengerId: invite.passengerId,
-      detail: `${invite.flightId}/${invite.leg}`,
+      detail: transfer
+        ? `${invite.inboundFlight}+${invite.flightId}`
+        : `${invite.flightId}/${invite.leg}`,
     });
 
     return res.status(201).json({
       ok: true,
       session,
       boundNow: result.boundNow,
-      trip: {
-        intent: invite.leg === "inbound" ? "arrive" : "depart",
-        flight: invite.flightId,
-        date: invite.flightDate,
-        arrivalFlight: invite.leg === "inbound" ? invite.flightId : undefined,
-        departureFlight: invite.leg === "outbound" ? invite.flightId : undefined,
-      },
+      trip: tripFromInvite(invite),
       flight: {
         ...snapshot,
         flightId: invite.flightId,

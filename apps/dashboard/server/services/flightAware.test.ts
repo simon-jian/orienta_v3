@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { pickBestFlightAwareFlight } from "./flightAware";
+import { aeroApiSearchWindow, pickBestFlightAwareFlight } from "./flightAware";
 
 // FLIGHTAWARE_API_KEY is read from process.env at module-load time (server/config.ts),
 // so each test gets a fresh module instance via resetModules() + dynamic import
@@ -19,6 +19,26 @@ function flight(overrides: Record<string, unknown>) {
     ...overrides,
   };
 }
+
+describe("aeroApiSearchWindow", () => {
+  it("keeps a PEK 00:05 departure when the form date is the next local day", () => {
+    const { start, end } = aeroApiSearchWindow("2026-09-15", new Date("2026-09-14T05:55:00Z"));
+    const startMs = Date.parse(start);
+    const endMs = Date.parse(end);
+    const landedRedEye = Date.parse("2026-09-13T16:05:00Z");
+    const nextRedEye = Date.parse("2026-09-14T16:05:00Z");
+    expect(startMs).toBeLessThanOrEqual(landedRedEye);
+    expect(endMs).toBeGreaterThan(landedRedEye);
+    expect(startMs).toBeLessThanOrEqual(nextRedEye);
+    expect(endMs).toBeGreaterThan(nextRedEye);
+  });
+
+  it("does not ask AeroAPI more than two days ahead", () => {
+    const now = new Date("2026-09-14T05:55:00Z");
+    const { end } = aeroApiSearchWindow("2026-09-15", now);
+    expect(Date.parse(end)).toBeLessThanOrEqual(now.getTime() + 2 * 86_400_000);
+  });
+});
 
 describe("pickBestFlightAwareFlight", () => {
   it("selects the requested local departure date instead of the first provider result", () => {
@@ -114,6 +134,30 @@ describe("fetchFlightAware circuit breaker", () => {
     expect(flightAwareCircuitStatus().consecutiveFailures).toBe(0);
   });
 
+  it("falls back to the closest instance when the requested date is not in the window", async () => {
+    const { fetchFlightAware } = await importFreshWithApiKey();
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        flights: [
+          {
+            operator_iata: "UA",
+            flight_number: "888",
+            status: "Scheduled",
+            scheduled_out: "2026-09-14T18:00:00Z",
+            origin: { code_iata: "SFO", timezone: "America/Los_Angeles" },
+            destination: { code_iata: "PEK", timezone: "Asia/Shanghai" },
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    const inst = await fetchFlightAware("UA888", { date: "2026-09-13", intent: "arrive" });
+    expect(inst.flight_iata).toBe("UA888");
+    expect(inst.arr_iata).toBe("PEK");
+  });
+
   it("\"no flights found\" (a healthy API response) does not count as a circuit failure", async () => {
     const { fetchFlightAware, flightAwareCircuitStatus } = await importFreshWithApiKey();
     global.fetch = vi.fn().mockResolvedValue({
@@ -127,6 +171,68 @@ describe("fetchFlightAware circuit breaker", () => {
     }
     expect(flightAwareCircuitStatus().open).toBe(false);
     expect(flightAwareCircuitStatus().consecutiveFailures).toBe(0);
+  });
+
+  it("queries the ICAO ident first so CA5285 hits FlightAware as CCA5285", async () => {
+    const { fetchFlightAware } = await importFreshWithApiKey();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        flights: [
+          {
+            ident: "CCA5285",
+            operator_iata: "CA",
+            flight_number: "5285",
+            status: "Arrived",
+            scheduled_out: "2026-09-13T16:05:00Z",
+            origin: { code_iata: "PEK", timezone: "Asia/Shanghai" },
+            destination: { code_iata: "SIN", timezone: "Asia/Singapore" },
+          },
+        ],
+      }),
+    });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    const inst = await fetchFlightAware("CA5285", { date: "2026-09-15", intent: "depart" });
+    expect(inst.dep_iata).toBe("PEK");
+    expect(inst.arr_iata).toBe("SIN");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const url = String(fetchMock.mock.calls[0]?.[0]);
+    expect(url).toContain("/flights/CCA5285?");
+    expect(url).toContain("ident_type=designator");
+    expect(url).not.toContain("/flights/CA5285?");
+  });
+
+  it("retries the IATA ident when the ICAO query is empty", async () => {
+    const { fetchFlightAware } = await importFreshWithApiKey();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({ flights: [] }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          flights: [
+            {
+              operator_iata: "CA",
+              flight_number: "5285",
+              origin: { code_iata: "PEK", timezone: "Asia/Shanghai" },
+              destination: { code_iata: "SIN", timezone: "Asia/Singapore" },
+              scheduled_out: "2026-09-14T16:05:00Z",
+            },
+          ],
+        }),
+      });
+    global.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(fetchFlightAware("CA5285")).resolves.toMatchObject({ dep_iata: "PEK" });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/flights/CCA5285?");
+    expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/flights/CA5285?");
   });
 
   it("a thrown network error (not just a bad HTTP status) also counts toward the circuit", async () => {

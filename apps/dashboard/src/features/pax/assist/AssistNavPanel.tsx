@@ -29,7 +29,7 @@ function buildPdrUiSrc(session: PaxSession, plan: NavPlanConfirmed): string {
   u.searchParams.set("airport", plan.airport);
   u.searchParams.set("from", plan.fromPoiId);
   u.searchParams.set("to", plan.toPoiId);
-  if (plan.airport === "PEK") u.searchParams.set("floor", "L2");
+  if (plan.airport === "PEK" && /安检/.test(plan.fromLabel)) u.searchParams.set("floor", "L2");
   u.searchParams.set("ui", "minimal");
   u.searchParams.set("orientaBackend", window.location.origin);
   u.searchParams.set("tenantId", session.passenger.tenantId);

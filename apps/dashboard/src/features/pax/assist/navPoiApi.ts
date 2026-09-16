@@ -170,37 +170,16 @@ export function matchPekAnjian1(pois: NavPoi[]): NavPoi | null {
 }
 
 /**
- * Departure walk: destination = assigned gate, origin = security.
- * PEK departures always start at 安检1 (L2). A real two-ended transfer keeps
- * both gate hints and does not force 安检.
+ * Single-leg and transfer use the same walk: departure airport, security →
+ * boarding gate. PEK always starts at 安检1 (T3E L2).
  */
 export function applyNavPlanPrefill(
   pois: NavPoi[],
-  hints: { fromGateHint?: string; toGateHint?: string; airport?: string },
+  hints: { fromGateHint?: string; toGateHint?: string; airport?: string; activeLeg?: "arr" | "dep" },
 ): { fromId: string; toId: string } {
   const to = matchPoiByGateHint(pois, hints.toGateHint, { preferCategory: "gate" });
-  const fromExplicit = matchPoiByGateHint(pois, hints.fromGateHint);
   const toId = to?.id || "";
-  const transfer =
-    !!fromExplicit &&
-    !!to &&
-    fromExplicit.id !== to.id &&
-    !!hints.fromGateHint &&
-    !!hints.toGateHint &&
-    hints.fromGateHint !== hints.toGateHint;
-
-  if (isPekAirport(hints.airport) && !transfer) {
-    const anjian1 = matchPekAnjian1(pois);
-    const fromId = anjian1 && anjian1.id !== toId ? anjian1.id : "";
-    return { fromId, toId };
-  }
-
-  if (fromExplicit && fromExplicit.id !== to?.id) {
-    return { fromId: fromExplicit.id, toId };
-  }
-  if (to) {
-    const security = matchSecurityPoi(pois, to);
-    if (security && security.id !== to.id) return { fromId: security.id, toId };
-  }
-  return { fromId: "", toId };
+  const security = isPekAirport(hints.airport) ? matchPekAnjian1(pois) : matchSecurityPoi(pois, to);
+  const fromId = security && security.id !== toId ? security.id : "";
+  return { fromId, toId };
 }

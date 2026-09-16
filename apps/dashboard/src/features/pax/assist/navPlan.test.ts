@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gateHintsForLeg } from "./navPlan";
+import { buildStartNavHref, gateHintsForLeg } from "./navPlan";
 
 describe("gateHintsForLeg", () => {
   // The flight page passes the departure gate as both ends of the map view, and
@@ -28,5 +28,13 @@ describe("gateHintsForLeg", () => {
 
   it("returns nothing to prefill when no gate is assigned yet", () => {
     expect(gateHintsForLeg(undefined, undefined, "dep")).toEqual({});
+  });
+});
+
+describe("buildStartNavHref", () => {
+  it("pins the flight so CA986 SFO does not stick on CA985", () => {
+    expect(
+      buildStartNavHref({ airport: "SFO", toGateHint: "G7", flightId: "CA986" }),
+    ).toBe("/pax/app?tab=nav&plan=1&airport=SFO&to=G7&flight=CA986");
   });
 });

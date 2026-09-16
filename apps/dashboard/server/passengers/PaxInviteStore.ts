@@ -41,6 +41,9 @@ export type PaxInvite = {
   flightId: string;
   flightDate: string;
   leg: InviteLeg;
+  /** Set with `flightId` when the invite is a same-hub transfer pair. */
+  inboundFlight?: string;
+  inboundDate?: string;
   flight: InviteFlightSnapshot;
   /** True once a device has claimed this invite. The hash itself is never exposed. */
   deviceBound: boolean;
@@ -64,6 +67,8 @@ export type CreateInviteInput = {
   flightId: string;
   flightDate: string;
   leg: InviteLeg;
+  inboundFlight?: string;
+  inboundDate?: string;
   flight?: Partial<InviteFlightSnapshot>;
   expiresAt: number;
   createdBy: string;
@@ -103,6 +108,8 @@ type InviteRow = {
   passenger_name: string;
   flight_id: string;
   flight_date: string;
+  inbound_flight: string | null;
+  inbound_date: string | null;
   leg: string;
   token_hash: Buffer | string;
   dep_iata: string;
@@ -155,6 +162,8 @@ function mapRow(row: InviteRow): PaxInvite {
     passengerName: row.passenger_name,
     flightId: row.flight_id,
     flightDate: row.flight_date,
+    inboundFlight: row.inbound_flight || undefined,
+    inboundDate: row.inbound_date || undefined,
     leg: row.leg === "inbound" ? "inbound" : "outbound",
     flight: {
       depIata: row.dep_iata,
@@ -202,6 +211,8 @@ export class PaxInviteStore {
         passenger_name    TEXT    NOT NULL DEFAULT '',
         flight_id         TEXT    NOT NULL,
         flight_date       TEXT    NOT NULL,
+        inbound_flight    TEXT,
+        inbound_date      TEXT,
         leg               TEXT    NOT NULL DEFAULT 'outbound',
         token_hash        ${blob} NOT NULL,
         dep_iata          TEXT    NOT NULL DEFAULT '',
@@ -249,11 +260,12 @@ export class PaxInviteStore {
 
     await this.db.run(
       `INSERT INTO pax_invites (
-         invite_id, tenant_id, passenger_id, passenger_name, flight_id, flight_date, leg,
+         invite_id, tenant_id, passenger_id, passenger_name, flight_id, flight_date,
+         inbound_flight, inbound_date, leg,
          token_hash, dep_iata, arr_iata, dep_terminal, dep_gate, arr_terminal, arr_gate,
          scheduled_dep_utc, scheduled_arr_utc, flight_status,
          expires_at, is_active, redeem_count, created_by, created_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)`,
       [
         inviteId,
         input.tenantId,
@@ -261,6 +273,8 @@ export class PaxInviteStore {
         (input.passengerName ?? "").slice(0, MAX_NAME_LEN),
         input.flightId,
         input.flightDate,
+        input.inboundFlight || null,
+        input.inboundDate || null,
         input.leg,
         sha256(token),
         snapshot.depIata,

@@ -5,11 +5,11 @@ export function AssistInfoStrip({ strip }: { strip: Strip }) {
   const t = usePaxT();
   return (
     <div className="pax-assist-info-strip">
-      <div className="pax-assist-info-item">
+      <div className={`pax-assist-info-item${strip.active === "inbound" ? " is-active" : ""}`}>
         <div className="pax-assist-info-label">{t("strip.inbound")}</div>
         <div className="pax-assist-info-val">{strip.inbound}</div>
       </div>
-      <div className="pax-assist-info-item">
+      <div className={`pax-assist-info-item${strip.active === "outbound" ? " is-active" : ""}`}>
         <div className="pax-assist-info-label">{t("strip.outbound")}</div>
         <div className="pax-assist-info-val">{strip.outbound}</div>
       </div>

@@ -124,4 +124,15 @@ export const migrations: Migration[] = [
       await addColumnIfMissing(db, "pax_invites", "device_is_mobile", "INTEGER");
     },
   },
+  {
+    // One invite can now carry a same-hub transfer pair. Outbound stays on
+    // flight_id / flight_date; inbound is optional and empty for single-leg
+    // invites issued before this change.
+    id: "2026_09_pax_invites_inbound_flight",
+    up: async (db) => {
+      if (!(await tableExists(db, "pax_invites"))) return;
+      await addColumnIfMissing(db, "pax_invites", "inbound_flight", "TEXT");
+      await addColumnIfMissing(db, "pax_invites", "inbound_date", "TEXT");
+    },
+  },
 ];

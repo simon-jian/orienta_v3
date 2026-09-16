@@ -35,6 +35,27 @@ describe("assistTrip info strip", () => {
     });
     expect(strip.inbound).toBe("CA835");
     expect(strip.outbound).toBe("CA783");
+    expect(strip.active).toBe("inbound");
+  });
+
+  it("highlights the departure tab and uses that leg's gate", () => {
+    const strip = baseInfoStrip(
+      session,
+      { intent: "transfer", arrivalFlight: "CA835", departureFlight: "CA783", activeLeg: "dep" },
+      { gate: "E21" },
+    );
+    expect(strip.active).toBe("outbound");
+    expect(strip.gate).toBe("E21");
+  });
+
+  it("does not fall back to the departure gate on the arrival tab", () => {
+    const strip = baseInfoStrip(
+      session,
+      { intent: "transfer", arrivalFlight: "CA835", departureFlight: "CA783", activeLeg: "arr" },
+      { gate: "—" },
+    );
+    expect(strip.active).toBe("inbound");
+    expect(strip.gate).toBe("—");
   });
 
   it("builds FA-enriched labels", () => {

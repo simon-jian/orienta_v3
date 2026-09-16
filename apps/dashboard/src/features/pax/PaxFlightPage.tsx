@@ -6,13 +6,18 @@ import {
   getStoredPaxSession,
   getStoredPaxTrip,
   localCalendarDate,
+  persistActiveLeg,
+  resolveActiveLeg,
   type PaxSession,
   type PaxTripContext,
+  type PaxTripLeg,
 } from "./session";
+import { PaxFlightLegTabs } from "./PaxFlightLegTabs";
 import { fetchClosestFlight, fetchTransfer, type FlightInstance, type TransferResult } from "./api/flightApi";
 import { fetchAirportWeather, type AirportWeather } from "./api/weatherApi";
 import { getTimeToGate } from "./api/journeyApi";
 import { IndoorMapEmbed, type MapLeg } from "./flight/IndoorMapEmbed";
+import { flightMapAirports } from "./flight/indoorMapParams";
 import { FlightCard, placeholderFlight } from "./flight/FlightCard";
 import { shortLocalClock, formatUtcClock, type BoardsDoors } from "./flight/flightCardHelpers";
 import { JourneySheets } from "./flight/JourneySheets";
@@ -39,14 +44,6 @@ function usableGate(value: string | undefined | null): string {
   return g;
 }
 
-function usableAirport(value: string | undefined | null): string {
-  const c = String(value || "")
-    .trim()
-    .toUpperCase();
-  if (!c || c === "—" || c === "-") return "";
-  return c;
-}
-
 function tripIntentLabel(intent: string, t: ReturnType<typeof usePaxI18n>["t"]): string {
   if (intent === "arrive") return t("flight.intentArrive");
   if (intent === "transfer") return t("flight.intentTransfer");
@@ -64,8 +61,12 @@ export default function PaxFlightPage() {
   const [instance, setInstance] = useState<FlightInstance | null>(null);
   const [badge, setBadge] = useState("");
   const [transfer, setTransfer] = useState<TransferResult | null>(null);
-  const [activeLeg, setActiveLeg] = useState<"arr" | "dep">("dep");
-  const [mapLeg, setMapLeg] = useState<MapLeg>("dep");
+  const [activeLeg, setActiveLeg] = useState<PaxTripLeg>(() =>
+    resolveActiveLeg(getStoredPaxSession()?.trip || getStoredPaxTrip()),
+  );
+  const [mapLeg, setMapLeg] = useState<MapLeg>(() =>
+    resolveActiveLeg(getStoredPaxSession()?.trip || getStoredPaxTrip()),
+  );
   const [sheet, setSheet] = useState<SheetKind>(null);
   const [weather, setWeather] = useState<AirportWeather | null>(null);
   const [boardsDoors, setBoardsDoors] = useState<Partial<BoardsDoors> | null>(null);
@@ -107,13 +108,17 @@ export default function PaxFlightPage() {
           const arr = trip.arrivalFlight || "";
           const dep = trip.departureFlight || session.passenger.flightId;
           if (!arr || !dep) throw new Error("missing_transfer_flights");
-          const data = await fetchTransfer(arr, dep);
+          const data = await fetchTransfer(arr, dep, {
+            arrivalDate: trip.arrivalDate,
+            departureDate: trip.departureDate,
+          });
           if (cancelled) return;
           setTransfer(data);
-          setActiveLeg("arr");
-          setMapLeg("arr");
-          setInstance(data.arrival);
-          setBadge("ARRIVAL");
+          const leg = resolveActiveLeg(trip);
+          setActiveLeg(leg);
+          setMapLeg(leg);
+          setInstance(leg === "dep" ? data.departure : data.arrival);
+          setBadge(leg === "dep" ? "DEPARTURE" : "ARRIVAL");
         } else {
           const flight = trip.flight || session.passenger.flightId;
           const date = trip.date || localCalendarDate();
@@ -240,35 +245,15 @@ export default function PaxFlightPage() {
   const exitDate =
     trip.intent === "transfer" ? trip.arrivalDate || localCalendarDate() : trip.date || localCalendarDate();
 
-  const depGate = usableGate(displayInstance.dep_gate) || usableGate(session.passenger.gateId);
+  const { dep: depAirportCode, arr: arrAirportCode } = flightMapAirports(displayInstance);
+  const hubAirport = clientDefaultAirportId();
+  const depGate =
+    usableGate(displayInstance.dep_gate) ||
+    (!depAirportCode || depAirportCode === hubAirport ? usableGate(session.passenger.gateId) : "");
   const arrGate = usableGate(displayInstance.arr_gate);
-  const depAirportCode =
-    trip.intent === "transfer"
-      ? usableAirport(transfer?.hub_airport) || clientDefaultAirportId()
-      : usableAirport(displayInstance.dep_iata) ||
-        usableAirport((displayInstance as { dep_airport_code?: string }).dep_airport_code) ||
-        clientDefaultAirportId();
-  const arrAirportCode =
-    trip.intent === "transfer"
-      ? usableAirport(transfer?.hub_airport) || clientDefaultAirportId()
-      : usableAirport(displayInstance.arr_iata) ||
-        usableAirport((displayInstance as { arr_airport_code?: string }).arr_airport_code) ||
-        clientDefaultAirportId();
-  const mapAirport = mapLeg === "arr" ? arrAirportCode : depAirportCode;
-  const mapFrom =
-    trip.intent === "transfer"
-      ? transfer?.from_gate
-      : mapLeg === "arr"
-        ? arrGate
-        : depGate;
-  const mapTo =
-    trip.intent === "transfer"
-      ? mapLeg === "arr"
-        ? transfer?.from_gate
-        : transfer?.to_gate
-      : mapLeg === "arr"
-        ? arrGate
-        : depGate;
+  const mapAirport = (mapLeg === "arr" ? arrAirportCode : depAirportCode) || hubAirport;
+  const mapFrom = mapLeg === "arr" ? arrGate : depGate;
+  const mapTo = mapFrom;
 
   const gateSubtitle = `${displayInstance.dep_iata} ${displayInstance.dep_terminal || ""} → ${displayInstance.dep_gate || "—"}`;
   const exitSubtitle = `${displayInstance.arr_iata} ${displayInstance.arr_gate || "—"} → ${t("flight.terminalExit")}`;
@@ -293,37 +278,21 @@ export default function PaxFlightPage() {
         <div className="pax-flight-card-shell">
           <div className="pax-flight-grid">
             <div className="pax-flight-summary">
-              {trip.intent === "transfer" ? (
-                <div className="pax-tabs">
-                  <button
-                    type="button"
-                    className={`pax-tab${activeLeg === "arr" ? " active" : ""}`}
-                    onClick={() => {
-                      setActiveLeg("arr");
-                      setMapLeg("arr");
-                      if (transfer) {
-                        setInstance(transfer.arrival);
-                        setBadge("ARRIVAL");
-                      }
-                    }}
-                  >
-                    {t("flight.legArrival")}
-                  </button>
-                  <button
-                    type="button"
-                    className={`pax-tab${activeLeg === "dep" ? " active" : ""}`}
-                    onClick={() => {
-                      setActiveLeg("dep");
-                      setMapLeg("dep");
-                      if (transfer) {
-                        setInstance(transfer.departure);
-                        setBadge("DEPARTURE");
-                      }
-                    }}
-                  >
-                    {t("flight.legDeparture")}
-                  </button>
-                </div>
+              {trip.intent === "transfer" && (trip.arrivalFlight || trip.departureFlight) ? (
+                <PaxFlightLegTabs
+                  arrivalFlight={trip.arrivalFlight || t("flight.legArrival")}
+                  departureFlight={trip.departureFlight || session.passenger.flightId || t("flight.legDeparture")}
+                  activeLeg={activeLeg}
+                  onChange={(leg) => {
+                    persistActiveLeg(trip, leg);
+                    setActiveLeg(leg);
+                    setMapLeg(leg);
+                    if (transfer) {
+                      setInstance(leg === "dep" ? transfer.departure : transfer.arrival);
+                      setBadge(leg === "dep" ? "DEPARTURE" : "ARRIVAL");
+                    }
+                  }}
+                />
               ) : null}
 
               {loadingFlight ? <p className="pax-flight-loading">{t("flight.querying")}</p> : null}
@@ -348,6 +317,9 @@ export default function PaxFlightPage() {
                 airport={mapAirport}
                 depAirportLabel={depAirportCode}
                 arrAirportLabel={arrAirportCode}
+                navAirport={depAirportCode}
+                navGate={depGate}
+                navFlightId={displayInstance.flight_iata}
                 mapLeg={mapLeg}
                 onMapLegChange={setMapLeg}
                 showLegToggle

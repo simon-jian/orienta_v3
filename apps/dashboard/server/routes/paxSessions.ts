@@ -257,6 +257,7 @@ export function registerPaxSessionRoutes(
         departureFlight: intent === "transfer" || intent === "depart" ? departureFlight : undefined,
         arrivalDate: intent === "transfer" ? arrivalDate : undefined,
         departureDate: intent === "transfer" ? departureDate : undefined,
+        activeLeg: intent === "transfer" ? "arr" : undefined,
       },
     });
   });
